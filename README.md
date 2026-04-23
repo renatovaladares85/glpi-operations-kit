@@ -272,5 +272,5 @@ Privado
 
 * **Licença:** Interna/Privada (conforme política da Empresa).
 * **Responsável pelo Projeto:** [Renato de Souza Valadares](https://github.com/renatovaladares85)
-* **Contato:** [rsvaladares@stefanini.com](mailto:rsvaladares@stefanini.com) ou via canal interno da equipe de ITSM.```
+* **Contato:** [rsvaladares@stefanini.com](mailto:rsvaladares@stefanini.com) ou via canal interno da equipe de ITSM.
 
