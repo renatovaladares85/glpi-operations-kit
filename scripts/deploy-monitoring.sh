@@ -10,6 +10,9 @@ RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 SECRET_FILE="$RUNTIME_DIR/monitoring.secrets.yml"
 
 ensure_directory "$RUNTIME_DIR"
+ensure_directory_mode "$RUNTIME_DIR" "700"
+require_bootstrap_marker
+ensure_script_directory_executable "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook
 export_runtime_inventory_if_present "$ENVIRONMENT"
 

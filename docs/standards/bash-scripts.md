@@ -24,6 +24,7 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 
 ## Standard flow
 
+- `bootstrap-permissions`
 - `pre-flight`
 - `check`
 - `apply`
@@ -46,6 +47,10 @@ Mandatory examples:
 - `ansible-playbook`
 - `ansible-inventory` when inventory validation is required
 - minimum local disk space for runtime artifacts
+- script execute permission baseline
+- sudo/root capability for deployment
+- operator membership in `glpiops`
+- secure runtime and secret file permissions
 
 Optional examples:
 

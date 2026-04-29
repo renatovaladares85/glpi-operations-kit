@@ -8,6 +8,8 @@ source "$SCRIPT_ROOT/lib/common.sh"
 ENVIRONMENT="${1:-staging}"
 RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 APP_RUNTIME_PATH="$RUNTIME_DIR/app.runtime.yml"
+require_bootstrap_marker
+ensure_script_directory_executable "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook
 export_runtime_inventory_if_present "$ENVIRONMENT"
 write_step "Deploying GLPI application role for $ENVIRONMENT"

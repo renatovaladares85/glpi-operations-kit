@@ -7,9 +7,11 @@ These rules must not be broken by agents.
 - Read `README.md`, `AGENTS.md`, and `docs/standards/index.md` before acting.
 - Consult only the thematic files required for the current task.
 - Run environment pre-flight checks before starting implementation.
+- Run `bash scripts/bootstrap-permissions.sh` before any deploy script in a fresh operator session.
 - Classify each pre-flight result as `mandatory` or `optional`.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.
 - Continue after a mandatory pre-flight failure only with explicit user approval.
+- Enforce operator membership in `glpiops` for deployment operations.
 - Never version secrets.
 - Never use common or easily guessable usernames, passwords, or identifiers.
 - Use biblical-context naming for generated or suggested identifiers when applicable.

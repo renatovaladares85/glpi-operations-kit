@@ -18,6 +18,29 @@ Record recurring commands here when they are safe, reusable, and reduce context 
 
 ### Objective
 
+Apply mandatory local permission bootstrap before any deployment.
+
+### Command
+
+```bash
+bash scripts/bootstrap-permissions.sh
+```
+
+### When to use
+
+At the beginning of each operator setup and before first deploy on a new machine/session.
+
+### Preconditions
+
+- Ubuntu/Linux host
+- sudo privileges
+
+### Risks
+
+- low risk; changes local file modes/group membership requirements
+
+### Objective
+
 Run the mandatory pre-flight check before implementation.
 
 ### Command

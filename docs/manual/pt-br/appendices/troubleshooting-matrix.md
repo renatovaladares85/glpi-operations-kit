@@ -1,35 +1,27 @@
 # Apêndice: Matriz de Troubleshooting
 
-## Falta `ansible-playbook` ou `ansible-inventory`
+## `Permission denied` em `./scripts/*.sh`
 
-- Sintoma: pre-flight acusa comando obrigatório ausente e pergunta se instala.
-- Causa provável: pacote Ansible ausente.
-- Verificação: `command -v ansible-playbook && command -v ansible-inventory`
-- Correção: aceitar instalação pelo script ou `sudo apt-get update && sudo apt-get install -y ansible`
+- Sintoma: shell retorna `Permission denied` ao executar script diretamente.
+- Causa provável: falta de execute bit.
+- Verificação: `ls -l scripts/*.sh`
+- Correção: `bash scripts/bootstrap-permissions.sh` ou `chmod +x scripts/*.sh`
 
-## Chave SSH inválida
+## Marcador de bootstrap ausente
 
-- Sintoma: prompt rejeita caminho da chave.
-- Verificação: `ls -l <path-to-key>`
-- Correção: usar chave real com `chmod 600`.
+- Sintoma: script exige bootstrap antes de continuar.
+- Causa provável: bootstrap não foi executado.
+- Verificação: `ls -l .runtime/bootstrap.completed`
+- Correção: `bash scripts/bootstrap-permissions.sh`
 
-## Host app/db inválido
+## Usuário fora do grupo `glpiops`
 
-- Sintoma: prompt rejeita host.
-- Causa provável: hostname/IP malformado.
-- Correção: informar hostname válido ou IPv4 válido.
+- Sintoma: pre-flight obrigatório falha na checagem de grupo.
+- Verificação: `id -nG | tr ' ' '\n' | grep -Fx glpiops`
+- Correção: `sudo groupadd -f glpiops && sudo usermod -aG glpiops "$USER"` e novo login.
 
-## Falha de acesso SSH entre hosts
+## Falha de validação do sudo
 
-- Verificação: `ssh -i <key> <user>@<host> "hostname && id"`
-- Correção: ajustar usuário/chave/rede e garantir sudo.
-
-## Falha `nginx -t`
-
-- Verificação: `sudo nginx -t`
-- Correção: revisar TLS runtime e reaplicar `./scripts/deploy-staging.sh apply app`.
-
-## Falha `php-fpm8.3 -t`
-
-- Verificação: `sudo php-fpm8.3 -t`
-- Correção: revisar variáveis runtime e reaplicar role `app`.
+- Sintoma: pre-flight obrigatório falha em sudo/root.
+- Verificação: `sudo -v`
+- Correção: ajustar política sudo mínima para o operador.

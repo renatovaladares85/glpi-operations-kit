@@ -56,6 +56,7 @@ AGENTS.md
 Available scripts:
 
 - `scripts/bootstrap-host.sh`
+- `scripts/bootstrap-permissions.sh`
 - `scripts/deploy-app.sh`
 - `scripts/deploy-db.sh`
 - `scripts/deploy-monitoring.sh`
@@ -66,6 +67,7 @@ Available scripts:
 ## Quick usage
 
 ```bash
+bash scripts/bootstrap-permissions.sh
 ./scripts/deploy-staging.sh check
 ./scripts/deploy-staging.sh apply db
 ./scripts/deploy-staging.sh apply app

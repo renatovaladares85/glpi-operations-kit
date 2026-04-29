@@ -3,6 +3,7 @@ set -euo pipefail
 
 PREFLIGHT_FORCE_CONTINUE="${PREFLIGHT_FORCE_CONTINUE:-false}"
 PREFLIGHT_AUTO_INSTALL="${PREFLIGHT_AUTO_INSTALL:-prompt}"
+GLPI_OPS_GROUP="${GLPI_OPS_GROUP:-glpiops}"
 
 write_step() {
   printf '\n==> %s\n' "$1"
@@ -19,6 +20,185 @@ assert_command() {
 ensure_directory() {
   local path="$1"
   mkdir -p "$path"
+}
+
+current_uid() {
+  id -u
+}
+
+is_root_user() {
+  [[ "$(current_uid)" -eq 0 ]]
+}
+
+file_mode_octal() {
+  local path="$1"
+  stat -c '%a' "$path" 2>/dev/null || true
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local answer=""
+  while true; do
+    echo "$prompt [y/n]"
+    read -r answer
+    case "$answer" in
+      y|Y|yes|YES) return 0 ;;
+      n|N|no|NO) return 1 ;;
+      *) echo "Please answer 'y' or 'n'." ;;
+    esac
+  done
+}
+
+offer_fix_then_execute() {
+  local title="$1"
+  local command_to_run="$2"
+
+  echo "$title"
+  echo "Suggested fix command:"
+  echo "  $command_to_run"
+  if ! prompt_yes_no "Apply automatic fix now?"; then
+    return 1
+  fi
+  if bash -lc "$command_to_run"; then
+    return 0
+  fi
+  echo "Automatic fix failed. Apply manually and rerun." >&2
+  return 1
+}
+
+ensure_execute_permission() {
+  local path="$1"
+  local mode
+  mode="$(file_mode_octal "$path")"
+  if [[ -x "$path" ]]; then
+    return 0
+  fi
+  if offer_fix_then_execute "Missing execute permission on '$path'." "chmod +x '$path'"; then
+    [[ -x "$path" ]]
+    return
+  fi
+  return 1
+}
+
+ensure_script_directory_executable() {
+  local dir_path="$1"
+  local failures=0
+  local script_path=""
+  while IFS= read -r -d '' script_path; do
+    if ! ensure_execute_permission "$script_path"; then
+      failures=$((failures + 1))
+    fi
+  done < <(find "$dir_path" -maxdepth 1 -type f -name "*.sh" -print0)
+  ((failures == 0))
+}
+
+ensure_mode() {
+  local path="$1"
+  local expected="$2"
+  local mode
+  mode="$(file_mode_octal "$path")"
+  if [[ "$mode" == "$expected" ]]; then
+    return 0
+  fi
+  if offer_fix_then_execute "Path '$path' has mode '${mode:-unknown}', expected '$expected'." "chmod $expected '$path'"; then
+    mode="$(file_mode_octal "$path")"
+    [[ "$mode" == "$expected" ]]
+    return
+  fi
+  return 1
+}
+
+ensure_directory_mode() {
+  local path="$1"
+  local expected="$2"
+  ensure_directory "$path"
+  ensure_mode "$path" "$expected"
+}
+
+ensure_group_exists_and_membership() {
+  local group_name="$1"
+  local current_user
+  current_user="$(id -un)"
+
+  if ! getent group "$group_name" >/dev/null 2>&1; then
+    local create_cmd
+    if command -v sudo >/dev/null 2>&1 && ! is_root_user; then
+      create_cmd="sudo groupadd '$group_name'"
+    else
+      create_cmd="groupadd '$group_name'"
+    fi
+    if ! offer_fix_then_execute "Required operator group '$group_name' does not exist." "$create_cmd"; then
+      return 1
+    fi
+  fi
+
+  if id -nG "$current_user" | tr ' ' '\n' | grep -Fx "$group_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local add_cmd
+  if command -v sudo >/dev/null 2>&1 && ! is_root_user; then
+    add_cmd="sudo usermod -aG '$group_name' '$current_user'"
+  else
+    add_cmd="usermod -aG '$group_name' '$current_user'"
+  fi
+
+  if offer_fix_then_execute "User '$current_user' is not a member of required group '$group_name'." "$add_cmd"; then
+    echo "User was added to '$group_name'. Log out and log back in before rerunning." >&2
+  fi
+  return 1
+}
+
+ensure_sudo_ready() {
+  if is_root_user; then
+    return 0
+  fi
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required for non-root execution." >&2
+    return 1
+  fi
+  if sudo -v; then
+    return 0
+  fi
+  echo "Unable to validate sudo privileges for current user." >&2
+  return 1
+}
+
+bootstrap_marker_path() {
+  echo "$SCRIPT_ROOT/../.runtime/bootstrap.completed"
+}
+
+write_bootstrap_marker() {
+  local marker
+  marker="$(bootstrap_marker_path)"
+  ensure_directory "$SCRIPT_ROOT/../.runtime"
+  printf "bootstrap_completed_at=%s\nbootstrap_completed_by=%s\n" "$(date -u +%FT%TZ)" "$(id -un)" >"$marker"
+  chmod 600 "$marker"
+}
+
+require_bootstrap_marker() {
+  local marker
+  marker="$(bootstrap_marker_path)"
+  if [[ -f "$marker" ]]; then
+    return 0
+  fi
+  echo "Missing bootstrap marker: $marker" >&2
+  echo "Run 'bash scripts/bootstrap-permissions.sh' first." >&2
+  return 1
+}
+
+enforce_ssh_private_key_permissions() {
+  local path="$1"
+  local mode
+  mode="$(file_mode_octal "$path")"
+  if [[ "$mode" == "600" ]]; then
+    return 0
+  fi
+  if offer_fix_then_execute "SSH private key '$path' has mode '${mode:-unknown}', expected '600'." "chmod 600 '$path'"; then
+    [[ "$(file_mode_octal "$path")" == "600" ]]
+    return
+  fi
+  return 1
 }
 
 read_required_value() {
@@ -116,6 +296,21 @@ read_existing_file() {
   done
 }
 
+read_existing_private_key_file() {
+  local prompt="$1"
+  local reason="$2"
+  local target_path="$3"
+  local value
+  while true; do
+    value="$(read_existing_file "$prompt" "$reason" "$target_path")"
+    if enforce_ssh_private_key_permissions "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    echo "SSH key permissions are mandatory. Fix is required to continue." >&2
+  done
+}
+
 save_yaml_map() {
   local output_path="$1"
   shift
@@ -130,6 +325,7 @@ save_yaml_map() {
       printf "%s: '%s'\n" "$key" "$value"
     done
   } >"$output_path"
+  chmod 600 "$output_path"
 }
 
 write_runtime_inventory() {
@@ -330,6 +526,9 @@ run_preflight_checks() {
   local optional_failures=0
   local disk_kb_available=0
   local disk_kb_required=1048576
+  local runtime_base_dir="$SCRIPT_ROOT/../.runtime"
+  local marker_file
+  marker_file="$(bootstrap_marker_path)"
 
   if (($# > 0)); then
     mandatory_commands=("$@")
@@ -372,6 +571,36 @@ run_preflight_checks() {
       optional_failures=$((optional_failures + 1))
     fi
   done
+
+  if ! ensure_sudo_ready; then
+    preflight_print_result "mandatory" "fail" "sudo/root capability is required"
+    mandatory_failures=$((mandatory_failures + 1))
+  else
+    preflight_print_result "mandatory" "ok" "sudo/root capability validated"
+  fi
+
+  if ! ensure_group_exists_and_membership "$GLPI_OPS_GROUP"; then
+    preflight_print_result "mandatory" "fail" "operator must belong to group '$GLPI_OPS_GROUP'"
+    mandatory_failures=$((mandatory_failures + 1))
+  else
+    preflight_print_result "mandatory" "ok" "operator belongs to group '$GLPI_OPS_GROUP'"
+  fi
+
+  if ! ensure_directory_mode "$runtime_base_dir" "700"; then
+    preflight_print_result "mandatory" "fail" "runtime base directory permissions are not compliant"
+    mandatory_failures=$((mandatory_failures + 1))
+  else
+    preflight_print_result "mandatory" "ok" "runtime base directory permissions are compliant"
+  fi
+
+  if [[ -f "$marker_file" ]]; then
+    if ! ensure_mode "$marker_file" "600"; then
+      preflight_print_result "mandatory" "fail" "bootstrap marker permissions are not compliant"
+      mandatory_failures=$((mandatory_failures + 1))
+    else
+      preflight_print_result "mandatory" "ok" "bootstrap marker permissions are compliant"
+    fi
+  fi
 
   if ((mandatory_failures > 0)); then
     echo "Mandatory pre-flight checks failed."

@@ -17,7 +17,13 @@ command -v ansible-inventory
 command -v ssh
 ```
 
-## 2. Staging Orchestrator
+## 2. Mandatory Permission Bootstrap
+
+```bash
+bash scripts/bootstrap-permissions.sh
+```
+
+## 3. Staging Orchestrator
 
 ```bash
 ./scripts/deploy-staging.sh check
@@ -30,7 +36,7 @@ command -v ssh
 ./scripts/deploy-staging.sh post-check all
 ```
 
-## 3. Manual Ansible Fallback (No Script Path)
+## 4. Manual Ansible Fallback (No Script Path)
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list
@@ -40,7 +46,7 @@ ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --ta
 ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/app.runtime.yml
 ```
 
-## 4. TLS Management
+## 5. TLS Management
 
 ```bash
 ./scripts/manage-tls.sh disable staging
@@ -49,17 +55,18 @@ ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --ta
 ./scripts/manage-tls.sh reload staging
 ```
 
-## 5. Targeted Script Entry Points
+## 6. Targeted Script Entry Points
 
 ```bash
 ./scripts/bootstrap-host.sh staging
+./scripts/bootstrap-permissions.sh
 ./scripts/deploy-db.sh staging
 ./scripts/deploy-app.sh staging
 ./scripts/deploy-monitoring.sh staging
 ./scripts/deploy-backup.sh staging
 ```
 
-## 6. Service Validation on Target Hosts
+## 7. Service Validation on Target Hosts
 
 ```bash
 sudo nginx -t

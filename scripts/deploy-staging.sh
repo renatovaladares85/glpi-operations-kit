@@ -15,7 +15,10 @@ DB_SECRET_PATH="$RUNTIME_DIR/db.secrets.yml"
 MONITORING_SECRET_PATH="$RUNTIME_DIR/monitoring.secrets.yml"
 
 ensure_directory "$RUNTIME_DIR"
+ensure_directory_mode "$RUNTIME_DIR" "700"
+require_bootstrap_marker
 write_step "Preparing execution for environment '$ENVIRONMENT'"
+ensure_script_directory_executable "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
 
 collect_runtime_inputs() {
@@ -25,7 +28,7 @@ collect_runtime_inputs() {
   app_host="$(read_hostname_or_ip "Staging app server IP or hostname" "The runtime inventory must target the real application host." "$INVENTORY_RUNTIME_PATH")"
   db_host="$(read_hostname_or_ip "Staging database server IP or hostname" "The runtime inventory must target the real database host." "$INVENTORY_RUNTIME_PATH")"
   ssh_user="$(read_required_value "SSH username" "Ansible needs a real SSH user for remote access." "$INVENTORY_RUNTIME_PATH")"
-  ssh_key="$(read_existing_file "SSH private key path" "Ansible must use a valid private key file for authentication." "$INVENTORY_RUNTIME_PATH")"
+  ssh_key="$(read_existing_private_key_file "SSH private key path" "Ansible must use a valid private key file for authentication." "$INVENTORY_RUNTIME_PATH")"
   glpi_version="$(read_required_value "Final GLPI version" "The deployment must use an explicit GLPI release version." "$APP_RUNTIME_PATH")"
   tls_mode="$(read_choice "TLS mode" "The staging app needs a clear HTTP/TLS behavior." "$APP_RUNTIME_PATH" none self_signed provided)"
   tls_common_name="$app_host"

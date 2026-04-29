@@ -12,6 +12,9 @@ INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
 APP_RUNTIME_PATH="$RUNTIME_DIR/app.runtime.yml"
 
 ensure_directory "$RUNTIME_DIR"
+ensure_directory_mode "$RUNTIME_DIR" "700"
+require_bootstrap_marker
+ensure_script_directory_executable "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
 
 if [[ ! -f "$INVENTORY_RUNTIME_PATH" || ! -f "$APP_RUNTIME_PATH" ]]; then

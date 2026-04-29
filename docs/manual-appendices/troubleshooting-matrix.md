@@ -1,5 +1,37 @@
 # Appendix: Troubleshooting Matrix
 
+## Permission denied on `./scripts/*.sh`
+
+- Symptom: shell returns `Permission denied` when running script directly
+- Likely cause: missing execute bit
+- Check: `ls -l scripts/*.sh`
+- Fix path: run `bash scripts/bootstrap-permissions.sh` or `chmod +x scripts/*.sh`
+- Safe resume: rerun original command
+
+## Missing bootstrap marker
+
+- Symptom: script asks to run bootstrap before continuing
+- Likely cause: `scripts/bootstrap-permissions.sh` was not executed yet
+- Check: `ls -l .runtime/bootstrap.completed`
+- Fix path: `bash scripts/bootstrap-permissions.sh`
+- Safe resume: rerun `./scripts/deploy-staging.sh check`
+
+## User not in `glpiops`
+
+- Symptom: mandatory pre-flight fails on operator group check
+- Likely cause: user not onboarded to required group
+- Check: `id -nG | tr ' ' '\n' | grep -Fx glpiops`
+- Fix path: `sudo groupadd -f glpiops && sudo usermod -aG glpiops "$USER"` then re-login
+- Safe resume: rerun bootstrap then deploy checks
+
+## Sudo validation fails
+
+- Symptom: mandatory pre-flight fails on sudo/root capability
+- Likely cause: operator lacks sudo or cannot refresh sudo ticket
+- Check: `sudo -v`
+- Fix path: grant least-privilege sudo policy for deployment operations
+- Safe resume: rerun bootstrap
+
 ## Missing `ansible-playbook` or `ansible-inventory`
 
 - Symptom: pre-flight shows missing mandatory command and asks to install

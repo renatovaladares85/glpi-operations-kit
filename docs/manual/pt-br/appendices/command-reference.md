@@ -17,7 +17,13 @@ command -v ansible-inventory
 command -v ssh
 ```
 
-## 2. Orquestrador de staging
+## 2. Bootstrap obrigatório de permissões
+
+```bash
+bash scripts/bootstrap-permissions.sh
+```
+
+## 3. Orquestrador de staging
 
 ```bash
 ./scripts/deploy-staging.sh check
@@ -30,7 +36,7 @@ command -v ssh
 ./scripts/deploy-staging.sh post-check all
 ```
 
-## 3. Fallback manual com Ansible (sem script)
+## 4. Fallback manual com Ansible (sem script)
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list
@@ -40,7 +46,7 @@ ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --ta
 ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/app.runtime.yml
 ```
 
-## 4. Gestão de TLS
+## 5. Gestão de TLS
 
 ```bash
 ./scripts/manage-tls.sh disable staging

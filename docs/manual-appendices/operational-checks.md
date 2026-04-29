@@ -9,6 +9,10 @@ Mandatory:
 - `git`
 - `ansible-playbook`
 - `ansible-inventory`
+- operator in `glpiops`
+- sudo/root capability
+- script execute permissions
+- `.runtime` and secret file permission baseline
 
 Optional:
 
@@ -30,6 +34,7 @@ Auto-install behavior in scripts:
 - For missing mandatory command, script asks whether it should install on Ubuntu.
 - If accepted, script runs apt install.
 - If install fails, script prints manual remediation and blocks flow.
+- For permission or group deviations, script offers automatic safe fixes and blocks if unresolved.
 
 ## 2. Service and Deployment Checks
 

@@ -197,6 +197,48 @@
   ansible.builtin.command: php-fpm8.3 -t
   changed_when: false
 
+- name: Collect GLPI path permissions
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop:
+    - { path: "{{ glpi_config_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_var_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_plugin_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_log_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_config_dir }}/local_define.php", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0640" }
+    - { path: "/usr/local/bin/glpi-cron.sh", owner: "root", group: "root", mode: "0750" }
+  register: glpi_permission_stats
+  changed_when: false
+
+- name: Assert GLPI path permissions baseline
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.pw_name == item.item.owner
+      - item.stat.gr_name == item.item.group
+      - item.stat.mode == item.item.mode
+    fail_msg: "Permission baseline mismatch for {{ item.item.path }}. Expected {{ item.item.owner }}:{{ item.item.group }} mode {{ item.item.mode }}."
+  loop: "{{ glpi_permission_stats.results }}"
+  changed_when: false
+
+- name: Check TLS private key permissions when TLS enabled
+  ansible.builtin.stat:
+    path: "{{ glpi_tls_certificate_key_path }}"
+  register: glpi_tls_key_stat
+  when: glpi_tls_mode != 'none'
+  changed_when: false
+
+- name: Assert TLS private key permissions when TLS enabled
+  ansible.builtin.assert:
+    that:
+      - glpi_tls_key_stat.stat.exists
+      - glpi_tls_key_stat.stat.pw_name == 'root'
+      - glpi_tls_key_stat.stat.gr_name == 'root'
+      - glpi_tls_key_stat.stat.mode == '0600'
+    fail_msg: "TLS private key must be root:root with mode 0600."
+  when: glpi_tls_mode != 'none'
+  changed_when: false
+
 - name: Ensure nginx is enabled
   ansible.builtin.service:
     name: nginx

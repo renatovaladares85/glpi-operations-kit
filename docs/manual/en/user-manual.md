@@ -58,6 +58,21 @@ Mandatory access:
 - SSH reachability between execution host and remote target host in dual-server mode
 - sudo privileges on target hosts
 - local SSH private key path available on execution host
+- operator user must belong to `glpiops` group
+
+### 3.1 Operator security setup (mandatory)
+
+```bash
+sudo groupadd -f glpiops
+sudo usermod -aG glpiops "$USER"
+newgrp glpiops
+```
+
+Recommended sudo validation:
+
+```bash
+sudo -v
+```
 
 ## 4. Automated Guided Flow (Track A)
 
@@ -68,6 +83,12 @@ Primary entrypoint:
 The script starts with pre-flight checks. If a mandatory command is missing, it prompts to install it on Ubuntu. If installation fails, it prints exact manual remediation commands and blocks execution.
 
 ### 4.1 Step-by-step
+
+0. Run permission bootstrap (first mandatory command):
+
+```bash
+bash scripts/bootstrap-permissions.sh
+```
 
 1. Run pre-flight and runtime collection:
 
@@ -141,6 +162,8 @@ command -v git
 command -v ansible-playbook
 command -v ansible-inventory
 command -v ssh
+id -nG | tr ' ' '\n' | grep -Fx glpiops
+sudo -v
 ```
 
 ### 5.2 Manual runtime data files
