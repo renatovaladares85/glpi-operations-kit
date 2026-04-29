@@ -5,4 +5,4 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODE="${1:-check}"
 TARGET="${2:-all}"
 
-exec bash "$SCRIPT_ROOT/glpictl.sh" staging deploy "$MODE" "$TARGET"
+exec bash "$SCRIPT_ROOT/glpictl.sh" production deploy "$MODE" "$TARGET"

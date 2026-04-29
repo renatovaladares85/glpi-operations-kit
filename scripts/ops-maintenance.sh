@@ -22,8 +22,7 @@ DB_SECRET_PATH="$RUNTIME_DIR/db.secrets.yml"
 PROTECTED_USERS=("root" "www-data" "mysql")
 
 ensure_runtime_foundation "$ENVIRONMENT"
-require_bootstrap_marker
-ensure_script_directory_executable "$SCRIPT_ROOT"
+ensure_bootstrap_baseline "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
 require_runtime_file "$INVENTORY_RUNTIME_PATH" "runtime inventory"
 export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"

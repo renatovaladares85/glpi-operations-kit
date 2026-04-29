@@ -188,6 +188,19 @@ require_bootstrap_marker() {
   return 1
 }
 
+ensure_bootstrap_baseline() {
+  local script_root="$1"
+  ensure_script_directory_executable "$script_root"
+  ensure_sudo_ready
+  ensure_group_exists_and_membership "$GLPI_OPS_GROUP"
+  ensure_directory_mode "$script_root/../.runtime" "700"
+  if [[ ! -f "$(bootstrap_marker_path)" ]]; then
+    write_step "Bootstrap marker not found. Creating baseline automatically."
+    write_bootstrap_marker
+  fi
+  ensure_mode "$(bootstrap_marker_path)" "600"
+}
+
 runtime_environment_root() {
   local environment="$1"
   echo "$SCRIPT_ROOT/../.runtime/$environment"
@@ -534,6 +547,31 @@ export_runtime_inventory_if_present() {
   if [[ -f "$runtime_inventory" ]]; then
     export ANSIBLE_RUNTIME_INVENTORY="$runtime_inventory"
   fi
+}
+
+runtime_env_dir() {
+  local environment="$1"
+  echo "$SCRIPT_ROOT/../.runtime/$environment"
+}
+
+runtime_inventory_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/inventory.runtime.yml"
+}
+
+runtime_app_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/app.runtime.yml"
+}
+
+runtime_db_secret_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/db.secrets.yml"
+}
+
+runtime_monitoring_secret_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/monitoring.secrets.yml"
 }
 
 require_runtime_file() {
