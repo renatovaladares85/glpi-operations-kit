@@ -42,6 +42,9 @@ The current implementation targets:
 - Secrets do not live in Git.
 - Guided Bash scripts collect sensitive values at runtime.
 - Runtime secrets are stored locally under `.runtime/<environment>/` and are ignored by Git.
+- Environment pre-flight checks must run before implementation starts.
+- Pre-flight results must be labeled as `mandatory` or `optional`.
+- Mandatory failures must block execution unless the user explicitly authorizes continuation.
 - Missing critical information must stop execution with a clear explanation.
 - Ansible applies the server state after the guided script prepares the context.
 
@@ -117,6 +120,7 @@ docs/
 
 ## Validation checklist
 
+- environment pre-flight checks
 - `ansible-inventory --list`
 - `ansible-playbook --syntax-check site.yml`
 - `nginx -t`

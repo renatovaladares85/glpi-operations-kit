@@ -10,6 +10,7 @@ RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 SECRET_FILE="$RUNTIME_DIR/monitoring.secrets.yml"
 
 ensure_directory "$RUNTIME_DIR"
+run_preflight_checks "$ENVIRONMENT" git ansible-playbook
 
 exporter_user="$(read_required_value "mysqld_exporter username" "The MariaDB exporter needs a dedicated least-privilege account." "/root/.glpi-secrets/monitoring-runtime.yml")"
 exporter_password="$(read_required_value "mysqld_exporter password" "The MariaDB exporter account must authenticate locally." "/root/.glpi-secrets/monitoring-runtime.yml" true)"

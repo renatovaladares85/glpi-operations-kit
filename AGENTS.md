@@ -64,6 +64,10 @@ Before proposing, analyzing, or executing any change, read in this order:
 ## 8. Mandatory operating rules
 
 - Prefer modifying existing files before creating new ones.
+- Run an environment pre-flight check before starting any implementation.
+- Classify pre-flight results as `mandatory` or `optional`.
+- Attempt safe, low-risk environment updates only when they are clearly supported by the current workflow.
+- If a mandatory pre-flight item cannot be fixed, stop and do not continue unless the user explicitly authorizes continuation.
 - Never version secrets.
 - Sensitive values must be requested at runtime when applicable.
 - Keep sensitive directories outside the web root.
@@ -76,6 +80,7 @@ Before proposing, analyzing, or executing any change, read in this order:
 
 When applicable, validate as much as possible before considering a block ready for commit:
 
+- environment pre-flight checks
 - `ansible-inventory --list`
 - `ansible-playbook --syntax-check ansible/site.yml`
 - `nginx -t`

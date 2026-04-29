@@ -40,12 +40,10 @@ new_monitoring_secrets() {
 
 ensure_directory "$RUNTIME_DIR"
 write_step "Preparing execution for environment '$ENVIRONMENT'"
-assert_command "git"
+run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
 
 if [[ "$MODE" == "check" ]]; then
   write_step "Running pre-flight checks"
-  assert_command "ansible-playbook"
-  assert_command "ansible-inventory"
   ansible-inventory -i "$SCRIPT_ROOT/../ansible/inventories/$ENVIRONMENT/hosts.yml" --list >/dev/null
   echo "Pre-flight checks completed successfully."
   exit 0

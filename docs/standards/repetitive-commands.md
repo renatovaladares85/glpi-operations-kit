@@ -18,6 +18,31 @@ Record recurring commands here when they are safe, reusable, and reduce context 
 
 ### Objective
 
+Run the mandatory pre-flight check before implementation.
+
+### Command
+
+```bash
+./scripts/deploy-staging.sh check
+```
+
+### When to use
+
+Before any staging implementation or validation session.
+
+### Preconditions
+
+- `bash`
+- `git`
+- `ansible-playbook`
+- `ansible-inventory`
+
+### Risks
+
+- low risk; read-only
+
+### Objective
+
 Validate the Ansible inventory structure.
 
 ### Command

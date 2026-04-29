@@ -6,5 +6,6 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_ROOT/lib/common.sh"
 
 ENVIRONMENT="${1:-staging}"
+run_preflight_checks "$ENVIRONMENT" git ansible-playbook
 write_step "Deploying backup role for $ENVIRONMENT"
 invoke_ansible "$ENVIRONMENT" "backup"

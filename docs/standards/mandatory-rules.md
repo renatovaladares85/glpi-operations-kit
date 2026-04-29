@@ -6,6 +6,10 @@ These rules must not be broken by agents.
 
 - Read `README.md`, `AGENTS.md`, and `docs/standards/index.md` before acting.
 - Consult only the thematic files required for the current task.
+- Run environment pre-flight checks before starting implementation.
+- Classify each pre-flight result as `mandatory` or `optional`.
+- Stop when a mandatory pre-flight item fails and cannot be fixed.
+- Continue after a mandatory pre-flight failure only with explicit user approval.
 - Never version secrets.
 - Do not duplicate rules already documented in another thematic markdown file.
 - Create commits only when a validated functional block is complete.
