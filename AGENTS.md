@@ -29,15 +29,15 @@ Before proposing, analyzing, or executing any change, read in this order:
 
 ## 4. Where to find each standard
 
-- Commits, checkpoints, and rollback: [commit-convention.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/commit-convention.md)
-- Infrastructure inventories, roles, templates, and secrets: [ansible.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/ansible.md)
-- Guided `bash` scripts, prompts, and runtime secrets: [bash-scripts.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/bash-scripts.md)
-- Security, permissions, TLS, LGPD, and sensitive data: [security.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/security.md)
-- Monitoring, exporters, alerts, and thresholds: [monitoring.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/monitoring.md)
-- Backup, restore, retention, and tests: [backup-restore.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/backup-restore.md)
-- Approved repetitive commands: [repetitive-commands.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/repetitive-commands.md)
-- Learned errors and prevention rules: [learned-lessons.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/learned-lessons.md)
-- Non-negotiable rules: [mandatory-rules.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/mandatory-rules.md)
+- Commits, checkpoints, and rollback: [commit-convention.md](docs/standards/commit-convention.md)
+- Infrastructure inventories, roles, templates, and secrets: [ansible.md](docs/standards/ansible.md)
+- Guided `bash` scripts, prompts, and runtime secrets: [bash-scripts.md](docs/standards/bash-scripts.md)
+- Security, permissions, TLS, LGPD, and sensitive data: [security.md](docs/standards/security.md)
+- Monitoring, exporters, alerts, and thresholds: [monitoring.md](docs/standards/monitoring.md)
+- Backup, restore, retention, and tests: [backup-restore.md](docs/standards/backup-restore.md)
+- Approved repetitive commands: [repetitive-commands.md](docs/standards/repetitive-commands.md)
+- Learned errors and prevention rules: [learned-lessons.md](docs/standards/learned-lessons.md)
+- Non-negotiable rules: [mandatory-rules.md](docs/standards/mandatory-rules.md)
 
 ## 5. When to consult `docs/standards`
 
@@ -93,6 +93,6 @@ When applicable, validate as much as possible before considering a block ready f
 
 ## 10. Main references
 
-- Project overview: [README.md](/D:/Stefanini/SoEnergy/glpi-soenergy/README.md)
-- Live implementation plan: [implementation-plan.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/implementation-plan.md)
-- Standards catalog: [docs/standards/index.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/index.md)
+- Project overview: [README.md](README.md)
+- Live implementation plan: [implementation-plan.md](docs/implementation-plan.md)
+- Standards catalog: [docs/standards/index.md](docs/standards/index.md)

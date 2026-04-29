@@ -242,5 +242,5 @@ Use the troubleshooting appendix for:
 
 ## 10. Related Documentation
 
-- [Multilingual index](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual/README.md)
-- [Appendices index](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual/en/appendices/index.md)
+- [Multilingual index](../README.md)
+- [Appendices index](appendices/index.md)

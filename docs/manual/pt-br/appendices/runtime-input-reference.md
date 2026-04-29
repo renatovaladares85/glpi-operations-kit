@@ -29,4 +29,4 @@ Entradas obrigatórias:
 
 Modelos de arquivo:
 
-- Use os mesmos modelos em [runtime-input-reference.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/runtime-input-reference.md).
+- Use os mesmos modelos em [runtime-input-reference.md](../../../manual-appendices/runtime-input-reference.md).

@@ -236,5 +236,5 @@ Use o apêndice de troubleshooting para:
 
 ## 10. Documentação relacionada
 
-- [Índice multilíngua](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual/README.md)
-- [Índice de apêndices PT-BR](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual/pt-br/appendices/index.md)
+- [Índice multilíngua](../README.md)
+- [Índice de apêndices PT-BR](appendices/index.md)

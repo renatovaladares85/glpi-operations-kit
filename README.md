@@ -97,9 +97,9 @@ You can later switch to a self-signed certificate or a valid provided certificat
 
 ## Live documentation
 
-- [implementation-plan.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/implementation-plan.md)
-- [standards/index.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/index.md)
-- [manual/README.md (EN + PT-BR)](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual/README.md)
+- [implementation-plan.md](docs/implementation-plan.md)
+- [standards/index.md](docs/standards/index.md)
+- [manual/README.md (EN + PT-BR)](docs/manual/README.md)
 
 ## Contact
 

@@ -242,12 +242,12 @@ Use the troubleshooting appendix for:
 
 ## 10. Related Documentation
 
-- [README.md](/D:/Stefanini/SoEnergy/glpi-soenergy/README.md)
-- [implementation-plan.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/implementation-plan.md)
-- [standards index](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/index.md)
-- [command reference appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/command-reference.md)
-- [runtime input appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/runtime-input-reference.md)
-- [tls appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/tls-modes.md)
-- [troubleshooting appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/troubleshooting-matrix.md)
-- [operational checks appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/operational-checks.md)
-- [deferred features appendix](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/manual-appendices/deferred-features.md)
+- [README.md](../README.md)
+- [implementation-plan.md](implementation-plan.md)
+- [standards index](standards/index.md)
+- [command reference appendix](manual-appendices/command-reference.md)
+- [runtime input appendix](manual-appendices/runtime-input-reference.md)
+- [tls appendix](manual-appendices/tls-modes.md)
+- [troubleshooting appendix](manual-appendices/troubleshooting-matrix.md)
+- [operational checks appendix](manual-appendices/operational-checks.md)
+- [deferred features appendix](manual-appendices/deferred-features.md)
