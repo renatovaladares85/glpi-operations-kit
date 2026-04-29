@@ -1,0 +1,35 @@
+---
+- name: Prepare base operating system
+  hosts: all
+  become: true
+  roles:
+    - role: base
+      tags: ["base"]
+
+- name: Configure GLPI application hosts
+  hosts: glpi_app
+  become: true
+  roles:
+    - role: app
+      tags: ["app"]
+
+- name: Configure MariaDB hosts
+  hosts: glpi_db
+  become: true
+  roles:
+    - role: db
+      tags: ["db"]
+
+- name: Configure monitoring exporters
+  hosts: all
+  become: true
+  roles:
+    - role: monitoring
+      tags: ["monitoring"]
+
+- name: Configure backup routines
+  hosts: all
+  become: true
+  roles:
+    - role: backup
+      tags: ["backup"]

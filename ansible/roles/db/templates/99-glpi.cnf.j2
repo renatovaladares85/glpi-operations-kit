@@ -1,0 +1,16 @@
+[mysqld]
+bind-address = {{ mariadb_bind_address }}
+port = {{ mariadb_port }}
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+innodb_buffer_pool_size = {{ mariadb_innodb_buffer_pool_size }}
+max_connections = {{ mariadb_max_connections }}
+tmp_table_size = {{ mariadb_tmp_table_size }}
+max_heap_table_size = {{ mariadb_max_heap_table_size }}
+slow_query_log = {{ mariadb_slow_query_log }}
+long_query_time = {{ mariadb_long_query_time }}
+skip_name_resolve = 1
+performance_schema = ON
+
+[client]
+default-character-set = utf8mb4

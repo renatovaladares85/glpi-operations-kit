@@ -1,21 +1,21 @@
 # Standards Index
 
-Use este indice para descobrir rapidamente onde cada padrao esta documentado.
+Use this index to quickly discover where each standard is documented.
 
-## Navegacao rapida
+## Quick navigation
 
-- Commits e checkpoints: [commit-convention.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/commit-convention.md)
-- Infraestrutura com Ansible: [ansible.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/ansible.md)
-- Scripts `bash`: [bash-scripts.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/bash-scripts.md)
-- Seguranca e dados sensiveis: [security.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/security.md)
-- Monitoração: [monitoring.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/monitoring.md)
-- Backup e restore: [backup-restore.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/backup-restore.md)
-- Comandos repetitivos: [repetitive-commands.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/repetitive-commands.md)
-- Erros aprendidos: [learned-lessons.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/learned-lessons.md)
-- Regras obrigatorias: [mandatory-rules.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/mandatory-rules.md)
+- Commits and checkpoints: [commit-convention.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/commit-convention.md)
+- Ansible infrastructure: [ansible.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/ansible.md)
+- `bash` scripts: [bash-scripts.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/bash-scripts.md)
+- Security and sensitive data: [security.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/security.md)
+- Monitoring: [monitoring.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/monitoring.md)
+- Backup and restore: [backup-restore.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/backup-restore.md)
+- Repetitive commands: [repetitive-commands.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/repetitive-commands.md)
+- Learned lessons: [learned-lessons.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/learned-lessons.md)
+- Mandatory rules: [mandatory-rules.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/standards/mandatory-rules.md)
 
-## Regra de uso
+## Usage rule
 
-- Leia primeiro este indice.
-- Depois abra apenas o arquivo do tema da tarefa.
-- Se o tema nao existir, crie no grupo correto em vez de duplicar regra em outro lugar.
+- Read this index first.
+- Then open only the file for the current task area.
+- If the topic does not exist yet, create it in the correct group instead of duplicating a rule elsewhere.

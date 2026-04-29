@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STAMP="$(date +%F-%H%M%S)"
+tar -czf "{{ glpi_backup_base_dir }}/files/glpi-files-${STAMP}.tgz" "{{ glpi_var_dir }}"
+tar -czf "{{ glpi_backup_base_dir }}/config/glpi-config-${STAMP}.tgz" "{{ glpi_config_dir }}"
+tar -czf "{{ glpi_backup_base_dir }}/plugins/glpi-plugins-${STAMP}.tgz" "{{ glpi_plugin_dir }}"
+
+find "{{ glpi_backup_base_dir }}/files" -type f -mtime +{{ glpi_backup_retention_days }} -delete
+find "{{ glpi_backup_base_dir }}/config" -type f -mtime +{{ glpi_backup_retention_days }} -delete
+find "{{ glpi_backup_base_dir }}/plugins" -type f -mtime +{{ glpi_backup_retention_days }} -delete

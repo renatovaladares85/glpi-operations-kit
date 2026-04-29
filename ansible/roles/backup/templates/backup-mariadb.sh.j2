@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STAMP="$(date +%F-%H%M%S)"
+TARGET="{{ glpi_backup_base_dir }}/db/glpi-${STAMP}.sql.gz"
+
+if [[ -z "${GLPI_DB_ROOT_PASSWORD:-}" ]]; then
+  echo "Missing GLPI_DB_ROOT_PASSWORD environment variable." >&2
+  exit 1
+fi
+
+mysqldump \
+  --single-transaction \
+  --quick \
+  --routines \
+  --events \
+  -u root \
+  -p"${GLPI_DB_ROOT_PASSWORD}" \
+  {{ glpi_db_name | default('glpi') }} | gzip -9 > "${TARGET}"
+
+chmod 600 "${TARGET}"
+
+find "{{ glpi_backup_base_dir }}/db" -type f -mtime +{{ glpi_backup_retention_days }} -delete

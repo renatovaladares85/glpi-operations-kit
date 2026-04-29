@@ -1,0 +1,142 @@
+---
+- name: Install GLPI application packages
+  ansible.builtin.apt:
+    name: "{{ glpi_app_packages }}"
+    state: present
+
+- name: Create GLPI directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(glpi_data_owner) }}"
+    group: "{{ item.group | default(glpi_data_group) }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ glpi_config_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_var_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_plugin_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_log_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
+    - { path: "{{ glpi_backup_base_dir }}", owner: "root", group: "root", mode: "0750" }
+
+- name: Download GLPI archive
+  ansible.builtin.get_url:
+    url: "{{ glpi_download_url }}"
+    dest: "/tmp/glpi-{{ glpi_version }}.tgz"
+    mode: "0644"
+
+- name: Unarchive GLPI release
+  ansible.builtin.unarchive:
+    src: "/tmp/glpi-{{ glpi_version }}.tgz"
+    dest: "{{ glpi_release_root }}"
+    remote_src: true
+    creates: "{{ glpi_release_dir }}"
+
+- name: Rename extracted GLPI directory when needed
+  ansible.builtin.command:
+    cmd: "mv {{ glpi_release_root }}/glpi {{ glpi_release_dir }}"
+  args:
+    creates: "{{ glpi_release_dir }}"
+  when: not (glpi_release_dir == glpi_release_root ~ '/glpi')
+
+- name: Create symlink for active GLPI release
+  ansible.builtin.file:
+    src: "{{ glpi_release_dir }}"
+    dest: "{{ glpi_install_dir }}"
+    state: link
+    force: true
+
+- name: Deploy GLPI downstream configuration
+  ansible.builtin.template:
+    src: downstream.php.j2
+    dest: "{{ glpi_install_dir }}/inc/downstream.php"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy GLPI local_define configuration
+  ansible.builtin.template:
+    src: local_define.php.j2
+    dest: "{{ glpi_config_dir }}/local_define.php"
+    owner: "{{ glpi_data_owner }}"
+    group: "{{ glpi_data_group }}"
+    mode: "0640"
+
+- name: Deploy php.ini overrides for GLPI
+  ansible.builtin.template:
+    src: glpi-php.ini.j2
+    dest: /etc/php/8.3/fpm/conf.d/99-glpi.ini
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart php-fpm
+
+- name: Deploy PHP-FPM pool configuration
+  ansible.builtin.template:
+    src: glpi-pool.conf.j2
+    dest: /etc/php/8.3/fpm/pool.d/glpi.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart php-fpm
+
+- name: Deploy Nginx virtual host
+  ansible.builtin.template:
+    src: nginx-glpi.conf.j2
+    dest: /etc/nginx/sites-available/glpi.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Enable GLPI virtual host
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/glpi.conf
+    dest: /etc/nginx/sites-enabled/glpi.conf
+    state: link
+    force: true
+  notify: Reload nginx
+
+- name: Disable default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Deploy GLPI cron wrapper
+  ansible.builtin.template:
+    src: glpi-cron.sh.j2
+    dest: /usr/local/bin/glpi-cron.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Configure GLPI cron job
+  ansible.builtin.cron:
+    name: GLPI background tasks
+    user: "{{ glpi_data_owner }}"
+    job: "/usr/local/bin/glpi-cron.sh >> {{ glpi_log_dir }}/cron.log 2>&1"
+    minute: "{{ glpi_cron_schedule.split(' ')[0] }}"
+    hour: "{{ glpi_cron_schedule.split(' ')[1] }}"
+    day: "{{ glpi_cron_schedule.split(' ')[2] }}"
+    month: "{{ glpi_cron_schedule.split(' ')[3] }}"
+    weekday: "{{ glpi_cron_schedule.split(' ')[4] }}"
+
+- name: Validate nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Validate php-fpm configuration
+  ansible.builtin.command: php-fpm8.3 -t
+  changed_when: false
+
+- name: Ensure nginx is enabled
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Ensure php-fpm is enabled
+  ansible.builtin.service:
+    name: "{{ glpi_php_fpm_service }}"
+    state: started
+    enabled: true

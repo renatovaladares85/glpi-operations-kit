@@ -1,28 +1,28 @@
 # Security Standard
 
-## Regras base
+## Base rules
 
-- Nao versionar segredos.
-- Manter diretorios sensiveis fora da web root.
-- Usar menor privilegio para SSH, banco e arquivos.
-- Restringir acesso ao banco apenas a hosts autorizados.
-- Preservar TLS e permissoes restritas.
+- Never version secrets.
+- Keep sensitive directories outside the web root.
+- Use least privilege for SSH, database, and filesystem access.
+- Restrict database access to authorized hosts only.
+- Preserve TLS and restricted permissions.
 
-## Layout sensivel do GLPI
+## Sensitive GLPI layout
 
-- codigo: `/usr/share/glpi`
+- code: `/usr/share/glpi`
 - config: `/etc/glpi`
-- dados: `/var/lib/glpi/files`
+- data: `/var/lib/glpi/files`
 - plugins: `/var/lib/glpi/plugins`
 - logs: `/var/log/glpi`
 
 ## LGPD
 
-- Evitar dados sensiveis em logs e exemplos.
-- Restringir acesso a anexos e backups.
-- Criptografar backups quando aplicavel.
+- Avoid sensitive data in logs and examples.
+- Restrict access to attachments and backups.
+- Encrypt backups where applicable.
 
-## Regras para agentes
+## Rules for agents
 
-- Ao tocar secrets, consultar este arquivo primeiro.
-- Se surgir nova regra critica, promover para `mandatory-rules.md`.
+- When touching secrets, read this file first.
+- If a new critical rule appears, promote it to `mandatory-rules.md`.

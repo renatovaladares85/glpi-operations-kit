@@ -1,61 +1,61 @@
 # Repetitive Commands
 
-Registre aqui comandos recorrentes que sejam seguros, reutilizaveis e economizem contexto.
+Record recurring commands here when they are safe, reusable, and reduce context cost.
 
-## Formato
+## Format
 
-### Objetivo
+### Objective
 
-### Comando
+### Command
 
-### Quando usar
+### When to use
 
-### Pre-condicoes
+### Preconditions
 
-### Riscos
+### Risks
 
-## Comandos iniciais
+## Initial commands
 
-### Objetivo
+### Objective
 
-Validar estrutura de inventario Ansible.
+Validate the Ansible inventory structure.
 
-### Comando
+### Command
 
 ```bash
 ansible-inventory --list -i ansible/inventories/staging/hosts.yml
 ```
 
-### Quando usar
+### When to use
 
-Antes de rodar playbooks ou ao alterar inventories.
+Before running playbooks or after changing inventories.
 
-### Pre-condicoes
+### Preconditions
 
-- `ansible` instalado
+- `ansible` installed
 
-### Riscos
+### Risks
 
-- baixo risco; apenas leitura
+- low risk; read-only
 
-### Objetivo
+### Objective
 
-Validar sintaxe do playbook principal.
+Validate the main playbook syntax.
 
-### Comando
+### Command
 
 ```bash
 ansible-playbook --syntax-check ansible/site.yml
 ```
 
-### Quando usar
+### When to use
 
-Antes de commitar mudancas em Ansible.
+Before committing Ansible changes.
 
-### Pre-condicoes
+### Preconditions
 
-- `ansible` instalado
+- `ansible` installed
 
-### Riscos
+### Risks
 
-- baixo risco; nao altera estado remoto
+- low risk; does not change remote state

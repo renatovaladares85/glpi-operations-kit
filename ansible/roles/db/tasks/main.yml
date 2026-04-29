@@ -1,0 +1,80 @@
+---
+- name: Install MariaDB packages
+  ansible.builtin.apt:
+    name: "{{ mariadb_version_packages }}"
+    state: present
+
+- name: Deploy MariaDB tuning configuration
+  ansible.builtin.template:
+    src: 99-glpi.cnf.j2
+    dest: /etc/mysql/mariadb.conf.d/99-glpi.cnf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart mariadb
+
+- name: Ensure MariaDB is enabled
+  ansible.builtin.service:
+    name: mariadb
+    state: started
+    enabled: true
+
+- name: Configure firewall for MariaDB access from app servers
+  community.general.ufw:
+    rule: allow
+    src: "{{ item }}"
+    port: "{{ mariadb_port }}"
+    proto: tcp
+  loop: "{{ db_allowed_source_hosts }}"
+
+- name: Check if runtime database secrets file is provided
+  ansible.builtin.assert:
+    that:
+      - glpi_db_name is defined
+      - glpi_db_user is defined
+      - glpi_db_password is defined
+      - glpi_db_root_password is defined
+    fail_msg: "Missing critical database runtime secrets. Provide glpi_db_name, glpi_db_user, glpi_db_password and glpi_db_root_password."
+
+- name: Configure MariaDB root password
+  community.mysql.mysql_user:
+    name: root
+    host_all: true
+    password: "{{ glpi_db_root_password }}"
+    login_unix_socket: /run/mysqld/mysqld.sock
+    check_implicit_admin: true
+    state: present
+
+- name: Remove anonymous MySQL users
+  community.mysql.mysql_user:
+    name: ""
+    host_all: true
+    state: absent
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"
+
+- name: Remove test database
+  community.mysql.mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"
+
+- name: Create GLPI database
+  community.mysql.mysql_db:
+    name: "{{ glpi_db_name }}"
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_ci
+    state: present
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"
+
+- name: Create GLPI database user
+  community.mysql.mysql_user:
+    name: "{{ glpi_db_user }}"
+    password: "{{ glpi_db_password }}"
+    host: "%"
+    priv: "{{ glpi_db_name }}.*:ALL"
+    state: present
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"

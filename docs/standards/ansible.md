@@ -1,6 +1,6 @@
 # Ansible Standard
 
-## Estrutura principal
+## Main structure
 
 - `ansible/inventories/<environment>/hosts.yml`
 - `ansible/inventories/<environment>/group_vars/all.yml`
@@ -8,21 +8,21 @@
 - `ansible/roles/<role>/handlers/main.yml`
 - `ansible/roles/<role>/templates/*.j2`
 
-## Regras
+## Rules
 
-- Prefira roles pequenas e focadas.
-- Use `group_vars` para valores nao sensiveis por ambiente.
-- Nao versione segredos em inventories ou vars.
-- Use templates para configuracoes variaveis.
-- Valide sintaxe antes de considerar um bloco pronto.
+- Prefer small, focused roles.
+- Use `group_vars` for non-sensitive environment values.
+- Never version secrets in inventories or vars.
+- Use templates for variable configurations.
+- Validate syntax before considering a block ready for commit.
 
-## Validacao minima
+## Minimum validation
 
 - `ansible-inventory --list`
 - `ansible-playbook --syntax-check ansible/site.yml`
 
 ## Secrets
 
-- Secrets devem entrar em runtime via script guiado.
-- O script pode gerar arquivo temporario local fora do Git.
-- O playbook deve falhar com mensagem clara se secret critico nao existir.
+- Secrets must enter at runtime through a guided script.
+- The script may generate a local temporary file outside Git.
+- The playbook must fail with a clear message when a critical secret is missing.

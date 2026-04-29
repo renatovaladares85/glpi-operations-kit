@@ -1,57 +1,57 @@
 # Learned Lessons
 
-Registre aqui aprendizados reais para evitar repeticao de erros.
+Record real learnings here to avoid repeating mistakes.
 
-## Formato
+## Format
 
-### Problema
+### Problem
 
-### Causa
+### Cause
 
-### Solucao aplicada
+### Applied fix
 
-### Regra preventiva
+### Prevention rule
 
-### Quando consultar
+### When to consult
 
-## Aprendizados iniciais
+## Initial learnings
 
-### Problema
+### Problem
 
-Scripts operacionais foram criados em `PowerShell` mesmo com foco em `Ubuntu/Linux`.
+Operational scripts were first created in `PowerShell` even though the target workflow is `Ubuntu/Linux`.
 
-### Causa
+### Cause
 
-A interface operacional nao foi alinhada ao sistema-alvo logo no inicio.
+The operational interface was not aligned with the target operating system early enough.
 
-### Solucao aplicada
+### Applied fix
 
-Substituir scripts `.ps1` por `.sh` e padronizar operacao em `bash`.
+Replace `.ps1` scripts with `.sh` scripts and standardize operations on `bash`.
 
-### Regra preventiva
+### Prevention rule
 
-Se o ambiente operacional for Linux, a interface de automacao deve ser Linux-first, salvo exigencia explicita contraria.
+If the operational environment is Linux, the automation interface must be Linux-first unless there is an explicit requirement otherwise.
 
-### Quando consultar
+### When to consult
 
-Ao criar ou revisar scripts operacionais.
+When creating or reviewing operational scripts.
 
-### Problema
+### Problem
 
-Erros de quoting em comandos encadeados aumentam retrabalho e desperdicam chamadas.
+Quoting errors in chained shell commands increase rework and waste calls.
 
-### Causa
+### Cause
 
-Execucao indireta entre shells diferentes sem simplificacao do comando.
+Indirect execution across different shells without simplifying the command shape.
 
-### Solucao aplicada
+### Applied fix
 
-Preferir comandos curtos, scriptados e com menos camadas de quoting.
+Prefer shorter, scriptable commands with fewer quoting layers.
 
-### Regra preventiva
+### Prevention rule
 
-Se um comando com quoting complexo puder ser simplificado, documente e use a forma mais curta e previsivel.
+If a command with complex quoting can be simplified, document and use the shorter, more predictable form.
 
-### Quando consultar
+### When to consult
 
-Ao validar scripts ou chamar ferramentas a partir de outro shell.
+When validating scripts or calling one tool from another shell.

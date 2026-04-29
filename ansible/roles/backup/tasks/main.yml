@@ -1,0 +1,50 @@
+---
+- name: Create backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ glpi_backup_base_dir }}"
+    - "{{ glpi_backup_base_dir }}/db"
+    - "{{ glpi_backup_base_dir }}/files"
+    - "{{ glpi_backup_base_dir }}/config"
+    - "{{ glpi_backup_base_dir }}/plugins"
+
+- name: Deploy database backup script to DB hosts
+  ansible.builtin.template:
+    src: backup-mariadb.sh.j2
+    dest: /usr/local/bin/backup-glpi-db.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: "'glpi_db' in group_names"
+
+- name: Deploy file backup script to app hosts
+  ansible.builtin.template:
+    src: backup-glpi-files.sh.j2
+    dest: /usr/local/bin/backup-glpi-files.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: "'glpi_app' in group_names"
+
+- name: Schedule database backup
+  ansible.builtin.cron:
+    name: GLPI MariaDB backup
+    user: root
+    minute: "15"
+    hour: "2"
+    job: "/usr/local/bin/backup-glpi-db.sh"
+  when: "'glpi_db' in group_names"
+
+- name: Schedule GLPI file backup
+  ansible.builtin.cron:
+    name: GLPI file backup
+    user: root
+    minute: "45"
+    hour: "2"
+    job: "/usr/local/bin/backup-glpi-files.sh"
+  when: "'glpi_app' in group_names"

@@ -1,16 +1,16 @@
 # Commit Convention
 
-## Padrao oficial
+## Official standard
 
-O repositorio usa `Conventional Commits`.
+This repository uses `Conventional Commits`.
 
-Formato:
+Format:
 
 ```text
-tipo(escopo): descricao
+type(scope): description
 ```
 
-## Tipos permitidos
+## Allowed types
 
 - `feat`
 - `fix`
@@ -22,7 +22,7 @@ tipo(escopo): descricao
 - `build`
 - `ci`
 
-## Escopos iniciais recomendados
+## Recommended initial scopes
 
 - `ansible-base`
 - `ansible-app`
@@ -34,35 +34,35 @@ tipo(escopo): descricao
 - `agents`
 - `security`
 
-## Quando criar commit
+## When to create a commit
 
-Crie commit apenas ao fechar um `bloco funcional validado`.
+Create a commit only when a `validated functional block` is complete.
 
-Definicao de bloco funcional validado:
+Definition of a validated functional block:
 
-- muda uma unidade coerente de comportamento;
-- pode ser entendida e revertida de forma isolada;
-- recebeu a validacao minima aplicavel;
-- nao mistura objetivos ou riscos diferentes.
+- changes one coherent unit of behavior;
+- can be understood and reverted in isolation;
+- received the minimum applicable validation;
+- does not mix unrelated goals or risks.
 
-## Exemplos bons
+## Good examples
 
-- `docs(agents): cria catalogo de padroes para IA`
-- `fix(scripts): corrige fluxo de secrets em runtime`
-- `feat(ansible-app): adiciona template inicial do nginx do glpi`
-- `chore(monitoring): adiciona exporters base para staging`
+- `docs(agents): create standards catalog for AI workflows`
+- `fix(scripts): correct runtime secret flow`
+- `feat(ansible-app): add initial glpi nginx template`
+- `chore(monitoring): add base exporters for staging`
 
-## Exemplos ruins
+## Bad examples
 
 - `update files`
-- `fix: varias coisas`
-- `docs(ansible-app): muda scripts e monitoring`
-- `feat(all): ajusta tudo`
+- `fix: many things`
+- `docs(ansible-app): change scripts and monitoring`
+- `feat(all): adjust everything`
 
-## Regra de recuperacao
+## Recovery rule
 
-Cada commit deve permitir identificar rapidamente:
+Each commit should make it easy to identify:
 
-- o que mudou;
-- qual area foi afetada;
-- se o rollback pode ser feito sem mexer no restante.
+- what changed;
+- which area was affected;
+- whether rollback can happen without touching the rest.

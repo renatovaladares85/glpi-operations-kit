@@ -1,0 +1,89 @@
+---
+- name: Install node exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+  when: node_exporter_enabled
+
+- name: Ensure node exporter is enabled
+  ansible.builtin.service:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true
+  when: node_exporter_enabled
+
+- name: Install mysqld exporter package on DB hosts
+  ansible.builtin.apt:
+    name: prometheus-mysqld-exporter
+    state: present
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+
+- name: Create mysqld exporter config directory
+  ansible.builtin.file:
+    path: /etc/prometheus
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+
+- name: Assert monitoring database secrets are provided for DB hosts
+  ansible.builtin.assert:
+    that:
+      - mysqld_exporter_user is defined
+      - mysqld_exporter_password is defined
+    fail_msg: "Missing mysqld_exporter runtime secrets. Provide mysqld_exporter_user and mysqld_exporter_password."
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+
+- name: Create mysqld exporter user
+  community.mysql.mysql_user:
+    name: "{{ mysqld_exporter_user }}"
+    password: "{{ mysqld_exporter_password }}"
+    host: localhost
+    priv: "*.*:PROCESS,REPLICATION CLIENT,SLAVE MONITOR"
+    state: present
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+
+- name: Deploy mysqld exporter credentials
+  ansible.builtin.template:
+    src: mysqld-exporter.cnf.j2
+    dest: /etc/prometheus/mysqld-exporter.cnf
+    owner: root
+    group: prometheus
+    mode: "0640"
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+  notify: Restart mysqld exporter
+
+- name: Override mysqld exporter environment
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-mysqld-exporter
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      ARGS="--config.my-cnf=/etc/prometheus/mysqld-exporter.cnf"
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"
+  notify: Restart mysqld exporter
+
+- name: Ensure mysqld exporter is enabled
+  ansible.builtin.service:
+    name: prometheus-mysqld-exporter
+    state: started
+    enabled: true
+  when:
+    - mysqld_exporter_enabled
+    - "'glpi_db' in group_names"

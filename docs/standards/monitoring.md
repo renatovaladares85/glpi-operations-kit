@@ -1,6 +1,6 @@
 # Monitoring Standard
 
-## Stack base
+## Base stack
 
 - `Prometheus`
 - `Grafana`
@@ -8,23 +8,23 @@
 - `node_exporter`
 - `mysqld_exporter`
 
-## Minimo esperado
+## Minimum monitoring scope
 
 - CPU
 - RAM
 - swap
-- disco
+- disk
 - inode
 - IO wait
-- disponibilidade do Nginx
-- disponibilidade do PHP-FPM
-- latencia e conexoes do MariaDB
+- Nginx availability
+- PHP-FPM availability
+- MariaDB latency and connections
 
-## Alertas minimos
+## Minimum alerts
 
-- disco acima de 80%
-- disco acima de 90%
-- RAM sustentada alta
-- swap em uso
-- servico parado
-- falha de backup
+- disk above 80%
+- disk above 90%
+- sustained high RAM
+- swap in use
+- service stopped
+- backup failure

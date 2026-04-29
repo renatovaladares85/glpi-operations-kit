@@ -1,34 +1,34 @@
 # Bash Scripts Standard
 
-## Objetivo
+## Objective
 
-Padronizar scripts guiados para operacao em `Ubuntu/Linux`.
+Standardize guided scripts for `Ubuntu/Linux` operations.
 
-## Regras
+## Rules
 
-- Usar `#!/usr/bin/env bash`
-- Usar `set -euo pipefail`
-- Centralizar funcoes comuns em `scripts/lib/common.sh`
-- Explicar por que cada dado sensivel esta sendo pedido
-- Informar onde o dado sera gravado
-- Interromper quando faltar informacao critica
+- Use `#!/usr/bin/env bash`
+- Use `set -euo pipefail`
+- Centralize shared functions in `scripts/lib/common.sh`
+- Explain why each sensitive value is being requested
+- Explain where the value will be written
+- Stop execution when critical information is missing
 
 ## Runtime secrets
 
-- Gravar apenas em `.runtime/<environment>/`
-- Nunca versionar `.runtime/`
-- Nao ecoar segredos no terminal
+- Store only under `.runtime/<environment>/`
+- Never version `.runtime/`
+- Never echo secrets to the terminal
 
-## Fluxo padrao
+## Standard flow
 
 - `check`
 - `apply`
 - `post-check`
 
-## Erros obrigatorios
+## Required error behavior
 
-Quando faltar dado critico, o script deve informar:
+When a critical value is missing, the script must explain:
 
-- qual dado falta;
-- por que ele e necessario;
-- em que arquivo ou componente sera usado.
+- which value is missing;
+- why it is needed;
+- which file or component will use it.
