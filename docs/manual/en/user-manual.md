@@ -1,90 +1,296 @@
-# GLPI SoEnergy User Manual
+# GLPI SoEnergy Operator Runbook
 
-## 1. Overview
+## 1. Purpose
 
-This manual is a full operator runbook for installing and validating GLPI in staging, with or without repository scripts.
+This manual is the official runbook for installing, validating, promoting, and operating GLPI SoEnergy environments.
 
-It covers:
+It is intended for:
 
-- automated guided flow (scripts + Ansible)
-- manual fallback flow (command-by-command on Ubuntu)
-- single-server mode (app + db on one host)
-- dual-server mode (app host + db host)
-- cross-host execution using SSH from app to db or db to app
+- Linux server operators
+- DevOps or infrastructure engineers
+- technical approvers responsible for staging and production execution
+- AI agents that must follow repository rules before suggesting or applying changes
 
-Implemented behavior is documented as executable. Deferred capabilities are listed separately.
+This manual explains:
 
-## 2. Architecture and Modes
+- what each command does
+- where each command must be executed
+- when each command must be executed
+- what each command changes on target hosts
+- which prerequisites are mandatory before execution continues
 
-Supported topology modes:
+## 2. Required Operator Profile
 
-- single-server: one Ubuntu host running app and db roles
-- dual-server: one Ubuntu app host and one Ubuntu db host
+Required operator skill:
 
-Supported TLS modes:
+- Ubuntu server administration
+- `sudo` usage
+- SSH key-based access
+- Ansible execution and troubleshooting
+- change-control awareness for corporate environments
 
-- `none` (HTTP only)
-- `self_signed`
-- `provided`
+Recommended AI execution profile:
 
-Secure GLPI layout:
+- an agent that reads `README.md`, `AGENTS.md`, `docs/standards/index.md`, and this runbook before acting
 
-- code: `/usr/share/glpi`
-- config: `/etc/glpi`
-- data: `/var/lib/glpi/files`
-- plugins: `/var/lib/glpi/plugins`
-- logs: `/var/log/glpi`
+## 3. Supported Topologies
 
-## 3. Prerequisites
+Primary topology:
 
-Execution origin policy for this runbook:
+- dual-server
+- one `app` host
+- one `db` host
 
-- run from a target host only (app host or db host)
-- no bastion host is required
+Supported fallback topology:
 
-Mandatory tools on execution host:
+- single-server
+- one Ubuntu host running both application and database roles
+
+How topology is decided:
+
+- the runtime inventory defines the real hosts
+- if `app host` and `db host` are the same value, the deployment behaves as single-server
+- if `app host` and `db host` are different values, the deployment behaves as dual-server
+
+## 4. Where To Run Commands
+
+Supported execution origins:
+
+- on the `app` host
+- on the `db` host
+- on the same host when running single-server mode
+
+Operational rule:
+
+- the execution host must have the Git clone, `bash`, `git`, `ansible-playbook`, `ansible-inventory`, SSH key access, and `sudo`
+
+What happens in dual-server mode:
+
+- `glpictl` runs locally on the execution host
+- Ansible connects over SSH to the remote host defined in the runtime inventory
+- `db` tasks run only on inventory group `glpi_db`
+- `app` tasks run only on inventory group `glpi_app`
+
+## 5. Mandatory Prerequisites
+
+### 5.1 Platform and repository
+
+- Ubuntu Linux on the execution host
+- repository cloned locally
+- enough local free disk for `.runtime`, logs, and evidence files
+
+### 5.2 Mandatory tools
 
 - `bash`
 - `git`
 - `ansible-playbook`
 - `ansible-inventory`
 
-Optional but recommended:
+Recommended tool:
 
 - `ssh`
 
-Mandatory access:
+### 5.3 Mandatory access and permissions
 
-- SSH reachability between execution host and remote target host in dual-server mode
-- sudo privileges on target hosts
-- local SSH private key path available on execution host
-- operator user must belong to `glpiops` group
+- valid `sudo` capability on the execution host
+- operator must belong to `glpiops`
+- SSH private key file must exist
+- SSH private key file must be restricted to mode `0600`
+- remote target hosts must be reachable by SSH
+- the SSH user must have privilege to execute the required system changes
 
-### 3.1 Operator security setup (mandatory)
+### 5.4 Mandatory operator setup
 
 ```bash
 sudo groupadd -f glpiops
 sudo usermod -aG glpiops "$USER"
 newgrp glpiops
-```
-
-Recommended sudo validation:
-
-```bash
 sudo -v
 ```
 
-## 4. Automated Guided Flow (Track A)
+### 5.5 First mandatory command
 
-Primary entrypoint:
+```bash
+bash scripts/bootstrap-permissions.sh
+```
 
-- `scripts/glpictl.sh`
+What it is for:
 
-The script starts with pre-flight checks. If a mandatory command is missing, it prompts to install it on Ubuntu. If installation fails, it prints exact manual remediation commands and blocks execution.
+- ensures scripts are executable
+- prepares `.runtime/`
+- validates operator baseline permissions
+- writes the bootstrap marker
 
-### 4.1 Step-by-step
+## 6. Official CLI
 
-0. Run permission bootstrap (first mandatory command):
+Official entrypoint:
+
+```bash
+./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
+```
+
+Supported environments:
+
+- `staging`
+- `production`
+
+Supported domains:
+
+- `deploy`
+- `certify`
+- `promote`
+- `tls`
+- `ops`
+- `audit`
+
+Compatibility note:
+
+- specific scripts such as `deploy-staging.sh`, `deploy-db.sh`, and `manage-tls.sh` still work
+- they are wrappers around `glpictl.sh`
+
+## 7. Command Behavior Matrix
+
+| Command shape | Purpose | Target hosts | When to use |
+|---|---|---|---|
+| `glpictl <env> deploy check all` | Validate precheck and runtime inventory | local checks + inventory parse | before any apply |
+| `glpictl <env> deploy apply db` | Install and configure MariaDB | `glpi_db` | first apply step in new environments |
+| `glpictl <env> deploy apply app` | Install and configure GLPI app stack | `glpi_app` | after DB is reachable |
+| `glpictl <env> deploy apply monitoring` | Install exporters | app and db according to role | after app and db baseline are ready |
+| `glpictl <env> deploy apply backup` | Install backup baseline | target hosts defined by role | after app and db baseline are ready |
+| `glpictl <env> deploy apply all` | Apply base, app, db, monitoring, backup | both inventory groups | controlled full run |
+| `glpictl <env> deploy post-check all` | Run validation playbook path | app and db | after deploy |
+| `glpictl staging certify run` | Create staging evidence and promotion gate | local + app + db checks | before any production rollout |
+| `glpictl <env> tls <action>` | Change or reload TLS mode | `glpi_app` | after app baseline exists |
+| `glpictl <env> ops ...` | day-2 maintenance | depends on operation | after deployment |
+| `glpictl <env> audit check` | run maintenance audit path | app and db | after deployment or after changes |
+| `glpictl production promote apply <target>` | production deployment with gate enforcement | depends on target | after approved staging certification |
+
+## 8. Runtime Files and What They Mean
+
+Runtime root:
+
+- `.runtime/<environment>/`
+
+Configuration files:
+
+- `inventory.runtime.yml`
+- `app.runtime.yml`
+- `db.secrets.yml`
+- `monitoring.secrets.yml`
+
+Operational state:
+
+- `.runtime/<environment>/logs/`
+- `.runtime/<environment>/state/`
+- `.runtime/<environment>/evidence/`
+
+Promotion gate:
+
+- `.runtime/promotion/staging-certified.yml`
+
+Important behavior:
+
+- if runtime files are missing, `glpictl` currently collects all runtime inputs before continuing
+- this means `apply db` may ask for app and monitoring values too
+- this is safe, but not yet optimized for least-prompt execution
+
+## 9. What `apply db` Does
+
+Command:
+
+```bash
+./scripts/glpictl.sh staging deploy apply db
+```
+
+Where to run:
+
+- on the app host, db host, or same host in single-server mode
+
+When to run:
+
+- first infrastructure apply step for a new environment
+- before `apply app`
+
+What it changes:
+
+- installs MariaDB packages if not already managed by the role
+- applies MariaDB baseline tuning and hardening
+- creates or updates the GLPI database
+- creates or updates the GLPI database user
+- uses the `glpi_db` inventory group only
+
+What it needs:
+
+- runtime inventory
+- DB name
+- DB username
+- DB password
+- MariaDB root password
+- SSH access to the DB host
+
+What to validate after it finishes:
+
+- MariaDB service is running on the DB host
+- GLPI schema exists
+- GLPI DB user exists
+- app host is allowed to connect according to configured access host
+
+## 10. What `apply app` Does
+
+Command:
+
+```bash
+./scripts/glpictl.sh staging deploy apply app
+```
+
+Where to run:
+
+- on the app host, db host, or same host in single-server mode
+
+When to run:
+
+- after `apply db` completes successfully
+- after the DB host is reachable and credentials are known
+
+What it changes:
+
+- installs and configures Nginx
+- installs and configures PHP-FPM
+- downloads or prepares GLPI files
+- applies secure GLPI filesystem layout
+- configures app-side GLPI files and runtime definitions
+- applies app-side TLS mode configuration
+- uses the `glpi_app` inventory group only
+
+What it needs:
+
+- runtime inventory
+- GLPI version
+- app host
+- TLS mode
+- certificate paths if `provided`
+- DB runtime file must already contain app DB connectivity values
+
+What to validate after it finishes:
+
+- `nginx -t`
+- `php-fpm8.3 -t`
+- GLPI installer page loads
+- application can reach the database
+
+## 11. Single-Server Runbook
+
+### 11.1 When to use
+
+- lab or constrained environment
+- temporary validation scenario
+- small non-production test environment
+
+### 11.2 How to provide runtime values
+
+- enter the same host value for both `app host` and `db host`
+
+### 11.3 Execution order
 
 ```bash
 bash scripts/bootstrap-permissions.sh
@@ -93,174 +299,91 @@ bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy apply app
 ./scripts/glpictl.sh staging deploy apply monitoring
 ./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
 ```
 
-### 4.3 Staging certification and production gate (mandatory)
+### 11.4 Validation
 
-Before any production deployment, run staging certification:
+- DB and app services run on the same server
+- GLPI page opens from the app endpoint
+- backup and monitoring artifacts exist
+
+## 12. Dual-Server Runbook From App Host
+
+### 12.1 When to use
+
+- standard corporate deployment
+- recommended for staging and production
+
+### 12.2 How to provide runtime values
+
+- `app host` = current app host
+- `db host` = remote database host
+- SSH user and key must work against both hosts
+
+### 12.3 Execution order
+
+```bash
+bash scripts/bootstrap-permissions.sh
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
+```
+
+### 12.4 What happens behind the scenes
+
+- the command runs locally on the app host
+- Ansible connects from app host to db host for `db` role execution
+- Ansible stays on app host or reconnects to app host for `app` role execution
+
+## 13. Dual-Server Runbook From DB Host
+
+### 13.1 When to use
+
+- when the db host is the approved execution point
+- when app host is reachable over SSH from db host
+
+### 13.2 How to provide runtime values
+
+- `db host` = current db host
+- `app host` = remote app host
+- SSH user and key must work against both hosts
+
+### 13.3 Execution order
+
+```bash
+bash scripts/bootstrap-permissions.sh
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
+```
+
+### 13.4 What happens behind the scenes
+
+- the command runs locally on the db host
+- Ansible connects from db host to app host when app tasks are required
+
+## 14. Staging Certification and Production
+
+Staging certification:
 
 ```bash
 ./scripts/glpictl.sh staging certify run
 ```
 
-Expected behavior:
+What it does:
 
-- generates evidence in `.runtime/staging/evidence/<timestamp>/`
-- writes promotion gate approval in `.runtime/promotion/staging-certified.yml`
-- blocks production promotion if any mandatory check fails
+- runs validation checks
+- writes evidence under `.runtime/staging/evidence/`
+- writes the promotion gate file
 
-### 4.2 Runtime prompts (mandatory)
-
-The script requests and validates:
-
-- app host IP/hostname
-- db host IP/hostname
-- SSH username
-- SSH private key path
-- GLPI version
-- TLS mode
-- certificate/key paths for `provided` mode
-- DB name, DB username, DB password
-- MariaDB root password
-- monitoring exporter username/password
-
-Runtime files are persisted under `.runtime/staging/`.
-
-## 5. Manual Fallback Flow (Track B)
-
-Use this flow when scripts are unavailable or when auto-install fails.
-
-### 5.1 Install dependencies on Ubuntu (execution host)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y bash git openssh-client ansible
-```
-
-Validate:
-
-```bash
-command -v bash
-command -v git
-command -v ansible-playbook
-command -v ansible-inventory
-command -v ssh
-id -nG | tr ' ' '\n' | grep -Fx glpiops
-sudo -v
-```
-
-### 5.2 Manual runtime data files
-
-Create runtime directory:
-
-```bash
-mkdir -p .runtime/staging
-chmod 700 .runtime/staging
-```
-
-Use file models from the appendices to create:
-
-- `.runtime/staging/inventory.runtime.yml`
-- `.runtime/staging/app.runtime.yml`
-- `.runtime/staging/db.secrets.yml`
-- `.runtime/staging/monitoring.secrets.yml`
-
-Protect secret files:
-
-```bash
-chmod 600 .runtime/staging/*.secrets.yml
-```
-
-### 5.3 Apply roles manually with Ansible
-
-```bash
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/db.secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/app.runtime.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/monitoring.secrets.yml --extra-vars @.runtime/staging/db.secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/app.runtime.yml
-```
-
-## 6. Single-Server and Dual-Server Operation
-
-### 6.1 Single-server mode
-
-Set both app and db host values to the same host in runtime inventory.
-
-Run:
-
-```bash
-./scripts/glpictl.sh staging deploy apply all
-```
-
-### 6.2 Dual-server mode from app host
-
-Run the script on app host and set:
-
-- app host = current app host IP/FQDN
-- db host = remote db host IP/FQDN
-- SSH user/key = credentials with sudo access on both
-
-### 6.3 Dual-server mode from db host
-
-Run the script on db host and set:
-
-- db host = current db host IP/FQDN
-- app host = remote app host IP/FQDN
-- SSH user/key = credentials with sudo access on both
-
-In both directions, execution host only needs SSH + key access to the other host.
-
-## 7. TLS Operations
-
-Use:
-
-```bash
-./scripts/glpictl.sh staging tls disable
-./scripts/glpictl.sh staging tls self-signed
-./scripts/glpictl.sh staging tls install-provided
-./scripts/glpictl.sh staging tls reload
-```
-
-`install-provided` asks for local cert/key file paths and applies app role safely.
-
-## 8. Validation and Acceptance
-
-Minimum acceptance checks:
-
-- pre-flight completes with no unresolved mandatory failures
-- runtime inventory parses
-- app and db roles complete
-- `nginx -t` is valid on app host
-- `php-fpm8.3 -t` is valid on app host
-- GLPI installer page opens
-- DB access works with runtime credentials
-- monitoring and backup artifacts exist
-
-## 9. Day-2 Operations (Post-Implementation)
-
-Use `scripts/glpictl.sh` for operational lifecycle actions:
-
-- `./scripts/glpictl.sh staging ops users add`
-- `./scripts/glpictl.sh staging ops users disable`
-- `./scripts/glpictl.sh staging ops users remove`
-- `./scripts/glpictl.sh staging ops cert check`
-- `./scripts/glpictl.sh staging ops cert renew`
-- `./scripts/glpictl.sh staging ops cert apply`
-- `./scripts/glpictl.sh staging audit check`
-- `./scripts/glpictl.sh staging ops resume`
-
-Operational persistence:
-
-- logs: `.runtime/<environment>/logs/`
-- checkpoints/state: `.runtime/<environment>/state/`
-
-Certificate policy:
-
-- warning threshold: `<= 30` days to expiry.
-
-## 10. Production rollout (after approved staging gate)
-
-Run only after successful `certify-staging.sh`:
+Production rollout:
 
 ```bash
 ./scripts/glpictl.sh production deploy check all
@@ -271,19 +394,49 @@ Run only after successful `certify-staging.sh`:
 ./scripts/glpictl.sh production deploy post-check all
 ```
 
-Production `apply` is blocked if `.runtime/promotion/staging-certified.yml` is missing or not approved.
+Stop condition:
 
-## 11. Troubleshooting and Recovery
+- production apply remains blocked without `.runtime/promotion/staging-certified.yml`
 
-Use the troubleshooting appendix for:
+## 15. Stop Conditions
 
-- missing dependencies and install failures
-- SSH connectivity/auth issues
-- runtime input validation failures
-- Nginx/PHP-FPM/MariaDB validation failures
-- partial deployment rerun sequence
+Execution must stop when any mandatory prerequisite is not resolved:
 
-## 12. Related Documentation
+- no `sudo`
+- operator not in `glpiops`
+- missing `ansible-playbook`
+- missing `ansible-inventory`
+- SSH key path does not exist
+- SSH key mode is not secure and cannot be fixed
+- target hosts are wrong or unreachable
+- production gate file is missing for production apply
+
+## 16. Project Improvement Recommendations
+
+### 16.1 Highest-value improvement
+
+Split runtime input collection by domain:
+
+- `apply db` should ask only DB-relevant values
+- `apply app` should ask only app and TLS values
+- `apply monitoring` should ask only monitoring-relevant values when missing
+
+Why this improves the project:
+
+- reduces operator confusion
+- reduces prompt volume
+- reduces risk of entering unnecessary values too early
+- reduces AI context and token waste
+- makes command behavior match operator expectation
+
+### 16.2 Additional improvement areas
+
+- add a generated command reference appendix from the real CLI contract
+- add a machine-readable operator profile document for agents
+- add explicit restore drill steps and expected evidence examples
+
+## 17. Related Documentation
 
 - [Multilingual index](../README.md)
 - [Appendices index](appendices/index.md)
+- [Implementation plan](../../implementation-plan.md)
