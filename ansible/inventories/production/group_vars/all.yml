@@ -12,8 +12,12 @@ glpi_data_owner: www-data
 glpi_data_group: www-data
 glpi_domain: servicedesk.soenergy.com
 glpi_use_tls: true
+glpi_tls_mode: provided
 glpi_tls_certificate_path: /etc/ssl/certs/glpi-production.crt
 glpi_tls_certificate_key_path: /etc/ssl/private/glpi-production.key
+glpi_tls_common_name: servicedesk.soenergy.com
+glpi_tls_provided_local_cert_path: ""
+glpi_tls_provided_local_key_path: ""
 glpi_php_fpm_service: php8.3-fpm
 glpi_php_fpm_socket: /run/php/php8.3-fpm.sock
 glpi_app_packages:
@@ -67,3 +71,4 @@ mariadb_long_query_time: 2
 timezone_name: America/Sao_Paulo
 db_allowed_source_hosts:
   - 192.0.2.30
+glpi_db_app_access_host: 192.0.2.30

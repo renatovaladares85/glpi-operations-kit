@@ -25,7 +25,7 @@
     src: "{{ item }}"
     port: "{{ mariadb_port }}"
     proto: tcp
-  loop: "{{ db_allowed_source_hosts }}"
+  loop: "{{ [glpi_db_app_access_host] if glpi_db_app_access_host is defined else db_allowed_source_hosts }}"
 
 - name: Check if runtime database secrets file is provided
   ansible.builtin.assert:
@@ -73,7 +73,7 @@
   community.mysql.mysql_user:
     name: "{{ glpi_db_user }}"
     password: "{{ glpi_db_password }}"
-    host: "%"
+    host: "{{ glpi_db_app_access_host | default('%') }}"
     priv: "{{ glpi_db_name }}.*:ALL"
     state: present
     login_user: root

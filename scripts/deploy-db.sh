@@ -11,6 +11,7 @@ SECRET_FILE="$RUNTIME_DIR/db.secrets.yml"
 
 ensure_directory "$RUNTIME_DIR"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook
+export_runtime_inventory_if_present "$ENVIRONMENT"
 
 db_name="$(read_required_value "GLPI database name" "MariaDB must create or target the application schema." "/root/.glpi-secrets/db-runtime.yml")"
 db_user="$(read_required_value "GLPI database username" "The application needs a dedicated database user." "/root/.glpi-secrets/db-runtime.yml")"

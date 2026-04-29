@@ -42,6 +42,7 @@ The current implementation targets:
 - Secrets do not live in Git.
 - Guided Bash scripts collect sensitive values at runtime.
 - Runtime secrets are stored locally under `.runtime/<environment>/` and are ignored by Git.
+- Runtime inventory and non-sensitive staging overrides are stored under `.runtime/<environment>/`.
 - Environment pre-flight checks must run before implementation starts.
 - Pre-flight results must be labeled as `mandatory` or `optional`.
 - Mandatory failures must block execution unless the user explicitly authorizes continuation.
@@ -105,6 +106,8 @@ docs/
 - Firewall is enabled locally.
 - PHP session cookies are hardened.
 - Database access is intended only from application hosts.
+- Staging supports `none`, `self_signed`, and `provided` TLS modes.
+- Valid certificate replacement must be handled by a script-driven workflow.
 
 ## Operational gaps that still need real environment data
 
@@ -121,6 +124,8 @@ docs/
 ## Validation checklist
 
 - environment pre-flight checks
+- runtime inventory generation
+- TLS mode selection and certificate path validation
 - `ansible-inventory --list`
 - `ansible-playbook --syntax-check site.yml`
 - `nginx -t`

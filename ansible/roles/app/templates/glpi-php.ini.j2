@@ -2,7 +2,7 @@ memory_limit = {{ glpi_memory_limit }}
 max_execution_time = {{ glpi_max_execution_time }}
 upload_max_filesize = {{ glpi_upload_max_filesize }}
 post_max_size = {{ glpi_post_max_size }}
-session.cookie_secure = {{ 'On' if glpi_use_tls else 'Off' }}
+session.cookie_secure = {{ 'On' if glpi_tls_mode != 'none' else 'Off' }}
 session.cookie_httponly = On
 session.cookie_samesite = Lax
 opcache.enable = 1

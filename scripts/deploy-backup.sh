@@ -7,5 +7,6 @@ source "$SCRIPT_ROOT/lib/common.sh"
 
 ENVIRONMENT="${1:-staging}"
 run_preflight_checks "$ENVIRONMENT" git ansible-playbook
+export_runtime_inventory_if_present "$ENVIRONMENT"
 write_step "Deploying backup role for $ENVIRONMENT"
 invoke_ansible "$ENVIRONMENT" "backup"

@@ -1,3 +1,35 @@
+{% if glpi_tls_mode == 'none' %}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ glpi_domain }};
+    root {{ glpi_install_dir }}/public;
+
+    client_max_body_size {{ glpi_upload_max_filesize }};
+    index index.php;
+
+    location / {
+        try_files $uri /index.php$is_args$args;
+    }
+
+    location ~ ^/index\.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{{ glpi_php_fpm_socket }};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+
+    location ~ \.php$ {
+        return 404;
+    }
+
+    location ~* ^/(config|files|marketplace|plugins|src|tests|vendor)/ {
+        deny all;
+    }
+
+    access_log {{ glpi_log_dir }}/nginx-access.log;
+    error_log {{ glpi_log_dir }}/nginx-error.log warn;
+}
+{% else %}
 server {
     listen 80;
     listen [::]:80;
@@ -41,3 +73,4 @@ server {
     access_log {{ glpi_log_dir }}/nginx-access.log;
     error_log {{ glpi_log_dir }}/nginx-error.log warn;
 }
+{% endif %}

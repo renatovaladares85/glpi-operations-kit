@@ -48,6 +48,73 @@ read_required_value() {
   done
 }
 
+read_choice() {
+  local prompt="$1"
+  local reason="$2"
+  local target_path="$3"
+  shift 3
+  local -a choices=("$@")
+  local value=""
+
+  while true; do
+    echo "$prompt"
+    echo "  Required because: $reason"
+    echo "  Will be written to: $target_path"
+    echo "  Allowed values: ${choices[*]}"
+    read -r value
+    for choice in "${choices[@]}"; do
+      if [[ "$value" == "$choice" ]]; then
+        printf '%s' "$value"
+        return 0
+      fi
+    done
+    echo "Invalid value '$value'. Choose one of: ${choices[*]}" >&2
+  done
+}
+
+validate_hostname_or_ip() {
+  local value="$1"
+  if [[ "$value" =~ ^([a-zA-Z0-9][-a-zA-Z0-9]*\.)*[a-zA-Z0-9][-a-zA-Z0-9]*$ ]]; then
+    return 0
+  fi
+  if [[ "$value" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    return 0
+  fi
+  return 1
+}
+
+read_hostname_or_ip() {
+  local prompt="$1"
+  local reason="$2"
+  local target_path="$3"
+  local value=""
+
+  while true; do
+    value="$(read_required_value "$prompt" "$reason" "$target_path")"
+    if validate_hostname_or_ip "$value"; then
+      printf '%s' "$value"
+      return 0
+    fi
+    echo "Value '$value' is not a valid hostname or IPv4 address." >&2
+  done
+}
+
+read_existing_file() {
+  local prompt="$1"
+  local reason="$2"
+  local target_path="$3"
+  local value=""
+
+  while true; do
+    value="$(read_required_value "$prompt" "$reason" "$target_path")"
+    if [[ -f "$value" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+    echo "File '$value' was not found." >&2
+  done
+}
+
 save_yaml_map() {
   local output_path="$1"
   shift
@@ -64,13 +131,85 @@ save_yaml_map() {
   } >"$output_path"
 }
 
+write_runtime_inventory() {
+  local output_path="$1"
+  local environment="$2"
+  local ssh_user="$3"
+  local ssh_key="$4"
+  local app_host="$5"
+  local db_host="$6"
+
+  cat >"$output_path" <<EOF
+---
+all:
+  vars:
+    ansible_user: ${ssh_user}
+    ansible_ssh_private_key_file: ${ssh_key}
+    environment_name: ${environment}
+  children:
+    glpi_app:
+      hosts:
+        stg-app:
+          ansible_host: ${app_host}
+    glpi_db:
+      hosts:
+        stg-db:
+          ansible_host: ${db_host}
+EOF
+}
+
+export_runtime_inventory_if_present() {
+  local environment="$1"
+  local runtime_inventory="$SCRIPT_ROOT/../.runtime/$environment/inventory.runtime.yml"
+  if [[ -f "$runtime_inventory" ]]; then
+    export ANSIBLE_RUNTIME_INVENTORY="$runtime_inventory"
+  fi
+}
+
+require_runtime_file() {
+  local path="$1"
+  local description="$2"
+  if [[ ! -f "$path" ]]; then
+    echo "Missing ${description}: $path" >&2
+    exit 1
+  fi
+}
+
+write_app_runtime() {
+  local output_path="$1"
+  local glpi_version="$2"
+  local app_host="$3"
+  local tls_mode="$4"
+  local tls_common_name="$5"
+  local local_cert_path="$6"
+  local local_key_path="$7"
+  local use_tls="false"
+
+  if [[ "$tls_mode" != "none" ]]; then
+    use_tls="true"
+  fi
+
+  cat >"$output_path" <<EOF
+---
+glpi_version: "${glpi_version}"
+glpi_download_url: "https://github.com/glpi-project/glpi/releases/download/${glpi_version}/glpi-${glpi_version}.tgz"
+glpi_release_dir: "/usr/share/glpi-${glpi_version}"
+glpi_domain: "${app_host}"
+glpi_use_tls: ${use_tls}
+glpi_tls_mode: "${tls_mode}"
+glpi_tls_common_name: "${tls_common_name}"
+glpi_tls_provided_local_cert_path: "${local_cert_path}"
+glpi_tls_provided_local_key_path: "${local_key_path}"
+EOF
+}
+
 invoke_ansible() {
   local environment="$1"
   local tags="$2"
   shift 2
 
   assert_command "ansible-playbook"
-  local inventory="$SCRIPT_ROOT/../ansible/inventories/$environment/hosts.yml"
+  local inventory="${ANSIBLE_RUNTIME_INVENTORY:-$SCRIPT_ROOT/../ansible/inventories/$environment/hosts.yml}"
   local playbook="$SCRIPT_ROOT/../ansible/site.yml"
   local args=("-i" "$inventory" "$playbook")
 

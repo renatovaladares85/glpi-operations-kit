@@ -61,6 +61,7 @@ Available scripts:
 - `scripts/deploy-monitoring.sh`
 - `scripts/deploy-backup.sh`
 - `scripts/deploy-staging.sh`
+- `scripts/manage-tls.sh`
 
 ## Quick usage
 
@@ -70,7 +71,20 @@ Available scripts:
 ./scripts/deploy-staging.sh apply app
 ./scripts/deploy-staging.sh apply monitoring
 ./scripts/deploy-staging.sh apply backup
+./scripts/manage-tls.sh self-signed staging
+./scripts/manage-tls.sh install-provided staging
 ```
+
+## TLS modes
+
+Supported staging TLS modes:
+
+- `none`
+- `self_signed`
+- `provided`
+
+The first staging deployment may run over plain HTTP.
+You can later switch to a self-signed certificate or a valid provided certificate with `scripts/manage-tls.sh`.
 
 ## Expected validation
 

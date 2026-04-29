@@ -11,9 +11,13 @@ glpi_log_dir: /var/log/glpi
 glpi_data_owner: www-data
 glpi_data_group: www-data
 glpi_domain: servicedesk-hml.soenergy.com
-glpi_use_tls: true
+glpi_use_tls: false
+glpi_tls_mode: none
 glpi_tls_certificate_path: /etc/ssl/certs/glpi-staging.crt
 glpi_tls_certificate_key_path: /etc/ssl/private/glpi-staging.key
+glpi_tls_common_name: servicedesk-hml.soenergy.com
+glpi_tls_provided_local_cert_path: ""
+glpi_tls_provided_local_key_path: ""
 glpi_php_fpm_service: php8.3-fpm
 glpi_php_fpm_socket: /run/php/php8.3-fpm.sock
 glpi_app_packages:
@@ -36,6 +40,7 @@ glpi_app_packages:
   - tar
   - xz-utils
   - curl
+  - openssl
 glpi_upload_max_filesize: 32M
 glpi_post_max_size: 32M
 glpi_memory_limit: 512M
@@ -67,3 +72,4 @@ mariadb_long_query_time: 2
 timezone_name: America/Sao_Paulo
 db_allowed_source_hosts:
   - 192.0.2.10
+glpi_db_app_access_host: 192.0.2.10
