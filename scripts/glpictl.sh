@@ -23,82 +23,25 @@ fi
 
 RUNTIME_DIR="$(runtime_env_dir "$ENVIRONMENT")"
 INVENTORY_RUNTIME_PATH="$(runtime_inventory_path "$ENVIRONMENT")"
-APP_RUNTIME_PATH="$(runtime_app_path "$ENVIRONMENT")"
-DB_SECRET_PATH="$(runtime_db_secret_path "$ENVIRONMENT")"
-MONITORING_SECRET_PATH="$(runtime_monitoring_secret_path "$ENVIRONMENT")"
+PUBLIC_RUNTIME_PATH="$(runtime_public_path "$ENVIRONMENT")"
+SECRET_PATH="$(runtime_secret_path "$ENVIRONMENT")"
+CONFIG_PATH="$(config_file_path "$ENVIRONMENT")"
 PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
-
-collect_runtime_inputs() {
-  local app_host db_host ssh_user ssh_key glpi_version tls_mode tls_common_name local_cert_path local_key_path
-  local db_name db_user db_password db_root_password exporter_user exporter_password
-
-  app_host="$(read_hostname_or_ip "${ENVIRONMENT^} app server IP or hostname" "Runtime inventory must target the real application host." "$INVENTORY_RUNTIME_PATH")"
-  db_host="$(read_hostname_or_ip "${ENVIRONMENT^} database server IP or hostname" "Runtime inventory must target the real database host." "$INVENTORY_RUNTIME_PATH")"
-  ssh_user="$(read_required_value "SSH username" "Ansible needs a real SSH user for remote access." "$INVENTORY_RUNTIME_PATH")"
-  ssh_key="$(read_existing_private_key_file "SSH private key path" "Ansible must use a valid private key file for authentication." "$INVENTORY_RUNTIME_PATH")"
-  glpi_version="$(read_required_value "Final GLPI version" "Deployment must use an explicit GLPI release version." "$APP_RUNTIME_PATH")"
-  tls_mode="$(read_choice "TLS mode" "A clear HTTP/TLS behavior is required." "$APP_RUNTIME_PATH" none self_signed provided)"
-  tls_common_name="$app_host"
-  local_cert_path=""
-  local_key_path=""
-
-  if [[ "$tls_mode" == "provided" ]]; then
-    local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$APP_RUNTIME_PATH")"
-    local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$APP_RUNTIME_PATH")"
-  fi
-
-  db_name="$(read_required_value "GLPI database name" "MariaDB must create or target the application schema." "$DB_SECRET_PATH")"
-  db_user="$(read_required_value "GLPI database username" "The application needs a dedicated database user." "$DB_SECRET_PATH")"
-  db_password="$(read_required_value "GLPI database password" "Dedicated database user requires password." "$DB_SECRET_PATH" true)"
-  db_root_password="$(read_required_value "MariaDB root password" "Ansible must secure MariaDB and create GLPI schema." "$DB_SECRET_PATH" true)"
-  exporter_user="$(read_required_value "mysqld_exporter username" "MariaDB exporter needs a dedicated least-privilege account." "$MONITORING_SECRET_PATH")"
-  exporter_password="$(read_required_value "mysqld_exporter password" "MariaDB exporter account must authenticate locally." "$MONITORING_SECRET_PATH" true)"
-
-  if [[ "$ENVIRONMENT" == "staging" ]]; then
-    write_runtime_inventory "$INVENTORY_RUNTIME_PATH" "$ENVIRONMENT" "$ssh_user" "$ssh_key" "$app_host" "$db_host"
-  else
-    cat >"$INVENTORY_RUNTIME_PATH" <<EOF
----
-all:
-  vars:
-    ansible_user: ${ssh_user}
-    ansible_ssh_private_key_file: ${ssh_key}
-    environment_name: ${ENVIRONMENT}
-  children:
-    glpi_app:
-      hosts:
-        prd-app:
-          ansible_host: ${app_host}
-    glpi_db:
-      hosts:
-        prd-db:
-          ansible_host: ${db_host}
-EOF
-  fi
-
-  write_app_runtime "$APP_RUNTIME_PATH" "$glpi_version" "$app_host" "$tls_mode" "$tls_common_name" "$local_cert_path" "$local_key_path"
-  save_yaml_map "$DB_SECRET_PATH" \
-    glpi_db_name "$db_name" \
-    glpi_db_user "$db_user" \
-    glpi_db_password "$db_password" \
-    glpi_db_root_password "$db_root_password" \
-    glpi_db_app_access_host "$app_host"
-  save_yaml_map "$MONITORING_SECRET_PATH" \
-    mysqld_exporter_user "$exporter_user" \
-    mysqld_exporter_password "$exporter_password" \
-    glpi_db_root_password "$db_root_password"
-}
+run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
 
 ensure_runtime_inputs_if_missing() {
-  if [[ -f "$INVENTORY_RUNTIME_PATH" && -f "$APP_RUNTIME_PATH" && -f "$DB_SECRET_PATH" && -f "$MONITORING_SECRET_PATH" ]]; then
-    return 0
+  require_runtime_file "$CONFIG_PATH" "product configuration file"
+  materialize_runtime_from_config "$ENVIRONMENT"
+  ensure_secret_keys "$ENVIRONMENT"
+  local ssh_key_path
+  ssh_key_path="$(read_product_config_value "$ENVIRONMENT" "network.ssh.private_key_path" || true)"
+  if [[ -n "${ssh_key_path// }" ]]; then
+    ssh_key_path="$(expand_home_path "$ssh_key_path")"
+    enforce_ssh_private_key_permissions "$ssh_key_path"
   fi
-  write_step "Runtime files missing for '$ENVIRONMENT'. Collecting inputs now."
-  collect_runtime_inputs
 }
 
 run_deploy() {
@@ -121,20 +64,20 @@ run_deploy() {
   fi
 
   local tags=""
-  local extra_var_files=("$APP_RUNTIME_PATH")
+  local extra_var_files=("$PUBLIC_RUNTIME_PATH" "$SECRET_PATH")
   case "$target" in
     base) tags="base" ;;
     app) tags="app" ;;
-    db) tags="db"; extra_var_files+=("$DB_SECRET_PATH") ;;
-    monitoring) tags="monitoring"; extra_var_files+=("$MONITORING_SECRET_PATH" "$DB_SECRET_PATH") ;;
+    db) tags="db" ;;
+    monitoring) tags="monitoring" ;;
     backup) tags="backup" ;;
-    all) tags="base,app,db,monitoring,backup"; extra_var_files+=("$DB_SECRET_PATH" "$MONITORING_SECRET_PATH") ;;
+    all) tags="base,app,db,monitoring,backup" ;;
     *) echo "Unsupported deploy target: $target" >&2; exit 1 ;;
   esac
 
   case "$mode" in
     apply) invoke_ansible "$ENVIRONMENT" "$tags" "${extra_var_files[@]}" ;;
-    post-check) invoke_ansible "$ENVIRONMENT" "app,db" "$APP_RUNTIME_PATH" "$DB_SECRET_PATH" ;;
+    post-check) invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH" ;;
     *) echo "Unsupported deploy action: $mode (expected check|apply|post-check)" >&2; exit 1 ;;
   esac
 }
@@ -151,8 +94,8 @@ run_tls() {
   local tls_action="$ACTION"
   local domain glpi_version local_cert_path local_key_path tls_mode
   ensure_runtime_inputs_if_missing
-  domain="$(awk -F'"' '/glpi_domain:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
-  glpi_version="$(awk -F'"' '/glpi_version:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
+  domain="$(awk -F'"' '/glpi_domain:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+  glpi_version="$(awk -F'"' '/glpi_version:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
   local_cert_path=""
   local_key_path=""
   tls_mode="none"
@@ -161,22 +104,26 @@ run_tls() {
     self-signed) tls_mode="self_signed" ;;
     install-provided)
       tls_mode="provided"
-      local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$APP_RUNTIME_PATH")"
-      local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$APP_RUNTIME_PATH")"
+      local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$PUBLIC_RUNTIME_PATH")"
+      local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$PUBLIC_RUNTIME_PATH")"
       ;;
     reload)
-      tls_mode="$(awk -F'"' '/glpi_tls_mode:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
-      local_cert_path="$(awk -F'"' '/glpi_tls_provided_local_cert_path:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
-      local_key_path="$(awk -F'"' '/glpi_tls_provided_local_key_path:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
+      tls_mode="$(awk -F'"' '/glpi_tls_mode:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+      local_cert_path="$(awk -F'"' '/glpi_tls_provided_local_cert_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+      local_key_path="$(awk -F'"' '/glpi_tls_provided_local_key_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
       ;;
     *)
       echo "Unsupported TLS action: $tls_action (expected disable|self-signed|install-provided|reload)" >&2
       exit 1
       ;;
   esac
-  write_app_runtime "$APP_RUNTIME_PATH" "$glpi_version" "$domain" "$tls_mode" "$domain" "$local_cert_path" "$local_key_path"
+  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" "$tls_mode"
+  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_use_tls" "$([[ "$tls_mode" == "none" ]] && echo false || echo true)"
+  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_common_name" "$domain"
+  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" "$local_cert_path"
+  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  invoke_ansible "$ENVIRONMENT" "app" "$APP_RUNTIME_PATH"
+  invoke_ansible "$ENVIRONMENT" "app" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH"
   echo "TLS action '$tls_action' completed."
 }
 

@@ -10,12 +10,12 @@ glpi_plugin_dir: /var/lib/glpi/plugins
 glpi_log_dir: /var/log/glpi
 glpi_data_owner: www-data
 glpi_data_group: www-data
-glpi_domain: servicedesk.soenergy.com
+glpi_domain: glpi.example.internal
 glpi_use_tls: true
 glpi_tls_mode: provided
 glpi_tls_certificate_path: /etc/ssl/certs/glpi-production.crt
 glpi_tls_certificate_key_path: /etc/ssl/private/glpi-production.key
-glpi_tls_common_name: servicedesk.soenergy.com
+glpi_tls_common_name: glpi.example.internal
 glpi_tls_provided_local_cert_path: ""
 glpi_tls_provided_local_key_path: ""
 glpi_php_fpm_service: php8.3-fpm
@@ -40,6 +40,7 @@ glpi_app_packages:
   - tar
   - xz-utils
   - curl
+  - openssl
 glpi_upload_max_filesize: 64M
 glpi_post_max_size: 64M
 glpi_memory_limit: 1024M
@@ -56,6 +57,7 @@ glpi_backup_base_dir: /var/backups/glpi
 glpi_backup_retention_days: 30
 node_exporter_enabled: true
 mysqld_exporter_enabled: true
+mysqld_exporter_user: issachar_monitor
 mariadb_bind_address: 0.0.0.0
 mariadb_port: 3306
 mariadb_version_packages:

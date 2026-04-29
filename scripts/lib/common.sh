@@ -23,6 +23,15 @@ ensure_directory() {
   mkdir -p "$path"
 }
 
+expand_home_path() {
+  local path="$1"
+  if [[ "$path" == "~/"* ]]; then
+    printf '%s\n' "${HOME}${path#\~}"
+    return 0
+  fi
+  printf '%s\n' "$path"
+}
+
 current_uid() {
   id -u
 }
@@ -559,19 +568,172 @@ runtime_inventory_path() {
   echo "$(runtime_env_dir "$environment")/inventory.runtime.yml"
 }
 
+runtime_public_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/public.runtime.yml"
+}
+
+runtime_secret_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/secrets.yml"
+}
+
 runtime_app_path() {
   local environment="$1"
   echo "$(runtime_env_dir "$environment")/app.runtime.yml"
 }
 
-runtime_db_secret_path() {
+config_file_path() {
   local environment="$1"
-  echo "$(runtime_env_dir "$environment")/db.secrets.yml"
+  echo "$SCRIPT_ROOT/../config/$environment.yml"
 }
 
-runtime_monitoring_secret_path() {
+config_example_path() {
+  echo "$SCRIPT_ROOT/../config/product.example.yml"
+}
+
+require_python_yaml_support() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to parse product configuration files." >&2
+    return 1
+  fi
+  if ! python3 -c "import yaml" >/dev/null 2>&1; then
+    echo "python3-yaml support is required. Install PyYAML or the Ubuntu python3-yaml package." >&2
+    return 1
+  fi
+}
+
+render_product_config() {
   local environment="$1"
-  echo "$(runtime_env_dir "$environment")/monitoring.secrets.yml"
+  local mode="$2"
+  local config_path
+  config_path="$(config_file_path "$environment")"
+  require_runtime_file "$config_path" "product configuration file"
+  require_python_yaml_support
+  python3 "$SCRIPT_ROOT/render_product_config.py" --config "$config_path" --mode "$mode"
+}
+
+read_product_config_value() {
+  local environment="$1"
+  local dotted_key="$2"
+  local config_path
+  config_path="$(config_file_path "$environment")"
+  require_runtime_file "$config_path" "product configuration file"
+  require_python_yaml_support
+  python3 - "$config_path" "$dotted_key" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+current = data
+for part in key.split("."):
+    if not isinstance(current, dict) or part not in current:
+        print("")
+        sys.exit(0)
+    current = current[part]
+if isinstance(current, bool):
+    print("true" if current else "false")
+elif current is None:
+    print("")
+else:
+    print(current)
+PY
+}
+
+materialize_runtime_from_config() {
+  local environment="$1"
+  local public_path
+  local inventory_path
+  public_path="$(runtime_public_path "$environment")"
+  inventory_path="$(runtime_inventory_path "$environment")"
+  ensure_runtime_foundation "$environment"
+  render_product_config "$environment" public-runtime >"$public_path"
+  chmod 600 "$public_path"
+  render_product_config "$environment" inventory >"$inventory_path"
+  chmod 600 "$inventory_path"
+  cp "$public_path" "$(runtime_app_path "$environment")"
+}
+
+read_yaml_top_level_value() {
+  local file_path="$1"
+  local key_name="$2"
+  if [[ ! -f "$file_path" ]]; then
+    return 1
+  fi
+  require_python_yaml_support
+  python3 - "$file_path" "$key_name" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+value = data.get(key, "")
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif value is None:
+    print("")
+else:
+    print(value)
+PY
+}
+
+update_yaml_top_level_value() {
+  local file_path="$1"
+  local key_name="$2"
+  local value="$3"
+  require_runtime_file "$file_path" "yaml file"
+  require_python_yaml_support
+  python3 - "$file_path" "$key_name" "$value" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+if value == "true":
+    parsed = True
+elif value == "false":
+    parsed = False
+else:
+    parsed = value
+data[key] = parsed
+path.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False), encoding="utf-8")
+PY
+  chmod 600 "$file_path"
+}
+
+ensure_secret_keys() {
+  local environment="$1"
+  local secret_path
+  local glpi_db_password glpi_db_root_password mysqld_exporter_password
+  secret_path="$(runtime_secret_path "$environment")"
+  ensure_runtime_foundation "$environment"
+
+  glpi_db_password="$(read_yaml_top_level_value "$secret_path" "glpi_db_password" || true)"
+  glpi_db_root_password="$(read_yaml_top_level_value "$secret_path" "glpi_db_root_password" || true)"
+  mysqld_exporter_password="$(read_yaml_top_level_value "$secret_path" "mysqld_exporter_password" || true)"
+
+  if [[ -z "${glpi_db_password// }" ]]; then
+    glpi_db_password="$(read_required_value "GLPI database password" "The GLPI database user requires a secret password." "$secret_path" true)"
+  fi
+  if [[ -z "${glpi_db_root_password// }" ]]; then
+    glpi_db_root_password="$(read_required_value "MariaDB root password" "MariaDB hardening and schema creation require the root password." "$secret_path" true)"
+  fi
+  if [[ -z "${mysqld_exporter_password// }" ]]; then
+    mysqld_exporter_password="$(read_required_value "mysqld_exporter password" "The mysqld exporter account requires a secret password." "$secret_path" true)"
+  fi
+
+  save_yaml_map "$secret_path" \
+    glpi_db_password "$glpi_db_password" \
+    glpi_db_root_password "$glpi_db_root_password" \
+    mysqld_exporter_password "$mysqld_exporter_password"
 }
 
 require_runtime_file() {
@@ -644,6 +806,7 @@ package_for_command() {
   case "$command_name" in
     ansible-playbook|ansible-inventory) echo "ansible" ;;
     git) echo "git" ;;
+    python3) echo "python3" ;;
     ssh) echo "openssh-client" ;;
     bash) echo "bash" ;;
     *) echo "" ;;

@@ -17,19 +17,22 @@ fi
 
 RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
-APP_RUNTIME_PATH="$RUNTIME_DIR/app.runtime.yml"
-DB_SECRET_PATH="$RUNTIME_DIR/db.secrets.yml"
+PUBLIC_RUNTIME_PATH="$RUNTIME_DIR/public.runtime.yml"
+SECRET_PATH="$RUNTIME_DIR/secrets.yml"
 PROTECTED_USERS=("root" "www-data" "mysql")
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+require_runtime_file "$(config_file_path "$ENVIRONMENT")" "product configuration file"
+materialize_runtime_from_config "$ENVIRONMENT"
+ensure_secret_keys "$ENVIRONMENT"
 require_runtime_file "$INVENTORY_RUNTIME_PATH" "runtime inventory"
 export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
 case "$DOMAIN" in
   cert|audit)
-    require_runtime_file "$APP_RUNTIME_PATH" "app runtime data"
+    require_runtime_file "$PUBLIC_RUNTIME_PATH" "public runtime data"
     ;;
 esac
 
@@ -61,8 +64,8 @@ run_inline_playbook() {
 }
 
 read_db_root_password() {
-  require_runtime_file "$DB_SECRET_PATH" "database secrets file"
-  awk -F"'" '/^glpi_db_root_password:/ {print $2}' "$DB_SECRET_PATH"
+  require_runtime_file "$SECRET_PATH" "runtime secret file"
+  awk -F"'" '/^glpi_db_root_password:/ {print $2}' "$SECRET_PATH"
 }
 
 users_add_os() {
@@ -259,7 +262,7 @@ users_glpi_manual() {
 
 cert_check() {
   local cert_path days
-  cert_path="$(awk -F'"' '/glpi_tls_certificate_path:/ {print $2}' "$APP_RUNTIME_PATH" | head -n1)"
+  cert_path="$(awk -F'"' '/glpi_tls_certificate_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
   if [[ -z "$cert_path" ]]; then
     cert_path="/etc/ssl/certs/glpi-staging.crt"
   fi
@@ -291,7 +294,7 @@ cert_renew() {
 audit_check() {
   write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "audit-check" "started" "running operational audit checks"
   ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
-  invoke_ansible "$ENVIRONMENT" "app,db" "$APP_RUNTIME_PATH" "$DB_SECRET_PATH"
+  invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH"
   write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "audit-check" "completed" "audit checks completed"
 }
 
