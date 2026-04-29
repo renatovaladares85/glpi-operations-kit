@@ -7,6 +7,40 @@
 - Use least privilege for SSH, database, and filesystem access.
 - Restrict database access to authorized hosts only.
 - Preserve TLS and restricted permissions.
+- Never use common, obvious, or easily guessable usernames, passwords, or identifiers.
+- When generating or suggesting names for users, service accounts, aliases, or internal labels, use biblical-context naming by default.
+- Biblical context must not reduce secret strength: passwords, tokens, and keys must remain high-entropy and non-predictable.
+
+## Naming and credential generation
+
+- Allowed for names and identifiers:
+  - biblical person references
+  - biblical place references
+  - biblical-theme aliases that are not generic defaults
+- Not allowed for secrets:
+  - plain biblical words such as `david`, `genesis`, or `jerusalem`
+  - predictable combinations such as `Moses123`, `Psalm2026`, or `Solomon!`
+  - reused naming patterns that reveal role and secret theme together
+- Required for secrets:
+  - strong randomness
+  - sufficient length
+  - no recognizable default pattern
+  - no direct reuse of the visible account name
+
+## Examples
+
+- Good account names:
+  - `nehemiah_ops`
+  - `bezalel_backup`
+  - `issachar_monitor`
+- Bad account names:
+  - `admin`
+  - `glpi`
+  - `mysqluser`
+- Good secret strategy:
+  - biblical-context account name plus a randomly generated secret
+- Bad secret strategy:
+  - a biblical word with a year or symbol appended
 
 ## Sensitive GLPI layout
 

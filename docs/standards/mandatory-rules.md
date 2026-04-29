@@ -11,6 +11,9 @@ These rules must not be broken by agents.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.
 - Continue after a mandatory pre-flight failure only with explicit user approval.
 - Never version secrets.
+- Never use common or easily guessable usernames, passwords, or identifiers.
+- Use biblical-context naming for generated or suggested identifiers when applicable.
+- Never use plain biblical words or predictable biblical patterns as secrets.
 - Do not duplicate rules already documented in another thematic markdown file.
 - Create commits only when a validated functional block is complete.
 - Use `Conventional Commits`.

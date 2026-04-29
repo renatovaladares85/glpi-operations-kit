@@ -19,6 +19,8 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 - Store only under `.runtime/<environment>/`
 - Never version `.runtime/`
 - Never echo secrets to the terminal
+- If a script ever suggests or generates account names, prefer biblical-context naming.
+- If a script ever suggests or generates secrets, use high-entropy random values and never plain biblical words or predictable biblical patterns.
 
 ## Standard flow
 
@@ -57,6 +59,12 @@ When a critical value is missing, the script must explain:
 - which value is missing;
 - why it is needed;
 - which file or component will use it.
+
+When a script proposes default names or credentials, it must explain:
+
+- whether the value is an identifier or a secret;
+- that identifiers should use biblical context when appropriate;
+- that secrets must remain random and must not be simple biblical words.
 
 When a mandatory pre-flight item fails, the script must explain:
 

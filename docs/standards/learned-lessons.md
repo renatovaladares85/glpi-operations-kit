@@ -55,3 +55,23 @@ If a command with complex quoting can be simplified, document and use the shorte
 ### When to consult
 
 When validating scripts or calling one tool from another shell.
+
+### Problem
+
+Generated names or credentials can drift toward common, obvious, or guessable defaults when there is no naming rule.
+
+### Cause
+
+Without an explicit convention, helpers and operators tend to fall back to generic names such as `admin`, `glpi`, or simple themed words.
+
+### Applied fix
+
+Adopt biblical-context naming for visible identifiers and require high-entropy randomness for all secrets.
+
+### Prevention rule
+
+Use biblical context for usernames, service accounts, aliases, and labels, but never use plain biblical words or predictable biblical patterns as passwords, tokens, or keys.
+
+### When to consult
+
+When creating users, service accounts, aliases, labels, or secrets.

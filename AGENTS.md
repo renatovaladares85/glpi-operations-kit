@@ -70,6 +70,9 @@ Before proposing, analyzing, or executing any change, read in this order:
 - If a mandatory pre-flight item cannot be fixed, stop and do not continue unless the user explicitly authorizes continuation.
 - Never version secrets.
 - Sensitive values must be requested at runtime when applicable.
+- When generating or suggesting usernames, service accounts, aliases, host labels, or similar identifiers, prefer biblical-context naming.
+- Never use common, obvious, or easily guessable usernames, passwords, or identifiers.
+- Biblical context may guide naming, but secrets must still use high entropy and must never be simple biblical words or predictable patterns.
 - Keep sensitive directories outside the web root.
 - Do not rewrite documentation that is already consolidated in another thematic markdown file.
 - Always minimize token usage, calls, and unnecessary file reads.
