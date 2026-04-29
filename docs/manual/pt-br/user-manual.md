@@ -31,36 +31,50 @@ bash scripts/bootstrap-permissions.sh
 1. Precheck e coleta:
 
 ```bash
-./scripts/deploy-staging.sh check
+./scripts/glpictl.sh staging deploy check all
 ```
 
 2. Deploy por etapa:
 
 ```bash
-./scripts/deploy-staging.sh apply db
-./scripts/deploy-staging.sh apply app
-./scripts/deploy-staging.sh apply monitoring
-./scripts/deploy-staging.sh apply backup
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
 ```
+
+### 3.1 Certificacao de staging e gate para producao (obrigatorio)
+
+Antes de qualquer deploy em producao:
+
+```bash
+./scripts/glpictl.sh staging certify run
+```
+
+Comportamento esperado:
+
+- gera evidencias em `.runtime/staging/evidence/<timestamp>/`
+- grava aprovacao em `.runtime/promotion/staging-certified.yml`
+- bloqueia promocao para producao se algum check obrigatorio falhar
 
 ## 4. Operacoes Day-2 (pos-implementacao)
 
 Usuarios:
 
-- `bash scripts/ops-maintenance.sh users staging add os`
-- `bash scripts/ops-maintenance.sh users staging disable db`
-- `bash scripts/ops-maintenance.sh users staging remove glpi`
+- `./scripts/glpictl.sh staging ops users add`
+- `./scripts/glpictl.sh staging ops users disable`
+- `./scripts/glpictl.sh staging ops users remove`
 
 Certificados:
 
-- `bash scripts/ops-maintenance.sh cert staging check`
-- `bash scripts/ops-maintenance.sh cert staging renew`
-- `bash scripts/ops-maintenance.sh cert staging apply`
+- `./scripts/glpictl.sh staging ops cert check`
+- `./scripts/glpictl.sh staging ops cert renew`
+- `./scripts/glpictl.sh staging ops cert apply`
 
 Auditoria e continuidade:
 
-- `bash scripts/ops-maintenance.sh audit staging check`
-- `bash scripts/ops-maintenance.sh resume staging`
+- `./scripts/glpictl.sh staging audit check`
+- `./scripts/glpictl.sh staging ops resume`
 
 Persistencia operacional:
 
@@ -71,7 +85,22 @@ Politica de certificado:
 
 - alerta quando faltarem `<= 30` dias para expirar.
 
-## 5. Referencias
+## 6. Rollout de producao (apos gate aprovado)
+
+Execute somente apos `certify-staging.sh` com sucesso:
+
+```bash
+./scripts/glpictl.sh production deploy check all
+./scripts/glpictl.sh production deploy apply db
+./scripts/glpictl.sh production deploy apply app
+./scripts/glpictl.sh production deploy apply monitoring
+./scripts/glpictl.sh production deploy apply backup
+./scripts/glpictl.sh production deploy post-check all
+```
+
+`apply` em producao e bloqueado se `.runtime/promotion/staging-certified.yml` estiver ausente ou sem status aprovado.
+
+## 7. Referencias
 
 - [Indice multilingua](../README.md)
 - [Indice de apendices PT-BR](appendices/index.md)

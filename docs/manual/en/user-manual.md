@@ -78,7 +78,7 @@ sudo -v
 
 Primary entrypoint:
 
-- `scripts/deploy-staging.sh`
+- `scripts/glpictl.sh`
 
 The script starts with pre-flight checks. If a mandatory command is missing, it prompts to install it on Ubuntu. If installation fails, it prints exact manual remediation commands and blocks execution.
 
@@ -88,43 +88,26 @@ The script starts with pre-flight checks. If a mandatory command is missing, it 
 
 ```bash
 bash scripts/bootstrap-permissions.sh
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
 ```
 
-1. Run pre-flight and runtime collection:
+### 4.3 Staging certification and production gate (mandatory)
+
+Before any production deployment, run staging certification:
 
 ```bash
-./scripts/deploy-staging.sh check
+./scripts/glpictl.sh staging certify run
 ```
 
-2. Deploy database:
+Expected behavior:
 
-```bash
-./scripts/deploy-staging.sh apply db
-```
-
-3. Deploy application:
-
-```bash
-./scripts/deploy-staging.sh apply app
-```
-
-4. Deploy monitoring:
-
-```bash
-./scripts/deploy-staging.sh apply monitoring
-```
-
-5. Deploy backup:
-
-```bash
-./scripts/deploy-staging.sh apply backup
-```
-
-Optional combined deployment:
-
-```bash
-./scripts/deploy-staging.sh apply all
-```
+- generates evidence in `.runtime/staging/evidence/<timestamp>/`
+- writes promotion gate approval in `.runtime/promotion/staging-certified.yml`
+- blocks production promotion if any mandatory check fails
 
 ### 4.2 Runtime prompts (mandatory)
 
@@ -206,7 +189,7 @@ Set both app and db host values to the same host in runtime inventory.
 Run:
 
 ```bash
-./scripts/deploy-staging.sh apply all
+./scripts/glpictl.sh staging deploy apply all
 ```
 
 ### 6.2 Dual-server mode from app host
@@ -232,10 +215,10 @@ In both directions, execution host only needs SSH + key access to the other host
 Use:
 
 ```bash
-./scripts/manage-tls.sh disable staging
-./scripts/manage-tls.sh self-signed staging
-./scripts/manage-tls.sh install-provided staging
-./scripts/manage-tls.sh reload staging
+./scripts/glpictl.sh staging tls disable
+./scripts/glpictl.sh staging tls self-signed
+./scripts/glpictl.sh staging tls install-provided
+./scripts/glpictl.sh staging tls reload
 ```
 
 `install-provided` asks for local cert/key file paths and applies app role safely.
@@ -255,16 +238,16 @@ Minimum acceptance checks:
 
 ## 9. Day-2 Operations (Post-Implementation)
 
-Use `scripts/ops-maintenance.sh` for operational lifecycle actions:
+Use `scripts/glpictl.sh` for operational lifecycle actions:
 
-- `bash scripts/ops-maintenance.sh users staging add os`
-- `bash scripts/ops-maintenance.sh users staging disable db`
-- `bash scripts/ops-maintenance.sh users staging remove glpi`
-- `bash scripts/ops-maintenance.sh cert staging check`
-- `bash scripts/ops-maintenance.sh cert staging renew`
-- `bash scripts/ops-maintenance.sh cert staging apply`
-- `bash scripts/ops-maintenance.sh audit staging check`
-- `bash scripts/ops-maintenance.sh resume staging`
+- `./scripts/glpictl.sh staging ops users add`
+- `./scripts/glpictl.sh staging ops users disable`
+- `./scripts/glpictl.sh staging ops users remove`
+- `./scripts/glpictl.sh staging ops cert check`
+- `./scripts/glpictl.sh staging ops cert renew`
+- `./scripts/glpictl.sh staging ops cert apply`
+- `./scripts/glpictl.sh staging audit check`
+- `./scripts/glpictl.sh staging ops resume`
 
 Operational persistence:
 
@@ -275,7 +258,22 @@ Certificate policy:
 
 - warning threshold: `<= 30` days to expiry.
 
-## 10. Troubleshooting and Recovery
+## 10. Production rollout (after approved staging gate)
+
+Run only after successful `certify-staging.sh`:
+
+```bash
+./scripts/glpictl.sh production deploy check all
+./scripts/glpictl.sh production deploy apply db
+./scripts/glpictl.sh production deploy apply app
+./scripts/glpictl.sh production deploy apply monitoring
+./scripts/glpictl.sh production deploy apply backup
+./scripts/glpictl.sh production deploy post-check all
+```
+
+Production `apply` is blocked if `.runtime/promotion/staging-certified.yml` is missing or not approved.
+
+## 11. Troubleshooting and Recovery
 
 Use the troubleshooting appendix for:
 
@@ -285,7 +283,7 @@ Use the troubleshooting appendix for:
 - Nginx/PHP-FPM/MariaDB validation failures
 - partial deployment rerun sequence
 
-## 11. Related Documentation
+## 12. Related Documentation
 
 - [Multilingual index](../README.md)
 - [Appendices index](appendices/index.md)

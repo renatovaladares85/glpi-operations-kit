@@ -41,13 +41,19 @@ The current implementation targets:
 - All declarative state lives in Git.
 - Secrets do not live in Git.
 - Guided Bash scripts collect sensitive values at runtime.
+- Central execution CLI: `scripts/glpictl.sh <environment> <domain> <action> [target] [scope]`.
+- Specific scripts are supported as wrappers and follow the same central execution path.
 - Runtime secrets are stored locally under `.runtime/<environment>/` and are ignored by Git.
 - Runtime inventory and non-sensitive staging overrides are stored under `.runtime/<environment>/`.
+- Runtime state is split by purpose:
+  - config files under `.runtime/<environment>/`
+  - operation state/log/evidence under `.runtime/<environment>/{state,logs,evidence}`
 - Environment pre-flight checks must run before implementation starts.
 - Pre-flight results must be labeled as `mandatory` or `optional`.
 - Mandatory failures must block execution unless the user explicitly authorizes continuation.
 - Missing critical information must stop execution with a clear explanation.
 - Ansible applies the server state after the guided script prepares the context.
+- Production execution is blocked by a formal promotion gate generated from staging certification evidence.
 
 ## Current repository structure
 
@@ -98,6 +104,22 @@ docs/
 - file/config/plugin backup script
 - retention jobs
 
+## Promotion model (checklist + evidence)
+
+- `Phase 1 - Staging certification`
+  - run full validation checks;
+  - generate timestamped evidence package;
+  - mark gate as approved only when all mandatory checks pass.
+- `Phase 2 - Production rollout`
+  - blocked by default without approved gate;
+  - run production deployment with runtime values only;
+  - execute post-check and collect evidence.
+
+Gate artifacts:
+
+- Staging evidence: `.runtime/staging/evidence/<certification-id>/`
+- Promotion gate file: `.runtime/promotion/staging-certified.yml`
+
 ## Security decisions
 
 - Only `/public` should be exposed by the web server.
@@ -133,6 +155,7 @@ docs/
 - MariaDB connectivity checks
 - guided secret prompt flow
 - smoke test after deployment
+- promotion gate approval before any production apply run
 
 ## Change log
 

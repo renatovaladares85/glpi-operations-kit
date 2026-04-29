@@ -55,6 +55,7 @@ AGENTS.md
 
 Available scripts:
 
+- `scripts/glpictl.sh` (official central CLI)
 - `scripts/bootstrap-host.sh`
 - `scripts/bootstrap-permissions.sh`
 - `scripts/deploy-app.sh`
@@ -62,6 +63,8 @@ Available scripts:
 - `scripts/deploy-monitoring.sh`
 - `scripts/deploy-backup.sh`
 - `scripts/deploy-staging.sh`
+- `scripts/certify-staging.sh`
+- `scripts/deploy-production.sh`
 - `scripts/manage-tls.sh`
 - `scripts/ops-maintenance.sh`
 
@@ -69,16 +72,29 @@ Available scripts:
 
 ```bash
 bash scripts/bootstrap-permissions.sh
-./scripts/deploy-staging.sh check
-./scripts/deploy-staging.sh apply db
-./scripts/deploy-staging.sh apply app
-./scripts/deploy-staging.sh apply monitoring
-./scripts/deploy-staging.sh apply backup
-./scripts/manage-tls.sh self-signed staging
-./scripts/manage-tls.sh install-provided staging
-bash scripts/ops-maintenance.sh cert staging check
-bash scripts/ops-maintenance.sh users staging add os
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging certify run
+./scripts/glpictl.sh production deploy check all
+./scripts/glpictl.sh production deploy apply db
+./scripts/glpictl.sh production deploy apply app
+./scripts/glpictl.sh staging tls self-signed
+./scripts/glpictl.sh staging tls install-provided
+./scripts/glpictl.sh staging ops cert check
+./scripts/glpictl.sh staging ops users add
 ```
+
+Specific scripts still work and now delegate to the same central execution path.
+
+## Promotion gate (staging -> production)
+
+- Production deployment is blocked unless staging certification is approved.
+- The certification process generates evidence under `.runtime/staging/evidence/<timestamp>/`.
+- The promotion gate file is persisted at `.runtime/promotion/staging-certified.yml`.
+- If any critical staging check fails, production remains blocked until resolved.
 
 ## TLS modes
 
