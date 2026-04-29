@@ -1,42 +1,69 @@
 # Appendix: Operational Checks
 
-## Pre-flight Checks
+## 1. Pre-flight Dependency Matrix
 
-Current mandatory checks include:
+Mandatory:
 
-- `bash` exists
-- local free disk space threshold
-- `git` exists
-- `ansible-playbook` exists
-- `ansible-inventory` exists (staging flow)
+- `bash`
+- free local disk space >= 1 GB
+- `git`
+- `ansible-playbook`
+- `ansible-inventory`
 
-Current optional check:
+Optional:
 
-- `ssh` command presence
+- `ssh`
 
-## Service and Deployment Checks
+Check commands:
+
+```bash
+command -v bash
+command -v git
+command -v ansible-playbook
+command -v ansible-inventory
+command -v ssh
+df -Pk .
+```
+
+Auto-install behavior in scripts:
+
+- For missing mandatory command, script asks whether it should install on Ubuntu.
+- If accepted, script runs apt install.
+- If install fails, script prints manual remediation and blocks flow.
+
+## 2. Service and Deployment Checks
 
 After deployment:
 
-- `ansible-inventory` loads runtime inventory successfully
-- Nginx config test succeeds (`nginx -t`)
-- PHP-FPM config test succeeds (`php-fpm8.3 -t`)
-- MariaDB schema and user creation succeed
-- GLPI files and runtime directories exist with expected ownership
+- `ansible-inventory` parses runtime inventory
+- Nginx validation succeeds
+- PHP-FPM validation succeeds
+- MariaDB schema and user exist
+- GLPI directories exist with expected permissions
 
-## Usability Checks
+Validation commands:
+
+```bash
+ansible-inventory -i .runtime/staging/inventory.runtime.yml --list >/dev/null
+sudo nginx -t
+sudo php-fpm8.3 -t
+sudo systemctl status nginx php8.3-fpm mariadb --no-pager
+```
+
+## 3. Usability Checks
 
 - GLPI installer page loads
 - DB connectivity from app host works
 - app-to-db restriction is enforced by configured DB host rule
 
-## Monitoring and Backup Checks
+## 4. Monitoring and Backup Checks
 
 - monitoring exporters are installed and enabled
 - backup scripts are deployed
 - backup cron jobs are configured
 
-## Runtime Data Hygiene
+## 5. Runtime Data Hygiene
 
 - `.runtime/` exists locally
 - runtime secrets are not committed to Git
+- secret files use restricted permissions (`chmod 600`)

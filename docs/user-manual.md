@@ -2,36 +2,32 @@
 
 ## 1. Overview
 
-This manual is for installers and operators who need to deploy and operate GLPI using this repository.
+This manual is a full operator runbook for installing and validating GLPI in staging, with or without repository scripts.
 
-It documents only behavior that is currently implemented and executable from this codebase.
+It covers:
 
-This repository currently provides:
+- automated guided flow (scripts + Ansible)
+- manual fallback flow (command-by-command on Ubuntu)
+- single-server mode (app + db on one host)
+- dual-server mode (app host + db host)
+- cross-host execution using SSH from app to db or db to app
 
-- automated deployment for GLPI on Ubuntu hosts using Ansible
-- guided staging runtime input collection via bash scripts
-- app/db host separation
-- TLS mode switching (`none`, `self_signed`, `provided`)
-- baseline backup and monitoring setup
+Implemented behavior is documented as executable. Deferred capabilities are listed separately.
 
-Not all corporate target capabilities are fully implemented yet. Deferred items are listed in the dedicated appendix.
+## 2. Architecture and Modes
 
-## 2. Architecture
+Supported topology modes:
 
-Current deployment model:
+- single-server: one Ubuntu host running app and db roles
+- dual-server: one Ubuntu app host and one Ubuntu db host
 
-- `staging`: 1 app host + 1 db host
-- `production`: 1 app host + 1 db host baseline
+Supported TLS modes:
 
-Main stack:
+- `none` (HTTP only)
+- `self_signed`
+- `provided`
 
-- `Ubuntu 24.04`
-- `Nginx`
-- `PHP-FPM`
-- `MariaDB`
-- `Ansible`
-
-GLPI secure layout:
+Secure GLPI layout:
 
 - code: `/usr/share/glpi`
 - config: `/etc/glpi`
@@ -41,9 +37,12 @@ GLPI secure layout:
 
 ## 3. Prerequisites
 
-Run scripts from an operator machine with repository access.
+Execution origin policy for this runbook:
 
-Required local tools:
+- run from a target host only (app host or db host)
+- no bastion host is required
+
+Mandatory tools on execution host:
 
 - `bash`
 - `git`
@@ -54,92 +53,160 @@ Optional but recommended:
 
 - `ssh`
 
-Required access and files:
+Mandatory access:
 
-- network reachability to target app and db hosts
-- valid SSH username for both hosts
-- valid SSH private key file available locally
+- SSH reachability between execution host and remote target host in dual-server mode
+- sudo privileges on target hosts
+- local SSH private key path available on execution host
 
-## 4. Installation Workflow (Staging)
+## 4. Automated Guided Flow (Track A)
 
 Primary entrypoint:
 
 - `scripts/deploy-staging.sh`
 
-The script always starts with pre-flight checks, then asks for runtime values, writes runtime files under `.runtime/staging/`, and executes Ansible targets.
+The script starts with pre-flight checks. If a mandatory command is missing, it prompts to install it on Ubuntu. If installation fails, it prints exact manual remediation commands and blocks execution.
 
-### 4.1 Runtime values requested
+### 4.1 Step-by-step
 
-The staging workflow prompts for:
-
-- app server IP/hostname
-- db server IP/hostname
-- SSH username
-- SSH private key path
-- GLPI final version
-- TLS mode (`none`, `self_signed`, `provided`)
-- certificate and key local paths (when TLS mode is `provided`)
-- GLPI database name
-- GLPI database username
-- GLPI database password
-- MariaDB root password
-- `mysqld_exporter` username
-- `mysqld_exporter` password
-
-### 4.2 Runtime files generated
-
-Files are generated under `.runtime/staging/`:
-
-- `inventory.runtime.yml`
-- `app.runtime.yml`
-- `db.secrets.yml`
-- `monitoring.secrets.yml`
-
-### 4.3 Main command sequence
+1. Run pre-flight and runtime collection:
 
 ```bash
 ./scripts/deploy-staging.sh check
+```
+
+2. Deploy database:
+
+```bash
 ./scripts/deploy-staging.sh apply db
+```
+
+3. Deploy application:
+
+```bash
 ./scripts/deploy-staging.sh apply app
+```
+
+4. Deploy monitoring:
+
+```bash
 ./scripts/deploy-staging.sh apply monitoring
+```
+
+5. Deploy backup:
+
+```bash
 ./scripts/deploy-staging.sh apply backup
 ```
 
-Optional combined run:
+Optional combined deployment:
 
 ```bash
 ./scripts/deploy-staging.sh apply all
 ```
 
-### 4.4 Target behavior
+### 4.2 Runtime prompts (mandatory)
 
-Available targets in `deploy-staging.sh`:
+The script requests and validates:
 
-- `base`
-- `app`
-- `db`
-- `monitoring`
-- `backup`
-- `all`
+- app host IP/hostname
+- db host IP/hostname
+- SSH username
+- SSH private key path
+- GLPI version
+- TLS mode
+- certificate/key paths for `provided` mode
+- DB name, DB username, DB password
+- MariaDB root password
+- monitoring exporter username/password
 
-Available modes:
+Runtime files are persisted under `.runtime/staging/`.
 
-- `check`
-- `apply`
-- `post-check`
+## 5. Manual Fallback Flow (Track B)
 
-## 5. TLS Operation
+Use this flow when scripts are unavailable or when auto-install fails.
 
-Use `scripts/manage-tls.sh` to switch TLS behavior without manual Nginx editing.
+### 5.1 Install dependencies on Ubuntu (execution host)
 
-Supported actions:
+```bash
+sudo apt-get update
+sudo apt-get install -y bash git openssh-client ansible
+```
 
-- `disable`
-- `self-signed`
-- `install-provided`
-- `reload`
+Validate:
 
-Examples:
+```bash
+command -v bash
+command -v git
+command -v ansible-playbook
+command -v ansible-inventory
+command -v ssh
+```
+
+### 5.2 Manual runtime data files
+
+Create runtime directory:
+
+```bash
+mkdir -p .runtime/staging
+chmod 700 .runtime/staging
+```
+
+Use file models from the appendices to create:
+
+- `.runtime/staging/inventory.runtime.yml`
+- `.runtime/staging/app.runtime.yml`
+- `.runtime/staging/db.secrets.yml`
+- `.runtime/staging/monitoring.secrets.yml`
+
+Protect secret files:
+
+```bash
+chmod 600 .runtime/staging/*.secrets.yml
+```
+
+### 5.3 Apply roles manually with Ansible
+
+```bash
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/db.secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/app.runtime.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/monitoring.secrets.yml --extra-vars @.runtime/staging/db.secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/app.runtime.yml
+```
+
+## 6. Single-Server and Dual-Server Operation
+
+### 6.1 Single-server mode
+
+Set both app and db host values to the same host in runtime inventory.
+
+Run:
+
+```bash
+./scripts/deploy-staging.sh apply all
+```
+
+### 6.2 Dual-server mode from app host
+
+Run the script on app host and set:
+
+- app host = current app host IP/FQDN
+- db host = remote db host IP/FQDN
+- SSH user/key = credentials with sudo access on both
+
+### 6.3 Dual-server mode from db host
+
+Run the script on db host and set:
+
+- db host = current db host IP/FQDN
+- app host = remote app host IP/FQDN
+- SSH user/key = credentials with sudo access on both
+
+In both directions, execution host only needs SSH + key access to the other host.
+
+## 7. TLS Operations
+
+Use:
 
 ```bash
 ./scripts/manage-tls.sh disable staging
@@ -148,52 +215,32 @@ Examples:
 ./scripts/manage-tls.sh reload staging
 ```
 
-Mode behavior:
+`install-provided` asks for local cert/key file paths and applies app role safely.
 
-- `none`: HTTP only
-- `self_signed`: HTTPS using generated self-signed certificate
-- `provided`: HTTPS using provided cert/key copied from local paths
+## 8. Validation and Acceptance
 
-## 6. Validation
+Minimum acceptance checks:
 
-Minimum operational checks:
+- pre-flight completes with no unresolved mandatory failures
+- runtime inventory parses
+- app and db roles complete
+- `nginx -t` is valid on app host
+- `php-fpm8.3 -t` is valid on app host
+- GLPI installer page opens
+- DB access works with runtime credentials
+- monitoring and backup artifacts exist
 
-- pre-flight completes without mandatory failures
-- inventory generation succeeds
-- app/db services are configured and started
-- `nginx -t` succeeds on app host
-- `php-fpm8.3 -t` succeeds on app host
-- GLPI installer page is reachable
-- DB connectivity works with runtime credentials
-- monitoring and backup tasks are present
+## 9. Troubleshooting and Recovery
 
-## 7. Operations
+Use the troubleshooting appendix for:
 
-Rerun guidance:
+- missing dependencies and install failures
+- SSH connectivity/auth issues
+- runtime input validation failures
+- Nginx/PHP-FPM/MariaDB validation failures
+- partial deployment rerun sequence
 
-- rerun `check` first when environment or access changed
-- rerun specific `apply <target>` for isolated corrections
-- use `manage-tls.sh` for TLS mode updates
-
-Secrets handling:
-
-- runtime secrets stay in `.runtime/`
-- secrets must not be committed
-
-## 8. Troubleshooting
-
-Use the troubleshooting matrix appendix for common failures and fix paths:
-
-- missing Ansible commands
-- invalid SSH key path
-- invalid app/db host input
-- invalid TLS provided certificate paths
-- Nginx config failure
-- PHP-FPM config failure
-- DB credential mismatch
-- app not loading after deployment
-
-## 9. Related Documentation
+## 10. Related Documentation
 
 - [README.md](/D:/Stefanini/SoEnergy/glpi-soenergy/README.md)
 - [implementation-plan.md](/D:/Stefanini/SoEnergy/glpi-soenergy/docs/implementation-plan.md)

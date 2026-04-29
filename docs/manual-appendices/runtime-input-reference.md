@@ -11,6 +11,12 @@ Generated files:
 - `.runtime/staging/db.secrets.yml`
 - `.runtime/staging/monitoring.secrets.yml`
 
+## Topology Guidance
+
+- Single-server mode: set app host and db host to the same host.
+- Dual-server mode: set app host and db host to distinct hosts.
+- Script execution can start from app host or db host, as long as SSH key access exists to all targets.
+
 ## Runtime Inputs
 
 ### Staging app server IP/hostname
@@ -96,3 +102,60 @@ Generated files:
 - Why: monitoring account authentication
 - Validation: non-empty
 - Stored in: `monitoring.secrets.yml`
+
+## Manual File Models (No Script Path)
+
+`inventory.runtime.yml`:
+
+```yaml
+---
+all:
+  vars:
+    ansible_user: "YOUR_SSH_USER"
+    ansible_ssh_private_key_file: "/path/to/your/key"
+    environment_name: "staging"
+  children:
+    glpi_app:
+      hosts:
+        stg-app:
+          ansible_host: "APP_HOST_OR_IP"
+    glpi_db:
+      hosts:
+        stg-db:
+          ansible_host: "DB_HOST_OR_IP"
+```
+
+`app.runtime.yml`:
+
+```yaml
+---
+glpi_version: "11.0.0"
+glpi_download_url: "https://github.com/glpi-project/glpi/releases/download/11.0.0/glpi-11.0.0.tgz"
+glpi_release_dir: "/usr/share/glpi-11.0.0"
+glpi_domain: "APP_HOST_OR_IP"
+glpi_use_tls: false
+glpi_tls_mode: "none"
+glpi_tls_common_name: "APP_HOST_OR_IP"
+glpi_tls_provided_local_cert_path: ""
+glpi_tls_provided_local_key_path: ""
+```
+
+`db.secrets.yml`:
+
+```yaml
+---
+glpi_db_name: "glpi_db_name"
+glpi_db_user: "glpi_db_user"
+glpi_db_password: "CHANGE_ME"
+glpi_db_root_password: "CHANGE_ME"
+glpi_db_app_access_host: "APP_HOST_OR_IP"
+```
+
+`monitoring.secrets.yml`:
+
+```yaml
+---
+mysqld_exporter_user: "exporter_user"
+mysqld_exporter_password: "CHANGE_ME"
+glpi_db_root_password: "CHANGE_ME"
+```

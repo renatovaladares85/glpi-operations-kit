@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PREFLIGHT_FORCE_CONTINUE="${PREFLIGHT_FORCE_CONTINUE:-false}"
+PREFLIGHT_AUTO_INSTALL="${PREFLIGHT_AUTO_INSTALL:-prompt}"
 
 write_step() {
   printf '\n==> %s\n' "$1"
@@ -231,6 +232,94 @@ preflight_print_result() {
   printf '[%s] [%s] %s\n' "$level" "$status" "$message"
 }
 
+package_for_command() {
+  local command_name="$1"
+  case "$command_name" in
+    ansible-playbook|ansible-inventory) echo "ansible" ;;
+    git) echo "git" ;;
+    ssh) echo "openssh-client" ;;
+    bash) echo "bash" ;;
+    *) echo "" ;;
+  esac
+}
+
+install_command_ubuntu() {
+  local command_name="$1"
+  local package_name="$2"
+  local install_cmd=""
+
+  if command -v sudo >/dev/null 2>&1; then
+    install_cmd="sudo apt-get update && sudo apt-get install -y ${package_name}"
+  else
+    install_cmd="apt-get update && apt-get install -y ${package_name}"
+  fi
+
+  echo "Trying to install '${command_name}' from package '${package_name}'..."
+  if bash -lc "$install_cmd"; then
+    return 0
+  fi
+  return 1
+}
+
+prompt_install_missing_command() {
+  local level="$1"
+  local command_name="$2"
+  local package_name="$3"
+  local answer=""
+
+  if [[ "$PREFLIGHT_AUTO_INSTALL" == "always" ]]; then
+    answer="y"
+  else
+    while true; do
+      echo "Command '${command_name}' is missing (${level})."
+      echo "Install now on this Ubuntu host using package '${package_name}'? [y/n]"
+      read -r answer
+      case "$answer" in
+        y|Y|yes|YES) answer="y"; break ;;
+        n|N|no|NO) answer="n"; break ;;
+        *) echo "Please answer 'y' or 'n'." ;;
+      esac
+    done
+  fi
+
+  if [[ "$answer" != "y" ]]; then
+    return 1
+  fi
+
+  if install_command_ubuntu "$command_name" "$package_name"; then
+    if command -v "$command_name" >/dev/null 2>&1; then
+      preflight_print_result "$level" "ok" "command '$command_name' installed successfully"
+      return 0
+    fi
+  fi
+
+  echo "Automatic installation failed for '${command_name}'." >&2
+  echo "Manual remediation (Ubuntu):" >&2
+  if command -v sudo >/dev/null 2>&1; then
+    echo "  sudo apt-get update && sudo apt-get install -y ${package_name}" >&2
+  else
+    echo "  apt-get update && apt-get install -y ${package_name}" >&2
+  fi
+  return 1
+}
+
+check_or_install_command() {
+  local level="$1"
+  local command_name="$2"
+  local package_name="$3"
+
+  if command -v "$command_name" >/dev/null 2>&1; then
+    preflight_print_result "$level" "ok" "command '$command_name' found"
+    return 0
+  fi
+
+  preflight_print_result "$level" "fail" "command '$command_name' not found"
+  if [[ -n "$package_name" ]] && prompt_install_missing_command "$level" "$command_name" "$package_name"; then
+    return 0
+  fi
+  return 1
+}
+
 run_preflight_checks() {
   local environment="${1:-unknown}"
   shift || true
@@ -272,19 +361,14 @@ run_preflight_checks() {
   fi
 
   for cmd in "${mandatory_commands[@]}"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      preflight_print_result "mandatory" "ok" "command '$cmd' found"
-    else
-      preflight_print_result "mandatory" "fail" "command '$cmd' not found"
+    if ! check_or_install_command "mandatory" "$cmd" "$(package_for_command "$cmd")"; then
       mandatory_failures=$((mandatory_failures + 1))
     fi
   done
 
   for cmd in "${optional_commands[@]}"; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-      preflight_print_result "optional" "ok" "command '$cmd' found"
-    else
-      preflight_print_result "optional" "warn" "command '$cmd' not found"
+    if ! check_or_install_command "optional" "$cmd" "$(package_for_command "$cmd")"; then
+      preflight_print_result "optional" "warn" "command '$cmd' remains unavailable"
       optional_failures=$((optional_failures + 1))
     fi
   done
