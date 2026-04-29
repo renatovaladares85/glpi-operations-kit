@@ -1,27 +1,26 @@
-# Apêndice: Matriz de Troubleshooting
+# Apendice: Troubleshooting
 
-## `Permission denied` em `./scripts/*.sh`
+## Permission denied em scripts
 
-- Sintoma: shell retorna `Permission denied` ao executar script diretamente.
-- Causa provável: falta de execute bit.
-- Verificação: `ls -l scripts/*.sh`
-- Correção: `bash scripts/bootstrap-permissions.sh` ou `chmod +x scripts/*.sh`
+- Check: `ls -l scripts/*.sh`
+- Fix: `bash scripts/bootstrap-permissions.sh`
 
-## Marcador de bootstrap ausente
+## Operacao bloqueada por lock
 
-- Sintoma: script exige bootstrap antes de continuar.
-- Causa provável: bootstrap não foi executado.
-- Verificação: `ls -l .runtime/bootstrap.completed`
-- Correção: `bash scripts/bootstrap-permissions.sh`
+- Causa: execucao concorrente de `ops-maintenance.sh`
+- Check: `.runtime/<env>/state/.ops-maintenance.lock`
+- Acao: validar se nao existe processo ativo antes de remover lock
 
-## Usuário fora do grupo `glpiops`
+## Falha de certificado
 
-- Sintoma: pre-flight obrigatório falha na checagem de grupo.
-- Verificação: `id -nG | tr ' ' '\n' | grep -Fx glpiops`
-- Correção: `sudo groupadd -f glpiops && sudo usermod -aG glpiops "$USER"` e novo login.
+- Check: `bash scripts/ops-maintenance.sh cert staging check`
+- Acao: aplicar novo certificado com `cert staging apply`
 
-## Falha de validação do sudo
+## Falha em usuario DB
 
-- Sintoma: pre-flight obrigatório falha em sudo/root.
-- Verificação: `sudo -v`
-- Correção: ajustar política sudo mínima para o operador.
+- Check: revisar `.runtime/<env>/logs/*.log` e `.summary.yml`
+- Acao: rerun com `users staging disable db` ou `users staging add db`
+
+## Continuar apos falha
+
+- Comando: `bash scripts/ops-maintenance.sh resume staging`

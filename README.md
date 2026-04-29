@@ -63,6 +63,7 @@ Available scripts:
 - `scripts/deploy-backup.sh`
 - `scripts/deploy-staging.sh`
 - `scripts/manage-tls.sh`
+- `scripts/ops-maintenance.sh`
 
 ## Quick usage
 
@@ -75,6 +76,8 @@ bash scripts/bootstrap-permissions.sh
 ./scripts/deploy-staging.sh apply backup
 ./scripts/manage-tls.sh self-signed staging
 ./scripts/manage-tls.sh install-provided staging
+bash scripts/ops-maintenance.sh cert staging check
+bash scripts/ops-maintenance.sh users staging add os
 ```
 
 ## TLS modes

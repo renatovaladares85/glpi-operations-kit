@@ -32,6 +32,22 @@
 - Fix path: grant least-privilege sudo policy for deployment operations
 - Safe resume: rerun bootstrap
 
+## Maintenance run blocked by lock file
+
+- Symptom: `ops-maintenance.sh` reports an active lock file
+- Likely cause: previous run crashed or concurrent execution
+- Check: `.runtime/<env>/state/.ops-maintenance.lock`
+- Fix path: confirm no active process remains, then remove stale lock file
+- Safe resume: `bash scripts/ops-maintenance.sh resume <env>`
+
+## Day-2 operation failed and needs continuation
+
+- Symptom: operation ends with failed state and partial completion
+- Likely cause: stage-specific runtime or remote execution issue
+- Check: `.runtime/<env>/logs/*.log` and `.runtime/<env>/state/*.state.yml`
+- Fix path: resolve reported stage error, then run `resume`
+- Safe resume: `bash scripts/ops-maintenance.sh resume <env>`
+
 ## Missing `ansible-playbook` or `ansible-inventory`
 
 - Symptom: pre-flight shows missing mandatory command and asks to install

@@ -55,7 +55,20 @@ ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --ta
 ./scripts/manage-tls.sh reload staging
 ```
 
-## 6. Targeted Script Entry Points
+## 6. Day-2 Operations
+
+```bash
+bash scripts/ops-maintenance.sh cert staging check
+bash scripts/ops-maintenance.sh cert staging renew
+bash scripts/ops-maintenance.sh cert staging apply
+bash scripts/ops-maintenance.sh users staging add os
+bash scripts/ops-maintenance.sh users staging disable db
+bash scripts/ops-maintenance.sh users staging remove glpi
+bash scripts/ops-maintenance.sh audit staging check
+bash scripts/ops-maintenance.sh resume staging
+```
+
+## 7. Targeted Script Entry Points
 
 ```bash
 ./scripts/bootstrap-host.sh staging
@@ -64,9 +77,10 @@ ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --ta
 ./scripts/deploy-app.sh staging
 ./scripts/deploy-monitoring.sh staging
 ./scripts/deploy-backup.sh staging
+./scripts/ops-maintenance.sh cert staging check
 ```
 
-## 7. Service Validation on Target Hosts
+## 8. Service Validation on Target Hosts
 
 ```bash
 sudo nginx -t

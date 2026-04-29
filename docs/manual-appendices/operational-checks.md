@@ -67,7 +67,14 @@ sudo systemctl status nginx php8.3-fpm mariadb --no-pager
 - backup scripts are deployed
 - backup cron jobs are configured
 
-## 5. Runtime Data Hygiene
+## 5. Day-2 Operation Checks
+
+- `bash scripts/ops-maintenance.sh audit staging check`
+- certificate warning check: `bash scripts/ops-maintenance.sh cert staging check`
+- resumable checkpoint check: `.runtime/<env>/state/*.state.yml`
+- execution log check: `.runtime/<env>/logs/*.log`
+
+## 6. Runtime Data Hygiene
 
 - `.runtime/` exists locally
 - runtime secrets are not committed to Git

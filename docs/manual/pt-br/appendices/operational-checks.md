@@ -1,39 +1,20 @@
-# Apêndice: Checks Operacionais
+# Apendice: Checks Operacionais
 
-Pre-flight obrigatório:
+Pre-flight obrigatorio:
 
 - `bash`
 - `git`
 - `ansible-playbook`
 - `ansible-inventory`
-- disco local livre >= 1 GB
+- usuario no grupo `glpiops`
+- sudo valido
 
-Pre-flight opcional:
+Checks day-2:
 
-- `ssh`
+- `bash scripts/ops-maintenance.sh audit staging check`
+- verificar logs em `.runtime/staging/logs/`
+- verificar estado em `.runtime/staging/state/`
 
-Comandos:
+Continuidade:
 
-```bash
-command -v bash
-command -v git
-command -v ansible-playbook
-command -v ansible-inventory
-command -v ssh
-df -Pk .
-```
-
-Checks pós-implantação:
-
-```bash
-ansible-inventory -i .runtime/staging/inventory.runtime.yml --list >/dev/null
-sudo nginx -t
-sudo php-fpm8.3 -t
-sudo systemctl status nginx php8.3-fpm mariadb --no-pager
-```
-
-Higiene de runtime:
-
-- manter `.runtime/`
-- não versionar segredos
-- usar `chmod 600` em arquivos de segredo
+- para falhas incompletas use `bash scripts/ops-maintenance.sh resume staging`

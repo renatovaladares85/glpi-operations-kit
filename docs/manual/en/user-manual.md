@@ -253,7 +253,29 @@ Minimum acceptance checks:
 - DB access works with runtime credentials
 - monitoring and backup artifacts exist
 
-## 9. Troubleshooting and Recovery
+## 9. Day-2 Operations (Post-Implementation)
+
+Use `scripts/ops-maintenance.sh` for operational lifecycle actions:
+
+- `bash scripts/ops-maintenance.sh users staging add os`
+- `bash scripts/ops-maintenance.sh users staging disable db`
+- `bash scripts/ops-maintenance.sh users staging remove glpi`
+- `bash scripts/ops-maintenance.sh cert staging check`
+- `bash scripts/ops-maintenance.sh cert staging renew`
+- `bash scripts/ops-maintenance.sh cert staging apply`
+- `bash scripts/ops-maintenance.sh audit staging check`
+- `bash scripts/ops-maintenance.sh resume staging`
+
+Operational persistence:
+
+- logs: `.runtime/<environment>/logs/`
+- checkpoints/state: `.runtime/<environment>/state/`
+
+Certificate policy:
+
+- warning threshold: `<= 30` days to expiry.
+
+## 10. Troubleshooting and Recovery
 
 Use the troubleshooting appendix for:
 
@@ -263,7 +285,7 @@ Use the troubleshooting appendix for:
 - Nginx/PHP-FPM/MariaDB validation failures
 - partial deployment rerun sequence
 
-## 10. Related Documentation
+## 11. Related Documentation
 
 - [Multilingual index](../README.md)
 - [Appendices index](appendices/index.md)

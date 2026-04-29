@@ -12,6 +12,8 @@ These rules must not be broken by agents.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.
 - Continue after a mandatory pre-flight failure only with explicit user approval.
 - Enforce operator membership in `glpiops` for deployment operations.
+- Use `scripts/ops-maintenance.sh` for post-implementation user and certificate lifecycle tasks.
+- Persist day-2 operation logs and checkpoints under `.runtime/<env>/logs` and `.runtime/<env>/state`.
 - Never version secrets.
 - Never use common or easily guessable usernames, passwords, or identifiers.
 - Use biblical-context naming for generated or suggested identifiers when applicable.

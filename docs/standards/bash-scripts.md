@@ -13,6 +13,8 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 - Explain why each sensitive value is being requested
 - Explain where the value will be written
 - Stop execution when critical information is missing
+- Persist execution logs for each operational run
+- Persist checkpoint/state data for resumable operations
 
 ## Runtime secrets
 
@@ -29,6 +31,7 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 - `check`
 - `apply`
 - `post-check`
+- `day-2-ops`
 
 ## Pre-flight policy
 

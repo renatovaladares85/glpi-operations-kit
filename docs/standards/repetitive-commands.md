@@ -41,6 +41,50 @@ At the beginning of each operator setup and before first deploy on a new machine
 
 ### Objective
 
+Run day-2 operational audit checks.
+
+### Command
+
+```bash
+bash scripts/ops-maintenance.sh audit staging check
+```
+
+### When to use
+
+After post-implementation changes (users, certs, permissions) and before closing maintenance windows.
+
+### Preconditions
+
+- runtime inventory and bootstrap marker available
+
+### Risks
+
+- low risk; validation-oriented operation
+
+### Objective
+
+Resume interrupted day-2 operations from latest checkpoint.
+
+### Command
+
+```bash
+bash scripts/ops-maintenance.sh resume staging
+```
+
+### When to use
+
+After a failed maintenance run with checkpoint state available.
+
+### Preconditions
+
+- `.runtime/staging/state/*.state.yml` exists
+
+### Risks
+
+- medium; resumes prior workflow so must confirm previous failure context
+
+### Objective
+
 Run the mandatory pre-flight check before implementation.
 
 ### Command

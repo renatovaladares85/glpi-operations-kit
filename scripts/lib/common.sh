@@ -4,6 +4,7 @@ set -euo pipefail
 PREFLIGHT_FORCE_CONTINUE="${PREFLIGHT_FORCE_CONTINUE:-false}"
 PREFLIGHT_AUTO_INSTALL="${PREFLIGHT_AUTO_INSTALL:-prompt}"
 GLPI_OPS_GROUP="${GLPI_OPS_GROUP:-glpiops}"
+CERT_RENEWAL_WARN_DAYS="${CERT_RENEWAL_WARN_DAYS:-30}"
 
 write_step() {
   printf '\n==> %s\n' "$1"
@@ -185,6 +186,178 @@ require_bootstrap_marker() {
   echo "Missing bootstrap marker: $marker" >&2
   echo "Run 'bash scripts/bootstrap-permissions.sh' first." >&2
   return 1
+}
+
+runtime_environment_root() {
+  local environment="$1"
+  echo "$SCRIPT_ROOT/../.runtime/$environment"
+}
+
+runtime_logs_dir() {
+  local environment="$1"
+  echo "$(runtime_environment_root "$environment")/logs"
+}
+
+runtime_state_dir() {
+  local environment="$1"
+  echo "$(runtime_environment_root "$environment")/state"
+}
+
+ensure_runtime_foundation() {
+  local environment="$1"
+  ensure_directory_mode "$(runtime_environment_root "$environment")" "700"
+  ensure_directory_mode "$(runtime_logs_dir "$environment")" "700"
+  ensure_directory_mode "$(runtime_state_dir "$environment")" "700"
+}
+
+new_operation_id() {
+  local prefix="$1"
+  echo "${prefix}-$(date +%Y%m%d-%H%M%S)"
+}
+
+operation_log_path() {
+  local environment="$1"
+  local operation_id="$2"
+  echo "$(runtime_logs_dir "$environment")/${operation_id}.log"
+}
+
+operation_summary_path() {
+  local environment="$1"
+  local operation_id="$2"
+  echo "$(runtime_logs_dir "$environment")/${operation_id}.summary.yml"
+}
+
+operation_state_path() {
+  local environment="$1"
+  local operation_id="$2"
+  echo "$(runtime_state_dir "$environment")/${operation_id}.state.yml"
+}
+
+runtime_lock_path() {
+  local environment="$1"
+  echo "$(runtime_state_dir "$environment")/.ops-maintenance.lock"
+}
+
+mask_sensitive() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    echo ""
+    return
+  fi
+  local len="${#value}"
+  if ((len <= 4)); then
+    echo "****"
+    return
+  fi
+  local tail="${value: -2}"
+  echo "****${tail}"
+}
+
+begin_operation_log() {
+  local environment="$1"
+  local operation_id="$2"
+  local command_line="$3"
+  local log_path
+  log_path="$(operation_log_path "$environment" "$operation_id")"
+  local summary_path
+  summary_path="$(operation_summary_path "$environment" "$operation_id")"
+
+  {
+    echo "---"
+    echo "operation_id: '$operation_id'"
+    echo "environment: '$environment'"
+    echo "operator: '$(id -un)'"
+    echo "host: '$(hostname)'"
+    echo "command: '$command_line'"
+    echo "started_at: '$(date -u +%FT%TZ)'"
+    echo "status: 'started'"
+  } >"$summary_path"
+  chmod 600 "$summary_path"
+
+  exec > >(tee -a "$log_path") 2>&1
+  echo "Operation log: $log_path"
+}
+
+complete_operation_log() {
+  local environment="$1"
+  local operation_id="$2"
+  local status="$3"
+  local failed_stage="${4:-}"
+  local remediation_hint="${5:-}"
+  local summary_path
+  summary_path="$(operation_summary_path "$environment" "$operation_id")"
+  local status_line
+  status_line="$(printf "status: '%s'" "$status")"
+  sed -i "s/^status: .*/$status_line/" "$summary_path"
+  {
+    echo "completed_at: '$(date -u +%FT%TZ)'"
+    echo "failed_stage: '${failed_stage}'"
+    echo "remediation_hint: '${remediation_hint}'"
+  } >>"$summary_path"
+}
+
+acquire_runtime_lock() {
+  local environment="$1"
+  local lock_path
+  lock_path="$(runtime_lock_path "$environment")"
+  if [[ -f "$lock_path" ]]; then
+    echo "Another maintenance execution appears active. Lock file: $lock_path" >&2
+    return 1
+  fi
+  printf "pid=%s\nuser=%s\nstarted_at=%s\n" "$$" "$(id -un)" "$(date -u +%FT%TZ)" >"$lock_path"
+  chmod 600 "$lock_path"
+  return 0
+}
+
+release_runtime_lock() {
+  local environment="$1"
+  local lock_path
+  lock_path="$(runtime_lock_path "$environment")"
+  rm -f "$lock_path"
+}
+
+write_operation_state() {
+  local environment="$1"
+  local operation_id="$2"
+  local stage="$3"
+  local status="$4"
+  local message="${5:-}"
+  local state_path
+  state_path="$(operation_state_path "$environment" "$operation_id")"
+  {
+    echo "---"
+    echo "operation_id: '$operation_id'"
+    echo "environment: '$environment'"
+    echo "stage: '$stage'"
+    echo "status: '$status'"
+    echo "message: '$message'"
+    echo "updated_at: '$(date -u +%FT%TZ)'"
+  } >"$state_path"
+  chmod 600 "$state_path"
+}
+
+latest_operation_state() {
+  local environment="$1"
+  local state_dir
+  state_dir="$(runtime_state_dir "$environment")"
+  find "$state_dir" -maxdepth 1 -type f -name "*.state.yml" | sort | tail -n1
+}
+
+read_state_field() {
+  local path="$1"
+  local field="$2"
+  awk -F"'" -v key="$field" '$1 ~ "^" key ": " {print $2; exit}' "$path"
+}
+
+confirm_destructive_action() {
+  local action="$1"
+  local ticket="$2"
+  local reason="$3"
+  if [[ -z "${ticket// }" || -z "${reason// }" ]]; then
+    echo "Change ticket and reason are mandatory for destructive action '$action'." >&2
+    return 1
+  fi
+  prompt_yes_no "Confirm destructive action '$action' with ticket '$ticket' and reason '$reason'?"
 }
 
 enforce_ssh_private_key_permissions() {

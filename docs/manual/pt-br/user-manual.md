@@ -1,64 +1,17 @@
-# Manual do Usuário GLPI SoEnergy
+# Manual do Usuario GLPI SoEnergy
 
-## 1. Visão geral
+## 1. Visao geral
 
-Este manual é um runbook completo para operadores instalarem e validarem o GLPI em staging, com ou sem scripts do repositório.
+Este manual e um runbook para operadores instalarem, validarem e manterem o GLPI em staging.
 
-Ele cobre:
-
-- fluxo guiado automatizado (scripts + Ansible)
-- fluxo manual de contingência (comando a comando no Ubuntu)
-- modo servidor único (app + banco no mesmo host)
-- modo dois servidores (host app + host db)
-- execução entre hosts via SSH (app para db e db para app)
-
-## 2. Arquitetura e modos
-
-Topologias suportadas:
-
-- servidor único: um host Ubuntu com roles de app e db
-- dois servidores: um host Ubuntu para app e outro para db
-
-Modos TLS suportados:
-
-- `none` (somente HTTP)
-- `self_signed`
-- `provided`
-
-Layout seguro do GLPI:
-
-- código: `/usr/share/glpi`
-- configuração: `/etc/glpi`
-- dados: `/var/lib/glpi/files`
-- plugins: `/var/lib/glpi/plugins`
-- logs: `/var/log/glpi`
-
-## 3. Pré-requisitos
-
-Política de origem de execução:
+## 2. Pre-requisitos
 
 - executar a partir de host alvo (app ou db)
-- bastion não é obrigatório
+- ferramentas obrigatorias: `bash`, `git`, `ansible-playbook`, `ansible-inventory`
+- usuario operador no grupo `glpiops`
+- privilegio sudo valido
 
-Ferramentas obrigatórias no host de execução:
-
-- `bash`
-- `git`
-- `ansible-playbook`
-- `ansible-inventory`
-
-Opcional, mas recomendado:
-
-- `ssh`
-
-Acessos obrigatórios:
-
-- conectividade SSH entre host de execução e host remoto na topologia dual
-- privilégio sudo nos hosts alvo
-- chave privada SSH válida disponível no host de execução
-- usuário operador pertencente ao grupo `glpiops`
-
-### 3.1 Setup de segurança do operador (obrigatório)
+Setup obrigatorio:
 
 ```bash
 sudo groupadd -f glpiops
@@ -67,140 +20,58 @@ newgrp glpiops
 sudo -v
 ```
 
-## 4. Fluxo guiado automatizado (Trilha A)
+## 3. Fluxo de implantacao
 
-Ponto de entrada principal:
-
-- `scripts/deploy-staging.sh`
-
-### 4.1 Passo a passo
-
-0. Rodar bootstrap de permissões (primeiro comando obrigatório):
+0. Bootstrap de permissoes:
 
 ```bash
 bash scripts/bootstrap-permissions.sh
 ```
 
-1. Rodar pre-flight e coleta de runtime:
+1. Precheck e coleta:
 
 ```bash
 ./scripts/deploy-staging.sh check
 ```
 
-2. Implantar banco:
+2. Deploy por etapa:
 
 ```bash
 ./scripts/deploy-staging.sh apply db
-```
-
-3. Implantar aplicação:
-
-```bash
 ./scripts/deploy-staging.sh apply app
-```
-
-4. Implantar monitoração:
-
-```bash
 ./scripts/deploy-staging.sh apply monitoring
-```
-
-5. Implantar backup:
-
-```bash
 ./scripts/deploy-staging.sh apply backup
 ```
 
-Opcional (implantação combinada):
+## 4. Operacoes Day-2 (pos-implementacao)
 
-```bash
-./scripts/deploy-staging.sh apply all
-```
+Usuarios:
 
-### 4.2 Entradas de runtime (obrigatórias)
+- `bash scripts/ops-maintenance.sh users staging add os`
+- `bash scripts/ops-maintenance.sh users staging disable db`
+- `bash scripts/ops-maintenance.sh users staging remove glpi`
 
-O script solicita e valida:
+Certificados:
 
-- IP/hostname do host app
-- IP/hostname do host db
-- usuário SSH
-- caminho da chave SSH privada (modo 0600 exigido)
-- versão do GLPI
-- modo TLS
-- caminhos de certificado/chave para `provided`
-- nome do banco, usuário do banco, senha do banco
-- senha root do MariaDB
-- usuário/senha do exporter de monitoração
+- `bash scripts/ops-maintenance.sh cert staging check`
+- `bash scripts/ops-maintenance.sh cert staging renew`
+- `bash scripts/ops-maintenance.sh cert staging apply`
 
-## 5. Fluxo manual de contingência (Trilha B)
+Auditoria e continuidade:
 
-Use este fluxo quando scripts não estiverem disponíveis ou quando auto-instalação falhar.
+- `bash scripts/ops-maintenance.sh audit staging check`
+- `bash scripts/ops-maintenance.sh resume staging`
 
-### 5.1 Instalar dependências no Ubuntu (host de execução)
+Persistencia operacional:
 
-```bash
-sudo apt-get update
-sudo apt-get install -y bash git openssh-client ansible
-```
+- logs: `.runtime/<environment>/logs/`
+- checkpoints/estado: `.runtime/<environment>/state/`
 
-Validar:
+Politica de certificado:
 
-```bash
-command -v bash
-command -v git
-command -v ansible-playbook
-command -v ansible-inventory
-command -v ssh
-id -nG | tr ' ' '\n' | grep -Fx glpiops
-sudo -v
-```
+- alerta quando faltarem `<= 30` dias para expirar.
 
-## 6. Operação em servidor único e dual
+## 5. Referencias
 
-### 6.1 Modo servidor único
-
-Defina app host e db host com o mesmo valor no inventory runtime.
-
-```bash
-./scripts/deploy-staging.sh apply all
-```
-
-### 6.2 Modo dual a partir do host app
-
-Execute no host app e informe:
-
-- app host = IP/FQDN do próprio host app
-- db host = IP/FQDN do host db remoto
-- usuário/chave SSH com sudo em ambos
-
-### 6.3 Modo dual a partir do host db
-
-Execute no host db e informe:
-
-- db host = IP/FQDN do próprio host db
-- app host = IP/FQDN do host app remoto
-- usuário/chave SSH com sudo em ambos
-
-## 7. Operações de TLS
-
-```bash
-./scripts/manage-tls.sh disable staging
-./scripts/manage-tls.sh self-signed staging
-./scripts/manage-tls.sh install-provided staging
-./scripts/manage-tls.sh reload staging
-```
-
-## 8. Validação e aceite
-
-Checks mínimos:
-
-- pre-flight sem falhas obrigatórias pendentes
-- parsing do runtime inventory
-- conclusão das roles app e db
-- `nginx -t` válido no host app
-- `php-fpm8.3 -t` válido no host app
-
-## 9. Documentação relacionada
-
-- [Índice multilíngua](../README.md)
-- [Índice de apêndices PT-BR](appendices/index.md)
+- [Indice multilingua](../README.md)
+- [Indice de apendices PT-BR](appendices/index.md)
