@@ -231,10 +231,13 @@ ensure_permissive_justification() {
   if [[ -n "${PERMISSIVE_JUSTIFICATION// }" ]]; then
     return 0
   fi
-  PERMISSIVE_JUSTIFICATION="$(read_required_value \
-    "Permissive mode justification" \
-    "Risk acceptance is mandatory when policies are downgraded to warning." \
-    "$PERMISSIVE_EVIDENCE_STATE_PATH")"
+  PERMISSIVE_JUSTIFICATION="$(read_product_config_value "$ENVIRONMENT" "OPERATIONS_PERMISSIVE_JUSTIFICATION" || true)"
+  if [[ -z "${PERMISSIVE_JUSTIFICATION// }" ]]; then
+    echo "Missing required config key: OPERATIONS_PERMISSIVE_JUSTIFICATION" >&2
+    echo "Purpose: mandatory risk acceptance reason for permissive security mode" >&2
+    echo "Used by: permissive evidence trail in .runtime/<env>/state and evidence" >&2
+    exit 1
+  fi
   export SECURITY_JUSTIFICATION="$PERMISSIVE_JUSTIFICATION"
 }
 
@@ -542,8 +545,18 @@ run_tls() {
     self-signed) tls_mode="self_signed" ;;
     install-provided)
       tls_mode="provided"
-      local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$OVERRIDE_RUNTIME_PATH")"
-      local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$OVERRIDE_RUNTIME_PATH")"
+      local_cert_path="$(read_product_config_value "$ENVIRONMENT" "TLS_PROVIDED_LOCAL_CERT_PATH" || true)"
+      local_key_path="$(read_product_config_value "$ENVIRONMENT" "TLS_PROVIDED_LOCAL_KEY_PATH" || true)"
+      local_cert_path="$(expand_home_path "$local_cert_path")"
+      local_key_path="$(expand_home_path "$local_key_path")"
+      if [[ -z "${local_cert_path// }" || ! -f "$local_cert_path" ]]; then
+        echo "Missing or invalid TLS_PROVIDED_LOCAL_CERT_PATH in config/$ENVIRONMENT.env" >&2
+        exit 1
+      fi
+      if [[ -z "${local_key_path// }" || ! -f "$local_key_path" ]]; then
+        echo "Missing or invalid TLS_PROVIDED_LOCAL_KEY_PATH in config/$ENVIRONMENT.env" >&2
+        exit 1
+      fi
       ;;
     reload)
       tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"

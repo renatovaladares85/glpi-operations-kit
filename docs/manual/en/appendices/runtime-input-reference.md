@@ -4,7 +4,7 @@ This appendix explains how configuration and runtime data flow through the proje
 
 ## Public vs secret input
 
-All non-sensitive values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Sensitive values are never stored there and remain in `.runtime/<environment>/secrets.yml`.
+All deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, policy flags, and required secrets. Scripts materialize `.runtime/<environment>/secrets.yml` from this file for Ansible consumption.
 
 In practice, you edit public values once in `config/<environment>.env`, run `deploy check`, and let the scripts render the runtime files used by Ansible.
 
@@ -15,7 +15,7 @@ In practice, you edit public values once in `config/<environment>.env`, run `dep
 | `.runtime/<env>/inventory.runtime.yml` | config renderer via `glpictl` | Encodes the effective host targeting model (`local` or `ssh`) for this execution | `ansible-inventory`, `ansible-playbook` |
 | `.runtime/<env>/public.runtime.yml` | config renderer via `glpictl` | Converts public `key=value` settings into role-ready variables | `ansible-playbook` |
 | `.runtime/<env>/overrides.runtime.yml` | scripts and operator actions | Stores mutable runtime overrides (for example TLS changes) without editing baseline config | `ansible-playbook` |
-| `.runtime/<env>/secrets.yml` | interactive secret prompts | Stores secret values outside Git with restricted permissions | `ansible-playbook` |
+| `.runtime/<env>/secrets.yml` | renderer from `config/<env>.env` | Stores secret values outside Git with restricted permissions | `ansible-playbook` |
 | `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Machine-readable precheck and policy status | operators, audit flow |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Human-readable precheck summary | operators, audit flow |
 | `.runtime/<env>/state/deploy-sequence.yml` | deploy workflow | Tracks ordered execution state for gated stages | `glpictl` |
@@ -39,13 +39,13 @@ The operational meaning is straightforward: baseline settings come from `config/
 
 ## Mandatory secret keys
 
-The minimum required secret keys are:
+The minimum required keys in `config/<environment>.env` for secret materialization are:
 
-- `glpi_db_password`
-- `glpi_db_root_password`
-- `mysqld_exporter_password`
+- `DATABASE_PASSWORD`
+- `DATABASE_ROOT_PASSWORD`
+- `MONITORING_MYSQLD_EXPORTER_PASSWORD`
 
-If any of them are missing, scripts prompt for values and block mutable operations until the secret file is compliant.
+If any of them are missing in `config/<environment>.env`, scripts fail early and block mutable operations until the environment file is complete.
 
 ## Conditional runtime rules
 

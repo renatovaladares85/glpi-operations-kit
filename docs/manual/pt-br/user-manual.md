@@ -14,7 +14,7 @@ A primeira ação é preparar a configuração e, em seguida, ajustar permissõe
 cp config/product.env config/staging.env
 ```
 
-Abra `config/staging.env` e ajuste os valores para seu ambiente. Não coloque segredos nesse arquivo. Senhas e dados sensíveis ficam somente em `.runtime/<environment>/secrets.yml`, que é criado e mantido em runtime.
+Abra `config/staging.env` e ajuste todos os valores obrigatórios, incluindo os sensíveis necessários para o deploy. O script não solicita mais segredos no terminal; ele lê do arquivo de ambiente e materializa `.runtime/<environment>/secrets.yml` com permissão restrita.
 
 Depois de ajustar o arquivo, execute:
 

@@ -79,9 +79,21 @@ REQUIRED_PUBLIC_KEYS = {
         "purpose": "Defines the GLPI database username.",
         "consumer": "database and application connectivity",
     },
+    "DATABASE_PASSWORD": {
+        "purpose": "Defines the GLPI database password.",
+        "consumer": "runtime secrets materialization and database/application connectivity",
+    },
+    "DATABASE_ROOT_PASSWORD": {
+        "purpose": "Defines the MariaDB root password for provisioning.",
+        "consumer": "runtime secrets materialization and database provisioning",
+    },
     "MONITORING_MYSQLD_EXPORTER_USER": {
         "purpose": "Defines the mysqld_exporter username.",
         "consumer": "monitoring role",
+    },
+    "MONITORING_MYSQLD_EXPORTER_PASSWORD": {
+        "purpose": "Defines the mysqld_exporter password.",
+        "consumer": "runtime secrets materialization and monitoring role",
     },
     "TLS_MODE": {
         "purpose": "Defines whether the deployment uses none, self_signed, or provided TLS.",

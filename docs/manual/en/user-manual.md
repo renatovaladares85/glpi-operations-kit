@@ -14,7 +14,7 @@ Your first action is always to prepare configuration, then bootstrap permissions
 cp config/product.env config/staging.env
 ```
 
-Open `config/staging.env`, adjust the values for your environment, and keep secrets out of this file. Passwords and other sensitive data are stored only in `.runtime/<environment>/secrets.yml`, which is generated and maintained at runtime.
+Open `config/staging.env` and adjust all required values, including sensitive ones required by deployment. The script does not prompt for missing secrets anymore; it reads them from the environment file and materializes `.runtime/<environment>/secrets.yml` with restricted permissions.
 
 After editing the environment file, run:
 

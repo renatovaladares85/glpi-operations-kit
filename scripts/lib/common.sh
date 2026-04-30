@@ -749,18 +749,27 @@ ensure_secret_keys() {
   secret_path="$(runtime_secret_path "$environment")"
   ensure_runtime_foundation "$environment"
 
-  glpi_db_password="$(read_yaml_top_level_value "$secret_path" "glpi_db_password" || true)"
-  glpi_db_root_password="$(read_yaml_top_level_value "$secret_path" "glpi_db_root_password" || true)"
-  mysqld_exporter_password="$(read_yaml_top_level_value "$secret_path" "mysqld_exporter_password" || true)"
+  glpi_db_password="$(read_product_config_value "$environment" "DATABASE_PASSWORD" || true)"
+  glpi_db_root_password="$(read_product_config_value "$environment" "DATABASE_ROOT_PASSWORD" || true)"
+  mysqld_exporter_password="$(read_product_config_value "$environment" "MONITORING_MYSQLD_EXPORTER_PASSWORD" || true)"
 
   if [[ -z "${glpi_db_password// }" ]]; then
-    glpi_db_password="$(read_required_value "GLPI database password" "The GLPI database user requires a secret password." "$secret_path" true)"
+    echo "Missing required config key: DATABASE_PASSWORD" >&2
+    echo "Purpose: secret password for GLPI database user" >&2
+    echo "Used by: database provisioning and application connectivity" >&2
+    exit 1
   fi
   if [[ -z "${glpi_db_root_password// }" ]]; then
-    glpi_db_root_password="$(read_required_value "MariaDB root password" "MariaDB hardening and schema creation require the root password." "$secret_path" true)"
+    echo "Missing required config key: DATABASE_ROOT_PASSWORD" >&2
+    echo "Purpose: root password for MariaDB administrative operations" >&2
+    echo "Used by: schema creation, grants, and hardening" >&2
+    exit 1
   fi
   if [[ -z "${mysqld_exporter_password// }" ]]; then
-    mysqld_exporter_password="$(read_required_value "mysqld_exporter password" "The mysqld exporter account requires a secret password." "$secret_path" true)"
+    echo "Missing required config key: MONITORING_MYSQLD_EXPORTER_PASSWORD" >&2
+    echo "Purpose: secret password for mysqld exporter account" >&2
+    echo "Used by: monitoring role deployment" >&2
+    exit 1
   fi
 
   save_yaml_map "$secret_path" \
