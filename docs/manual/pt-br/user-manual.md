@@ -155,9 +155,15 @@ Se aparecer `permission denied` ao chamar `./scripts/...`, rode o bootstrap nova
 
 Arquivos públicos:
 
-- `config/staging.yml`
-- `config/production.yml`
 - `config/product.example.yml`
+- `config/<environment>.yml` (criado pelo operador a partir de `product.example.yml`)
+
+Crie o arquivo do ambiente antes do deploy:
+
+```bash
+cp config/product.example.yml config/staging.yml
+cp config/product.example.yml config/production.yml
+```
 
 Arquivo de segredo runtime:
 

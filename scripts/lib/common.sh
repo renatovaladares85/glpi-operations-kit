@@ -813,7 +813,8 @@ invoke_ansible() {
   shift 2
 
   assert_command "ansible-playbook"
-  local inventory="${ANSIBLE_RUNTIME_INVENTORY:-$SCRIPT_ROOT/../ansible/inventories/$environment/hosts.yml}"
+  local inventory="${ANSIBLE_RUNTIME_INVENTORY:-$(runtime_inventory_path "$environment")}"
+  require_runtime_file "$inventory" "runtime inventory for environment '$environment'"
   local playbook="$SCRIPT_ROOT/../ansible/site.yml"
   local args=("-i" "$inventory" "$playbook")
 
@@ -1483,8 +1484,10 @@ run_preflight_checks() {
       fi
     fi
   else
+    local copy_cmd
+    copy_cmd="cp config/product.example.yml config/${environment}.yml"
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
-      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.yml" "create config file from example" "true" "fail" "Provide config/<environment>.yml."
+      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.yml" "$copy_cmd" "true" "fail" "Create config/${environment}.yml from config/product.example.yml and adjust values."
     mandatory_failures=$((mandatory_failures + 1))
   fi
 

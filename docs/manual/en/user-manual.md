@@ -155,9 +155,15 @@ If you see `permission denied` when calling `./scripts/...`, run the bootstrap a
 
 Public config files:
 
-- `config/staging.yml`
-- `config/production.yml`
 - `config/product.example.yml`
+- `config/<environment>.yml` (operator-created from `product.example.yml`)
+
+Create environment file before running deploy:
+
+```bash
+cp config/product.example.yml config/staging.yml
+cp config/product.example.yml config/production.yml
+```
 
 Secret runtime file:
 

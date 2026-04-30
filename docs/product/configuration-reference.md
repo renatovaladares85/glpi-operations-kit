@@ -7,8 +7,7 @@ This document defines the single public configuration model for the reusable GLP
 Primary files:
 
 - `config/product.example.yml`
-- `config/staging.yml`
-- `config/production.yml`
+- `config/<environment>.yml` (created from `product.example.yml`)
 
 Secret file:
 

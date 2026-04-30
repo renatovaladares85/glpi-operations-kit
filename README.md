@@ -13,9 +13,8 @@ Private infrastructure-as-code product for deploying and operating GLPI in reusa
 
 Primary public configuration:
 
-- `config/staging.yml`
-- `config/production.yml`
 - `config/product.example.yml`
+- `config/<environment>.yml` (created by copying `product.example.yml`)
 
 Runtime secrets:
 
@@ -54,6 +53,7 @@ Execution contract (shared by all scripts):
 Examples:
 
 ```bash
+cp config/product.example.yml config/staging.yml
 export GLPI_ENVIRONMENT=staging
 export GLPI_EXECUTION_MODE=local
 export GLPI_HOST_ROLE=db

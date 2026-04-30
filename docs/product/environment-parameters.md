@@ -13,9 +13,8 @@ This document explains each environment parameter used by scripts and Ansible, i
 
 ## Public baseline files
 
-- `config/staging.yml`
-- `config/production.yml`
 - `config/product.example.yml`
+- `config/<environment>.yml` (created from `product.example.yml`)
 
 ## Secret file
 

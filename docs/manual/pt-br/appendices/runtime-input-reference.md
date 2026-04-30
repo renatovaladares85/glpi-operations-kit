@@ -5,8 +5,7 @@
 Arquivos principais:
 
 - `config/product.example.yml`
-- `config/staging.yml`
-- `config/production.yml`
+- `config/<environment>.yml` (criado a partir de `product.example.yml`)
 
 Todos os valores não sensíveis devem sair desses arquivos.
 

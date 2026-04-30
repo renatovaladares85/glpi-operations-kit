@@ -163,12 +163,12 @@ Validate the Ansible inventory structure.
 ### Command
 
 ```bash
-ansible-inventory --list -i ansible/inventories/staging/hosts.yml
+ansible-inventory --list -i .runtime/<env>/inventory.runtime.yml
 ```
 
 ### When to use
 
-Before running playbooks or after changing inventories.
+Before running playbooks or after changing environment runtime configuration.
 
 ### Preconditions
 
@@ -185,7 +185,7 @@ Validate the main playbook syntax.
 ### Command
 
 ```bash
-ansible-playbook --syntax-check ansible/site.yml
+ansible-playbook --syntax-check -i .runtime/<env>/inventory.runtime.yml ansible/site.yml
 ```
 
 ### When to use

@@ -5,8 +5,7 @@
 Primary files:
 
 - `config/product.example.yml`
-- `config/staging.yml`
-- `config/production.yml`
+- `config/<environment>.yml` (created from `product.example.yml`)
 
 All non-secret operational values are read from these files.
 

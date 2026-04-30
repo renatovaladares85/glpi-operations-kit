@@ -1,3 +1,8 @@
+# Copy this file to the target environment name before execution.
+# Example:
+#   cp config/product.example.yml config/staging.yml
+#   cp config/product.example.yml config/production.yml
+
 product:
   name: "GLPI Operations Kit"
   slug: "glpi-operations-kit"
@@ -8,7 +13,7 @@ customer:
   short_name: "example-customer"
 
 environment:
-  name: "staging"
+  name: "example"
   stage: "staging"
 
 execution:
@@ -27,7 +32,7 @@ topology:
 network:
   ssh:
     user: "ubuntu"
-    private_key_path: "~/.ssh/glpi_staging_ed25519"
+    private_key_path: "~/.ssh/glpi_example_ed25519"
   database:
     app_access_host: "192.0.2.10"
     allowed_source_hosts:
@@ -109,7 +114,7 @@ monitoring:
     product: "glpi"
     service: "itsm"
     customer: "example-customer"
-    environment: "staging"
+    environment: "example"
   thresholds:
     cpu_warning_percent: 80
     cpu_critical_percent: 90
