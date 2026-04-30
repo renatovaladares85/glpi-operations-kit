@@ -134,6 +134,30 @@ Before declaring staging complete and before requesting production approval.
 
 ### Objective
 
+Generate an environment-specific SSH key pair for remote deployment.
+
+### Command
+
+```bash
+ssh-keygen -t ed25519 -a 100 -f ~/.ssh/glpi_staging_ed25519 -C "glpi-staging-ops"
+chmod 600 ~/.ssh/glpi_staging_ed25519
+chmod 644 ~/.ssh/glpi_staging_ed25519.pub
+```
+
+### When to use
+
+Before first remote deployment to staging.
+
+### Preconditions
+
+- `openssh-client` installed
+
+### Risks
+
+- low risk; key overwrite risk if the same path is reused without backup
+
+### Objective
+
 Validate the Ansible inventory structure.
 
 ### Command

@@ -7,9 +7,12 @@
 - Use least privilege for SSH, database, and filesystem access.
 - Restrict database access to authorized hosts only.
 - Preserve TLS and restricted permissions.
+- Production must not run without secure TLS/HTTPS.
+- Production policy may require SSO and must be enforced by configuration gate.
 - Never use common, obvious, or easily guessable usernames, passwords, or identifiers.
 - When generating or suggesting names for users, service accounts, aliases, or internal labels, use biblical-context naming by default.
 - Biblical context must not reduce secret strength: passwords, tokens, and keys must remain high-entropy and non-predictable.
+- Never hardcode real customer names in reusable product code or documentation. Keep customer identity configurable and generic.
 
 ## Naming and credential generation
 

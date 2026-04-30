@@ -1,12 +1,15 @@
-# Manual Appendices (EN Canonical)
+# Manual Appendices (Legacy EN Bridge)
 
-This directory is the canonical source for English appendices.
+This directory is retained only for backward compatibility.
 
-Navigation bridge:
+Canonical EN appendices now live in:
 
-- `docs/manual/en/appendices/index.md`
+- `docs/manual/en/appendices/`
+
+Canonical PT-BR appendices live in:
+
+- `docs/manual/pt-br/appendices/`
 
 Operational rule:
 
-- Update EN appendix content here.
-- Keep PT-BR appendix content under `docs/manual/pt-br/appendices/`.
+- add or update appendix content only in the language-specific canonical folders.

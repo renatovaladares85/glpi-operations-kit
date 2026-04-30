@@ -1,36 +1,50 @@
-# Apendice: Troubleshooting
+# Apêndice: Matriz de Troubleshooting
 
-## Permission denied em scripts
+## Falta `ansible-playbook` ou `ansible-inventory`
 
-- Check: `ls -l scripts/*.sh`
-- Fix: `bash scripts/bootstrap-permissions.sh`
+- Sintoma: precheck falha em ferramenta obrigatória.
+- Validação: `command -v ansible-playbook && command -v ansible-inventory`
+- Correção: aceitar instalação automática ou executar `sudo apt-get install -y ansible`
+- Retomada segura: `./scripts/glpictl.sh <env> deploy check all`
 
-## Operacao bloqueada por lock
+## Caminho de chave SSH inválido ou ausente
 
-- Causa: execucao concorrente de `ops-maintenance.sh`
-- Check: `.runtime/<env>/state/.ops-maintenance.lock`
-- Acao: validar se nao existe processo ativo antes de remover lock
+- Sintoma: precheck falha na política de chave SSH.
+- Validação: `ls -l ~/.ssh/glpi_<env>_ed25519 ~/.ssh/glpi_<env>_ed25519.pub`
+- Correção: gerar par de chaves e ajustar `network.ssh.private_key_path`
+- Retomada segura: executar check novamente
 
-## Falha de certificado
+## Modo da chave SSH inseguro
 
-- Check: `./scripts/glpictl.sh staging ops cert check`
-- Acao: aplicar novo certificado com `./scripts/glpictl.sh staging ops cert apply`
+- Sintoma: falha por permissão de chave.
+- Validação: `stat -c '%a' ~/.ssh/glpi_<env>_ed25519`
+- Correção: `chmod 600 ~/.ssh/glpi_<env>_ed25519`
+- Retomada segura: executar check novamente
 
-## Caminho invalido da chave SSH no config do produto
+## Produção bloqueada por política TLS
 
-- Check: `ls -l <caminho-da-chave>`
-- Acao: corrigir `config/<environment>.yml` e garantir `chmod 600 <caminho-da-chave>`
+- Sintoma: apply de produção falha por modo TLS/HTTPS.
+- Validação: `config/production.yml` em `tls.mode`, `security.require_tls_in_production`, `security.require_https_in_production`
+- Correção: configurar `tls.mode=provided` e caminhos de certificado válidos
+- Retomada segura: `production deploy check all` e repetir apply
 
-## Host app/db invalido no config do produto
+## Produção bloqueada por política SSO
 
-- Check: validar sintaxe do hostname ou IP informado
-- Acao: corrigir `config/<environment>.yml` e executar novamente o comando
+- Sintoma: apply de produção falha por política de SSO.
+- Validação: `config/production.yml` em `security.sso_enabled`
+- Correção: configurar `security.sso_enabled: true`
+- Retomada segura: refazer precheck e deploy
 
-## Falha em usuario DB
+## Bloqueio por ordem de execução
 
-- Check: revisar `.runtime/<env>/logs/*.log` e `.summary.yml`
-- Acao: rerun com `./scripts/glpictl.sh staging ops users disable db` ou `./scripts/glpictl.sh staging ops users add db`
+- Sintoma: `apply app` bloqueado antes de `apply db`.
+- Validação: `.runtime/<env>/state/deploy-sequence.yml`
+- Correção: seguir sequência obrigatória `check -> db -> app -> monitoring -> backup -> post-check`
+- Retomada segura: executar somente a próxima etapa exigida
 
-## Continuar apos falha
+## Arquivos TLS provided ausentes
 
-- Comando: `./scripts/glpictl.sh staging ops resume`
+- Sintoma: `tls install-provided` falha.
+- Validação: existência dos arquivos locais e caminhos no config/override
+- Correção: informar caminhos válidos e reaplicar comando TLS
+- Retomada segura: `tls install-provided`

@@ -14,6 +14,11 @@ Secret file:
 
 - `.runtime/<environment>/secrets.yml`
 
+Companion references:
+
+- [Prerequisites Matrix](prerequisites-matrix.md)
+- [Environment Parameters Reference](environment-parameters.md)
+
 ## Configuration Flow
 
 1. Public values are defined in `config/<environment>.yml`.
@@ -122,7 +127,7 @@ Operational rule:
 - `network.ssh.private_key_path`
   - Purpose: path to SSH private key on the execution host.
   - Used by: generated inventory and prechecks.
-  - Example: `~/.ssh/id_rsa`
+  - Example: `~/.ssh/glpi_staging_ed25519`
   - Type: public-sensitive path.
 - `network.database.app_access_host`
   - Purpose: app-side host allowed to connect to MariaDB.
@@ -318,6 +323,33 @@ Operational rule:
   - Purpose: enable service-down alerts.
   - Used by: monitoring blueprint.
   - Type: public.
+
+### `security`
+
+- `security.sso_enabled`
+  - Purpose: indicates whether SSO policy is enabled for the environment.
+  - Used by: production deployment policy gate.
+  - Example: `true` (production), `false` (staging until SSO rollout).
+  - Type: public policy flag.
+  - Requirement: mandatory in all environment configs.
+- `security.allow_insecure_non_production`
+  - Purpose: allows `none` or `self_signed` TLS modes outside production.
+  - Used by: operator policy and precheck guidance.
+  - Type: public policy flag.
+- `security.require_tls_in_production`
+  - Purpose: forces secure TLS mode in production.
+  - Used by: deploy gate.
+  - Type: public policy flag.
+  - Requirement: when `true`, production blocks unless `tls.mode=provided`.
+- `security.require_https_in_production`
+  - Purpose: forces HTTPS behavior in production.
+  - Used by: deploy gate.
+  - Type: public policy flag.
+- `security.require_sso_in_production`
+  - Purpose: forces SSO policy gate in production.
+  - Used by: deploy gate.
+  - Type: public policy flag.
+  - Requirement: when `true`, production blocks unless `security.sso_enabled=true`.
 
 ### `paths`
 

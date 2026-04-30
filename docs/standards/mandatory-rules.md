@@ -12,10 +12,14 @@ These rules must not be broken by agents.
 - Keep public environment values in `config/<environment>.yml`.
 - Keep mutable runtime overrides in `.runtime/<environment>/overrides.runtime.yml`.
 - Keep secrets only in `.runtime/<environment>/secrets.yml`.
+- Maintain one SSH key pair per environment for remote execution contexts.
+- Keep SSH private keys at mode `0600`.
 - Classify each pre-flight result as `mandatory` or `optional`.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.
 - Continue after a mandatory pre-flight failure only with explicit user approval.
 - Enforce operator membership in `glpiops` for deployment operations.
+- Block production deployment unless staging certification gate exists.
+- Block production deployment when TLS/HTTPS/SSO policy requirements are not satisfied.
 - Use `scripts/ops-maintenance.sh` for post-implementation user and certificate lifecycle tasks.
 - Persist day-2 operation logs and checkpoints under `.runtime/<env>/logs` and `.runtime/<env>/state`.
 - Never version secrets.

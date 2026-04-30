@@ -2,12 +2,19 @@
 
 Não implementado:
 
-- integração LDAP/AD
-- integração SMTP
-- provisionamento centralizado Prometheus/Grafana/Alertmanager
-- orquestração de HA e replicação
+- integração LDAP/AD;
+- integração SMTP;
+- provisionamento centralizado de Prometheus/Grafana/Alertmanager;
+- orquestração de HA/replicação.
 
-Parcial:
+Parcialmente implementado:
 
-- automação de ciclo de vida de certificado (troca de modo TLS existe, pipeline corporativo completo ainda não)
-- hardening avançado de segurança de backup (scripts e agendamento existem, gestão completa de chaves/criptografia ainda não)
+- operações de ciclo de vida de TLS (troca de modo e aplicação de certificado existem; automação corporativa completa de CA ainda está postergada);
+- baseline de backup e agendamento (gestão avançada de chaves e pipeline criptográfico ainda está postergada).
+
+Implementado e já obrigatório:
+
+- relatório de precheck com classificação obrigatório/opcional/condicional;
+- gate de produção por configuração para TLS/HTTPS/SSO;
+- bloqueio por ordem obrigatória de deploy;
+- gate de certificação de staging para promoção à produção.

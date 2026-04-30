@@ -96,4 +96,6 @@ When applicable, validate as much as possible before considering a block ready f
 
 - Project overview: [README.md](README.md)
 - Live implementation plan: [implementation-plan.md](docs/implementation-plan.md)
+- Prerequisites matrix: [prerequisites-matrix.md](docs/product/prerequisites-matrix.md)
+- Environment parameters: [environment-parameters.md](docs/product/environment-parameters.md)
 - Standards catalog: [docs/standards/index.md](docs/standards/index.md)

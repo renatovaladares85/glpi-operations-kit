@@ -30,13 +30,12 @@ Why:
 
 - real staging E2E evidence is still required for final release declaration
 - scripts still rely on generated runtime intermediates as the execution contract
-- duplicate/legacy documentation trees still exist and should be rationalized
 - centralized monitoring stack remains blueprint-only
 - restore drill documentation exists conceptually but still needs a stronger product evidence workflow
 
 ## Usability Issues
 
-- legacy docs such as `docs/user-manual.md` and `docs/manual-appendices/*` need consolidation or deprecation
+- legacy docs are kept as compatibility pointers and must remain pointer-only
 - readiness acceptance still depends on running full staging E2E and collecting real evidence
 
 ## Maintainability Issues
@@ -65,9 +64,9 @@ What blocks direct commercial handoff:
 
 ## What Should Be Simplified First?
 
-1. Consolidate legacy doc trees into one canonical structure per language.
-2. Add domain-scoped secret prompting to reduce operator noise.
-3. Expand readiness evidence automation for restore drill execution proof.
+1. Add domain-scoped secret prompting to reduce operator noise.
+2. Expand readiness evidence automation for restore drill execution proof.
+3. Add stronger production cutover checklist automation.
 
 ## What Should Be Templated First?
 

@@ -1,50 +1,55 @@
-# Apendice: Configuracao do Produto e Segredos Runtime
+# Apêndice: Referência de Configuração e Arquivos Runtime
 
-## Visao geral
+## 1. Fonte pública de configuração
 
-O produto agora usa:
+Arquivos principais:
 
-- configuracao publica em `config/<environment>.yml`
-- segredos runtime em `.runtime/<environment>/secrets.yml`
+- `config/staging.yml`
+- `config/production.yml`
+- `config/product.example.yml`
 
-Arquivos runtime gerados:
+Valores públicos devem ser mantidos nesses arquivos e renderizados para runtime automaticamente.
 
-- `.runtime/<environment>/inventory.runtime.yml`
-- `.runtime/<environment>/public.runtime.yml`
-- `.runtime/<environment>/overrides.runtime.yml`
+## 2. Mapa de arquivos runtime
 
-Precedencia de merge:
+| Arquivo | Tipo | Produtor | Consumidor | Sensibilidade | Finalidade |
+|---|---|---|---|---|---|
+| `.runtime/<env>/inventory.runtime.yml` | gerado | `glpictl` + render | inventário Ansible | restrito | define hosts de destino e acesso SSH |
+| `.runtime/<env>/public.runtime.yml` | gerado | `glpictl` + render | variáveis Ansible | restrito | converte valores públicos em variáveis de role |
+| `.runtime/<env>/overrides.runtime.yml` | mutável runtime | `glpictl` / operador | variáveis Ansible | restrito | sobrescreve comportamentos mutáveis (por exemplo TLS) |
+| `.runtime/<env>/secrets.yml` | segredo runtime | prompts do operador | variáveis Ansible | secreto | armazena apenas segredos fora do Git |
+| `.runtime/<env>/state/deploy-sequence.yml` | estado gerado | `glpictl` | `glpictl` | restrito | controla ordem obrigatória de execução |
+| `.runtime/<env>/state/precheck-report-latest.yml` | estado gerado | precheck | operação/auditoria | restrito | relatório estruturado de pré-requisitos |
+| `.runtime/<env>/evidence/precheck-report-latest.md` | evidência gerada | precheck | operação/auditoria | restrito | resumo legível de pré-requisitos |
 
-- `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`
+## 3. Precedência de merge
 
-## O que fica no config publico
+1. `public.runtime.yml`
+2. `overrides.runtime.yml`
+3. `secrets.yml`
 
-Exemplos:
+Impacto operacional:
 
-- nome do cliente
-- hosts ou IPs de app/db
-- usuario SSH e caminho da chave
-- versao do GLPI
-- dominio
-- modo TLS
-- nome do banco e usuario do banco
-- usuario do exporter de monitoracao
-- defaults de backup e monitoracao
-- perfil de tuning
+- baseline público vem de `config/<env>.yml`;
+- override runtime altera comportamento sem reescrever baseline;
+- segredos prevalecem para chaves sensíveis.
 
-## O que fica nos segredos runtime
+## 4. Segredos obrigatórios
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-## Caminho manual sem script
+Se faltar:
 
-Se os scripts nao puderem ser usados, crie:
+- o script solicita em runtime;
+- a execução é bloqueada até preencher.
 
-- `.runtime/<environment>/inventory.runtime.yml`
-- `.runtime/<environment>/public.runtime.yml`
-- `.runtime/<environment>/overrides.runtime.yml`
-- `.runtime/<environment>/secrets.yml`
+## 5. Requisitos condicionais
 
-A fonte recomendada para os valores publicos continua sendo `config/<environment>.yml`.
+- Se `tls.mode=provided`:
+  - caminhos locais de certificado/chave devem existir.
+- Se `topology.mode=dual-server`:
+  - chave SSH por ambiente e conectividade com app/db são obrigatórias.
+- Em produção:
+  - políticas de TLS/HTTPS/SSO são obrigatórias e bloqueantes.

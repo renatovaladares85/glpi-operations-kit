@@ -87,6 +87,8 @@ Specific scripts remain available as wrappers over the same central flow.
 - [Implementation plan](docs/implementation-plan.md)
 - [Operator manual](docs/manual/README.md)
 - [Configuration reference](docs/product/configuration-reference.md)
+- [Prerequisites matrix](docs/product/prerequisites-matrix.md)
+- [Environment parameters](docs/product/environment-parameters.md)
 - [Monitoring blueprint](docs/product/monitoring-blueprint.md)
 - [Product audit](docs/product/product-audit.md)
 - [Standards catalog](docs/standards/index.md)

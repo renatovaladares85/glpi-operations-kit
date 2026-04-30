@@ -1,21 +1,21 @@
-# Apêndice: Checks Operacionais
+# Appendix: Operational Checks
 
-## 1. Saídas do precheck
+## 1. Precheck outputs
 
-Após `deploy check`, validar:
+After `deploy check`, validate:
 
 - `.runtime/<env>/state/precheck-report-latest.yml`
 - `.runtime/<env>/evidence/precheck-report-latest.md`
 
-Esses relatórios classificam cada pré-requisito como obrigatório, opcional ou condicional.
+These reports classify each prerequisite as mandatory, optional, or conditional.
 
-## 2. Controle de sequência de deploy
+## 2. Deploy sequence controls
 
-Arquivo de estado:
+State file:
 
 - `.runtime/<env>/state/deploy-sequence.yml`
 
-Ordem obrigatória:
+Mandatory order:
 
 1. `deploy check all`
 2. `deploy apply db`
@@ -24,9 +24,9 @@ Ordem obrigatória:
 5. `deploy apply backup`
 6. `deploy post-check all`
 
-Chamadas fora de ordem são bloqueadas.
+Out-of-order calls are blocked.
 
-## 3. Checks de serviço após apply
+## 3. Service checks after apply
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list >/dev/null
@@ -35,25 +35,25 @@ sudo php-fpm8.3 -t
 sudo systemctl status nginx php8.3-fpm mariadb --no-pager
 ```
 
-## 4. Evidências de certificação e prontidão
+## 4. Certification and readiness evidence
 
 ```bash
 ./scripts/glpictl.sh staging certify run
 bash scripts/release-readiness.sh staging
 ```
 
-Artefatos obrigatórios:
+Mandatory artifacts:
 
 - `.runtime/staging/evidence/readiness-report.md`
 - `.runtime/staging/evidence/readiness-report.json`
 - `.runtime/promotion/staging-certified.yml`
 
-## 5. Evidências de operação day-2
+## 5. Day-2 operation evidence
 
-Validar:
+Validate:
 
 - `.runtime/<env>/logs/*.log`
 - `.runtime/<env>/logs/*.summary.yml`
 - `.runtime/<env>/state/*.state.yml`
 
-Esses artefatos são necessários para auditoria e investigação.
+These files are required for troubleshooting and audit.
