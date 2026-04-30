@@ -1,0 +1,4 @@
+$HTTP["host"] =~ "({{ glpi_domain }}|{{ glpi_app_host }})" {
+    server.document-root = "{{ glpi_install_dir }}/public/"
+    url.rewrite-if-not-file = ( "" => "/index.php${url.path}${qsa}" )
+}

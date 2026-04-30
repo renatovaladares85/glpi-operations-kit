@@ -8,9 +8,9 @@ from pathlib import Path
 EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
+WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd", "iis"}
 
 DEFAULT_GLPI_APP_PACKAGES = [
-    "nginx",
     "php-fpm",
     "php-cli",
     "php-curl",
@@ -31,6 +31,13 @@ DEFAULT_GLPI_APP_PACKAGES = [
     "curl",
     "openssl",
 ]
+
+WEB_SERVER_PACKAGES = {
+    "nginx": ["nginx"],
+    "apache": ["apache2", "libapache2-mod-fcgid"],
+    "lighttpd": ["lighttpd"],
+    "iis": [],
+}
 
 DEFAULT_DATABASE_PACKAGES = ["mariadb-server", "mariadb-client", "python3-pymysql"]
 
@@ -70,6 +77,10 @@ REQUIRED_PUBLIC_KEYS = {
     "GLPI_DOMAIN": {
         "purpose": "Defines the public GLPI domain or hostname.",
         "consumer": "application role, TLS, smoke tests",
+    },
+    "WEB_SERVER_TYPE": {
+        "purpose": "Defines which GLPI-compatible web server should be configured.",
+        "consumer": "application role web server provisioning and templates",
     },
     "DATABASE_NAME": {
         "purpose": "Defines the GLPI database name.",
@@ -145,6 +156,7 @@ DOTTED_KEY_MAP = {
     "network.database.allowed_source_hosts": "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS",
     "glpi.version": "GLPI_VERSION",
     "glpi.domain": "GLPI_DOMAIN",
+    "web.server_type": "WEB_SERVER_TYPE",
     "glpi.upload_max_filesize": "GLPI_UPLOAD_MAX_FILESIZE",
     "glpi.post_max_size": "GLPI_POST_MAX_SIZE",
     "glpi.memory_limit": "GLPI_MEMORY_LIMIT",
@@ -359,6 +371,16 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     release_root = read_value(values, "PATH_GLPI_RELEASE_ROOT", "/usr/share").strip() or "/usr/share"
     ssh_key_path = os.path.expanduser(read_value(values, "NETWORK_SSH_PRIVATE_KEY_PATH", "").strip())
 
+    app_host = require_value(values, "TOPOLOGY_APP_HOST")
+    app_packages_value = read_value(values, "GLPI_APP_PACKAGES", "").strip()
+    if app_packages_value:
+        app_packages = as_list(app_packages_value, DEFAULT_GLPI_APP_PACKAGES)
+    else:
+        app_packages = WEB_SERVER_PACKAGES[web_server_type] + DEFAULT_GLPI_APP_PACKAGES
+
+    if web_server_type == "apache":
+        app_packages.append("libapache2-mod-php8.3")
+
     public_runtime = {
         "product_name": require_value(values, "PRODUCT_NAME"),
         "product_slug": read_value(values, "PRODUCT_SLUG", "glpi-operations-kit"),
@@ -380,6 +402,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "glpi_log_dir": read_value(values, "PATH_GLPI_LOG_DIR", "/var/log/glpi"),
         "glpi_backup_base_dir": read_value(values, "BACKUP_BASE_DIR", "/var/backups/glpi"),
         "glpi_domain": glpi_domain,
+        "glpi_app_host": app_host,
+        "glpi_web_server_type": web_server_type,
         "glpi_use_tls": tls_mode != "none",
         "glpi_tls_mode": tls_mode,
         "glpi_tls_common_name": read_value(values, "TLS_COMMON_NAME", glpi_domain),
@@ -397,7 +421,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "glpi_php_fpm_socket": read_value(values, "PHP_FPM_SOCKET", "/run/php/php8.3-fpm.sock"),
         "nginx_http_port": as_int(read_value(values, "NGINX_HTTP_PORT", "80"), 80),
         "nginx_https_port": as_int(read_value(values, "NGINX_HTTPS_PORT", "443"), 443),
-        "glpi_app_packages": as_list(read_value(values, "GLPI_APP_PACKAGES", ""), DEFAULT_GLPI_APP_PACKAGES),
+        "glpi_app_packages": app_packages,
         "glpi_upload_max_filesize": read_value(values, "GLPI_UPLOAD_MAX_FILESIZE", "32M"),
         "glpi_post_max_size": read_value(values, "GLPI_POST_MAX_SIZE", "32M"),
         "glpi_memory_limit": read_value(values, "GLPI_MEMORY_LIMIT", "512M"),
@@ -565,3 +589,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
+    if web_server_type not in WEB_SERVER_TYPES:
+        fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd, iis.")

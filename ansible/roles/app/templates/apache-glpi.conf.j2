@@ -1,0 +1,18 @@
+<VirtualHost *:{{ nginx_http_port }}>
+    ServerName {{ glpi_domain }}
+    ServerAlias {{ glpi_app_host }}
+
+    DocumentRoot {{ glpi_install_dir }}/public
+
+    <Directory {{ glpi_install_dir }}/public>
+        Require all granted
+        RewriteEngine On
+        RewriteCond %{HTTP:Authorization} ^(.+)$
+        RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteRule ^(.*)$ index.php [QSA,L]
+    </Directory>
+
+    ErrorLog {{ glpi_log_dir }}/apache-error.log
+    CustomLog {{ glpi_log_dir }}/apache-access.log combined
+</VirtualHost>

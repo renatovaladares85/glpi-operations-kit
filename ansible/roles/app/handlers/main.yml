@@ -8,3 +8,13 @@
   ansible.builtin.service:
     name: "{{ glpi_php_fpm_service }}"
     state: restarted
+
+- name: Reload apache2
+  ansible.builtin.service:
+    name: apache2
+    state: reloaded
+
+- name: Reload lighttpd
+  ansible.builtin.service:
+    name: lighttpd
+    state: reloaded

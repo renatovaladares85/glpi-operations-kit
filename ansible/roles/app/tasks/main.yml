@@ -37,6 +37,18 @@
       - glpi_tls_mode in ['none', 'self_signed', 'provided']
     fail_msg: "Invalid glpi_tls_mode. Supported values: none, self_signed, provided."
 
+- name: Assert valid web server type
+  ansible.builtin.assert:
+    that:
+      - glpi_web_server_type in ['nginx', 'apache', 'lighttpd', 'iis']
+    fail_msg: "Invalid glpi_web_server_type. Supported values: nginx, apache, lighttpd, iis."
+
+- name: Block IIS on Linux execution hosts
+  ansible.builtin.assert:
+    that:
+      - not (glpi_web_server_type == 'iis' and ansible_system == 'Linux')
+    fail_msg: "WEB_SERVER_TYPE=iis is not supported on Linux hosts. Use nginx, apache, or lighttpd on Ubuntu."
+
 - name: Assert provided TLS inputs exist
   ansible.builtin.assert:
     that:
@@ -153,6 +165,13 @@
     state: absent
   notify: Restart php-fpm
 
+- name: Enable Apache rewrite module
+  ansible.builtin.command: a2enmod rewrite
+  register: apache_rewrite_module
+  changed_when: "'already enabled' not in (apache_rewrite_module.stdout | default(''))"
+  when: glpi_web_server_type == 'apache'
+  notify: Reload apache2
+
 - name: Deploy Nginx virtual host
   ansible.builtin.template:
     src: nginx-glpi.conf.j2
@@ -160,6 +179,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: glpi_web_server_type == 'nginx'
   notify: Reload nginx
 
 - name: Enable GLPI virtual host
@@ -168,13 +188,77 @@
     dest: /etc/nginx/sites-enabled/glpi.conf
     state: link
     force: true
+  when: glpi_web_server_type == 'nginx'
   notify: Reload nginx
 
 - name: Disable default nginx site
   ansible.builtin.file:
     path: /etc/nginx/sites-enabled/default
     state: absent
+  when: glpi_web_server_type == 'nginx'
   notify: Reload nginx
+
+- name: Deploy Apache virtual host
+  ansible.builtin.template:
+    src: apache-glpi.conf.j2
+    dest: /etc/apache2/sites-available/glpi.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: glpi_web_server_type == 'apache'
+  notify: Reload apache2
+
+- name: Enable Apache GLPI virtual host
+  ansible.builtin.command: a2ensite glpi.conf
+  register: apache_glpi_site
+  changed_when: "'already enabled' not in (apache_glpi_site.stdout | default(''))"
+  when: glpi_web_server_type == 'apache'
+  notify: Reload apache2
+
+- name: Disable default Apache virtual host
+  ansible.builtin.command: a2dissite 000-default.conf
+  register: apache_default_site
+  changed_when: "'already disabled' not in (apache_default_site.stdout | default(''))"
+  when: glpi_web_server_type == 'apache'
+  notify: Reload apache2
+
+- name: Deploy lighttpd GLPI virtual host
+  ansible.builtin.template:
+    src: lighttpd-glpi.conf.j2
+    dest: /etc/lighttpd/conf-available/glpi.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: glpi_web_server_type == 'lighttpd'
+  notify: Reload lighttpd
+
+- name: Enable lighttpd GLPI virtual host
+  ansible.builtin.command: lighty-enable-mod glpi
+  register: lighttpd_enable_glpi
+  changed_when: "'already enabled' not in (lighttpd_enable_glpi.stdout | default(''))"
+  when: glpi_web_server_type == 'lighttpd'
+  notify: Reload lighttpd
+
+- name: Enable lighttpd rewrite module
+  ansible.builtin.command: lighty-enable-mod rewrite
+  register: lighttpd_enable_rewrite
+  changed_when: "'already enabled' not in (lighttpd_enable_rewrite.stdout | default(''))"
+  when: glpi_web_server_type == 'lighttpd'
+  notify: Reload lighttpd
+
+- name: Enable lighttpd fastcgi module
+  ansible.builtin.command: lighty-enable-mod fastcgi
+  register: lighttpd_enable_fastcgi
+  changed_when: "'already enabled' not in (lighttpd_enable_fastcgi.stdout | default(''))"
+  when: glpi_web_server_type == 'lighttpd'
+  notify: Reload lighttpd
+
+- name: Enable lighttpd fastcgi-php module
+  ansible.builtin.command: lighty-enable-mod fastcgi-php
+  register: lighttpd_enable_fastcgiphp
+  changed_when: "'already enabled' not in (lighttpd_enable_fastcgiphp.stdout | default(''))"
+  when: glpi_web_server_type == 'lighttpd'
+  notify: Reload lighttpd
 
 - name: Deploy GLPI cron wrapper
   ansible.builtin.template:
@@ -198,6 +282,17 @@
 - name: Validate nginx configuration
   ansible.builtin.command: nginx -t
   changed_when: false
+  when: glpi_web_server_type == 'nginx'
+
+- name: Validate apache configuration
+  ansible.builtin.command: apachectl -t
+  changed_when: false
+  when: glpi_web_server_type == 'apache'
+
+- name: Validate lighttpd configuration
+  ansible.builtin.command: lighttpd -tt -f /etc/lighttpd/lighttpd.conf
+  changed_when: false
+  when: glpi_web_server_type == 'lighttpd'
 
 - name: Validate php-fpm configuration
   ansible.builtin.command: php-fpm8.3 -t
@@ -250,6 +345,21 @@
     name: nginx
     state: started
     enabled: true
+  when: glpi_web_server_type == 'nginx'
+
+- name: Ensure apache2 is enabled
+  ansible.builtin.service:
+    name: apache2
+    state: started
+    enabled: true
+  when: glpi_web_server_type == 'apache'
+
+- name: Ensure lighttpd is enabled
+  ansible.builtin.service:
+    name: lighttpd
+    state: started
+    enabled: true
+  when: glpi_web_server_type == 'lighttpd'
 
 - name: Ensure php-fpm is enabled
   ansible.builtin.service:

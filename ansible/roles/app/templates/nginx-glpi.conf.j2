@@ -1,8 +1,8 @@
 {% if glpi_tls_mode == 'none' %}
 server {
-    listen 80;
-    listen [::]:80;
-    server_name {{ glpi_domain }};
+    listen {{ nginx_http_port }};
+    listen [::]:{{ nginx_http_port }};
+    server_name {{ glpi_domain }} {{ glpi_app_host }};
     root {{ glpi_install_dir }}/public;
 
     client_max_body_size {{ glpi_upload_max_filesize }};
@@ -31,9 +31,9 @@ server {
 }
 {% else %}
 server {
-    listen 80;
-    listen [::]:80;
-    server_name {{ glpi_domain }};
+    listen {{ nginx_http_port }};
+    listen [::]:{{ nginx_http_port }};
+    server_name {{ glpi_domain }} {{ glpi_app_host }};
 
     location / {
         return 301 https://$host$request_uri;
@@ -41,9 +41,9 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name {{ glpi_domain }};
+    listen {{ nginx_https_port }} ssl http2;
+    listen [::]:{{ nginx_https_port }} ssl http2;
+    server_name {{ glpi_domain }} {{ glpi_app_host }};
     root {{ glpi_install_dir }}/public;
 
     ssl_certificate {{ glpi_tls_certificate_path }};
