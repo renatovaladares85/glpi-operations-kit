@@ -90,7 +90,7 @@ Run the mandatory pre-flight check before implementation.
 ### Command
 
 ```bash
-./scripts/deploy-staging.sh check
+./scripts/glpictl.sh staging deploy check all
 ```
 
 ### When to use
@@ -107,6 +107,30 @@ Before any staging implementation or validation session.
 ### Risks
 
 - low risk; read-only
+
+### Objective
+
+Run the release readiness gate and generate audit-ready reports.
+
+### Command
+
+```bash
+bash scripts/release-readiness.sh staging
+```
+
+### When to use
+
+Before declaring staging complete and before requesting production approval.
+
+### Preconditions
+
+- bootstrap completed
+- runtime config rendered
+- runtime secrets present
+
+### Risks
+
+- low risk; validation-only but fails hard on unresolved critical gaps
 
 ### Objective
 

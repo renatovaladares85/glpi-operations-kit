@@ -21,7 +21,22 @@ Secret file:
 3. Missing secrets are requested at runtime and stored in `.runtime/<environment>/secrets.yml`.
 4. Ansible consumes:
    - `.runtime/<environment>/public.runtime.yml`
+   - `.runtime/<environment>/overrides.runtime.yml`
    - `.runtime/<environment>/secrets.yml`
+
+## Precedence
+
+Runtime values are merged in this order:
+
+1. public base config rendered to `public.runtime.yml`
+2. mutable runtime overrides from `overrides.runtime.yml`
+3. runtime secrets from `secrets.yml`
+
+Operational rule:
+
+- public defaults and customer values must remain in `config/<environment>.yml`
+- mutable operator changes (for example TLS mode transitions) must be written in `overrides.runtime.yml`
+- secrets must remain only in `secrets.yml`
 
 ## Sections
 

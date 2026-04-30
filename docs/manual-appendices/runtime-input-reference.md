@@ -11,6 +11,11 @@ Generated runtime files:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
+
+Merge precedence:
+
+- `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`
 
 ## What belongs in public config
 
@@ -39,6 +44,7 @@ If scripts cannot be used, create:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
 - `.runtime/<environment>/secrets.yml`
 
 The recommended source for manual public values is still `config/<environment>.yml`.

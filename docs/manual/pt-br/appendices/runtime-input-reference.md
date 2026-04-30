@@ -11,6 +11,11 @@ Arquivos runtime gerados:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
+
+Precedencia de merge:
+
+- `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`
 
 ## O que fica no config publico
 
@@ -39,6 +44,7 @@ Se os scripts nao puderem ser usados, crie:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
 - `.runtime/<environment>/secrets.yml`
 
 A fonte recomendada para os valores publicos continua sendo `config/<environment>.yml`.

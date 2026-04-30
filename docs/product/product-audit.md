@@ -13,6 +13,7 @@ Why:
 - strong automation baseline exists
 - scripts, Ansible roles, monitoring exporters, backups, and runbooks already exist
 - new central public configuration model improves reuse
+- runtime override layer exists for mutable operational settings
 - secrets remain outside Git
 - promotion gate exists between staging and production
 
@@ -27,18 +28,16 @@ Why:
 
 ## Product Blockers
 
-- runtime overrides are not yet fully modeled for every mutable operational change
-  - example: TLS action flow still needs a cleaner long-term override strategy
-- scripts still rely on generated runtime intermediates instead of consuming product config directly everywhere
+- real staging E2E evidence is still required for final release declaration
+- scripts still rely on generated runtime intermediates as the execution contract
 - duplicate/legacy documentation trees still exist and should be rationalized
 - centralized monitoring stack remains blueprint-only
 - restore drill documentation exists conceptually but still needs a stronger product evidence workflow
 
 ## Usability Issues
 
-- some manual appendices still reflect the older runtime file model
 - legacy docs such as `docs/user-manual.md` and `docs/manual-appendices/*` need consolidation or deprecation
-- direct script behavior is strong, but public config precedence needs to be more visible in all docs
+- readiness acceptance still depends on running full staging E2E and collecting real evidence
 
 ## Maintainability Issues
 
@@ -66,9 +65,9 @@ What blocks direct commercial handoff:
 
 ## What Should Be Simplified First?
 
-1. Eliminate old runtime-file references from remaining manuals and appendices.
-2. Complete public-config-first flow in every script path.
-3. Add domain-scoped secret prompting to reduce operator noise.
+1. Consolidate legacy doc trees into one canonical structure per language.
+2. Add domain-scoped secret prompting to reduce operator noise.
+3. Expand readiness evidence automation for restore drill execution proof.
 
 ## What Should Be Templated First?
 

@@ -45,6 +45,7 @@ After deployment:
 - PHP-FPM validation succeeds
 - MariaDB schema and user exist
 - GLPI directories exist with expected permissions
+- readiness gate report is generated and archived
 
 Validation commands:
 
@@ -77,5 +78,19 @@ sudo systemctl status nginx php8.3-fpm mariadb --no-pager
 ## 6. Runtime Data Hygiene
 
 - `.runtime/` exists locally
+- `overrides.runtime.yml` is present for mutable operational settings
 - runtime secrets are not committed to Git
 - secret files use restricted permissions (`chmod 600`)
+
+## 7. Release Readiness Gate
+
+Run:
+
+```bash
+bash scripts/release-readiness.sh staging
+```
+
+Expected outputs:
+
+- `.runtime/staging/evidence/readiness-report.md`
+- `.runtime/staging/evidence/readiness-report.json`

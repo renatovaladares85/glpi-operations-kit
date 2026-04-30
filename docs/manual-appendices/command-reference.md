@@ -30,6 +30,7 @@ Main files:
 ./scripts/glpictl.sh staging deploy apply monitoring
 ./scripts/glpictl.sh staging deploy apply backup
 ./scripts/glpictl.sh staging certify run
+bash scripts/release-readiness.sh staging
 ./scripts/glpictl.sh production deploy check all
 ./scripts/glpictl.sh production deploy apply db
 ./scripts/glpictl.sh production deploy apply app
@@ -41,8 +42,8 @@ Main files:
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/overrides.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/overrides.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/overrides.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/overrides.runtime.yml --extra-vars @.runtime/staging/secrets.yml
 ```

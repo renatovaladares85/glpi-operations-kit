@@ -25,6 +25,7 @@ Generated runtime artifacts:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
 - `.runtime/<environment>/logs/`
 - `.runtime/<environment>/state/`
 - `.runtime/<environment>/evidence/`
@@ -53,6 +54,7 @@ bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy apply monitoring
 ./scripts/glpictl.sh staging deploy apply backup
 ./scripts/glpictl.sh staging certify run
+bash scripts/release-readiness.sh staging
 ./scripts/glpictl.sh production deploy check all
 ./scripts/glpictl.sh production deploy apply db
 ./scripts/glpictl.sh production deploy apply app

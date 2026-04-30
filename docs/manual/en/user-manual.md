@@ -48,6 +48,7 @@ Generated runtime artifacts:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
 
 Operational rule:
 
@@ -196,6 +197,7 @@ Configuration files:
 
 - `inventory.runtime.yml`
 - `public.runtime.yml`
+- `overrides.runtime.yml`
 - `secrets.yml`
 
 Operational state:
@@ -213,6 +215,7 @@ Important behavior:
 - if runtime files are missing, `glpictl` renders them from `config/<environment>.yml`
 - only missing secrets should be requested at runtime
 - public values should not be entered interactively when already present in the product config
+- values are merged in this order: `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`
 
 ## 9. What `apply db` Does
 
@@ -391,6 +394,7 @@ Staging certification:
 
 ```bash
 ./scripts/glpictl.sh staging certify run
+bash scripts/release-readiness.sh staging
 ```
 
 What it does:
@@ -431,7 +435,7 @@ Execution must stop when any mandatory prerequisite is not resolved:
 
 ### 16.1 Highest-value improvement
 
-Add a clean runtime override layer for mutable operational changes such as TLS mode transitions, so that operator-driven updates can coexist safely with the committed product config.
+Expand override coverage beyond TLS to additional mutable operational domains, while keeping `config/<environment>.yml` as the public baseline source.
 
 ### 16.2 Additional improvement areas
 
@@ -444,3 +448,4 @@ Add a clean runtime override layer for mutable operational changes such as TLS m
 - [Multilingual index](../README.md)
 - [Appendices index](appendices/index.md)
 - [Implementation plan](../../implementation-plan.md)
+- [Configuration reference](../../product/configuration-reference.md)

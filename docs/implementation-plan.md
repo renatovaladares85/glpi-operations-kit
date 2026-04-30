@@ -45,7 +45,8 @@ The current implementation targets:
 - Central execution CLI: `scripts/glpictl.sh <environment> <domain> <action> [target] [scope]`.
 - Specific scripts are supported as wrappers and follow the same central execution path.
 - Runtime secrets are stored locally under `.runtime/<environment>/secrets.yml` and are ignored by Git.
-- Runtime inventory and rendered public variables are stored under `.runtime/<environment>/`.
+- Runtime inventory, rendered public variables, and mutable overrides are stored under `.runtime/<environment>/`.
+- Runtime precedence is explicit: `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`.
 - Runtime state is split by purpose:
   - rendered config files under `.runtime/<environment>/`
   - operation state/log/evidence under `.runtime/<environment>/{state,logs,evidence}`
@@ -55,6 +56,7 @@ The current implementation targets:
 - Missing critical information must stop execution with a clear explanation.
 - Ansible applies the server state after the guided script prepares the context.
 - Production execution is blocked by a formal promotion gate generated from staging certification evidence.
+- Readiness declaration must run `bash scripts/release-readiness.sh <environment>` and pass all critical checks.
 
 ## Current repository structure
 

@@ -8,7 +8,9 @@ These rules must not be broken by agents.
 - Consult only the thematic files required for the current task.
 - Run environment pre-flight checks before starting implementation.
 - Run `bash scripts/bootstrap-permissions.sh` before any deploy script in a fresh operator session.
+- Run `bash scripts/release-readiness.sh <environment>` before declaring an environment complete.
 - Keep public environment values in `config/<environment>.yml`.
+- Keep mutable runtime overrides in `.runtime/<environment>/overrides.runtime.yml`.
 - Keep secrets only in `.runtime/<environment>/secrets.yml`.
 - Classify each pre-flight result as `mandatory` or `optional`.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.

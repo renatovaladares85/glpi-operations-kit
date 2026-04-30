@@ -1,5 +1,8 @@
 # Appendices Index (EN)
 
+Canonical source for EN appendices: `docs/manual-appendices/`.
+This file is a navigation bridge only.
+
 - [Command Reference](../../../manual-appendices/command-reference.md)
 - [Runtime Input Reference](../../../manual-appendices/runtime-input-reference.md)
 - [TLS Modes](../../../manual-appendices/tls-modes.md)

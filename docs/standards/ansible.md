@@ -28,4 +28,6 @@
 - Secrets must enter at runtime through a guided script.
 - Secrets must be stored only under `.runtime/<environment>/secrets.yml`.
 - The rendered public runtime file must be generated from `config/<environment>.yml`.
+- Mutable runtime overrides must be stored in `.runtime/<environment>/overrides.runtime.yml`.
+- Extra vars precedence must follow `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`.
 - The playbook must fail with a clear message when a critical secret is missing.

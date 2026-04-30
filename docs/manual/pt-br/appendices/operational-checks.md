@@ -18,3 +18,9 @@ Checks day-2:
 Continuidade:
 
 - para falhas incompletas use `bash scripts/ops-maintenance.sh resume staging`
+
+Gate de prontidao:
+
+- executar `bash scripts/release-readiness.sh staging`
+- validar artefato `.runtime/staging/evidence/readiness-report.md`
+- validar artefato `.runtime/staging/evidence/readiness-report.json`

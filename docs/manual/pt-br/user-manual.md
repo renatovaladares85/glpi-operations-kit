@@ -48,6 +48,7 @@ Artefatos runtime gerados:
 
 - `.runtime/<environment>/inventory.runtime.yml`
 - `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/overrides.runtime.yml`
 
 Regra operacional:
 
@@ -196,6 +197,7 @@ Arquivos de configuracao:
 
 - `inventory.runtime.yml`
 - `public.runtime.yml`
+- `overrides.runtime.yml`
 - `secrets.yml`
 
 Estado operacional:
@@ -213,6 +215,7 @@ Comportamento importante:
 - se os arquivos runtime estiverem ausentes, o `glpictl` os gera a partir de `config/<environment>.yml`
 - apenas segredos ausentes devem ser solicitados em runtime
 - valores publicos nao devem ser digitados interativamente quando ja existirem no config do produto
+- os valores sao mesclados nesta ordem: `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`
 
 ## 9. O Que `apply db` Faz
 
@@ -391,6 +394,7 @@ Certificacao de homologacao:
 
 ```bash
 ./scripts/glpictl.sh staging certify run
+bash scripts/release-readiness.sh staging
 ```
 
 O que faz:
@@ -431,7 +435,7 @@ A execucao deve parar quando qualquer pre-requisito obrigatorio nao puder ser re
 
 ### 16.1 Melhoria de maior valor
 
-Adicionar uma camada clara de override runtime para mudancas operacionais mutaveis, como transicoes de modo TLS, para que atualizacoes feitas pelo operador convivam com seguranca com o config principal versionado.
+Expandir a cobertura de override runtime alem do TLS para outros dominios mutaveis, mantendo `config/<environment>.yml` como baseline publico principal.
 
 ### 16.2 Outras melhorias
 
@@ -444,3 +448,4 @@ Adicionar uma camada clara de override runtime para mudancas operacionais mutave
 - [Indice multilingue](../README.md)
 - [Indice de apendices](appendices/index.md)
 - [Plano de implementacao](../../implementation-plan.md)
+- [Referencia de configuracao](../../product/configuration-reference.md)
