@@ -36,40 +36,71 @@
       - glpi_db_root_password is defined
     fail_msg: "Missing critical database runtime secrets. Provide glpi_db_name, glpi_db_user, glpi_db_password and glpi_db_root_password."
 
-- name: Configure MariaDB root password (socket bootstrap)
+- name: Wait for MariaDB local port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mariadb_port }}"
+    delay: 0
+    timeout: 60
+
+- name: Detect MariaDB admin authentication method
   block:
-    - name: Configure MariaDB root password using local socket admin
-      community.mysql.mysql_user:
-        name: root
-        host_all: true
-        password: "{{ glpi_db_root_password }}"
+    - name: Probe MariaDB admin via unix socket
+      community.mysql.mysql_query:
+        query: "SELECT 1;"
         login_unix_socket: /run/mysqld/mysqld.sock
-        check_implicit_admin: true
-        state: present
+      changed_when: false
+
+    - name: Use unix socket admin authentication
+      ansible.builtin.set_fact:
+        mariadb_admin_login_user: ""
+        mariadb_admin_login_password: ""
+        mariadb_admin_login_unix_socket: /run/mysqld/mysqld.sock
   rescue:
-    - name: Configure MariaDB root password using existing root password
-      community.mysql.mysql_user:
-        name: root
-        host_all: true
-        password: "{{ glpi_db_root_password }}"
+    - name: Probe MariaDB admin via root password
+      community.mysql.mysql_query:
+        query: "SELECT 1;"
         login_user: root
         login_password: "{{ glpi_db_root_password }}"
-        state: present
+      changed_when: false
+
+    - name: Use root password admin authentication
+      ansible.builtin.set_fact:
+        mariadb_admin_login_user: root
+        mariadb_admin_login_password: "{{ glpi_db_root_password }}"
+        mariadb_admin_login_unix_socket: ""
+
+- name: Configure MariaDB root password
+  community.mysql.mysql_user:
+    name: root
+    host_all: true
+    password: "{{ glpi_db_root_password }}"
+    login_user: "{{ mariadb_admin_login_user | default(omit) }}"
+    login_password: "{{ mariadb_admin_login_password | default(omit) }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket | default(omit) }}"
+    check_implicit_admin: true
+    state: present
+
+- name: Standardize MariaDB admin login with root password
+  ansible.builtin.set_fact:
+    mariadb_admin_login_user: root
+    mariadb_admin_login_password: "{{ glpi_db_root_password }}"
+    mariadb_admin_login_unix_socket: ""
 
 - name: Remove anonymous MySQL users
   community.mysql.mysql_user:
     name: ""
     host_all: true
     state: absent
-    login_user: root
-    login_password: "{{ glpi_db_root_password }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
 
 - name: Remove test database
   community.mysql.mysql_db:
     name: test
     state: absent
-    login_user: root
-    login_password: "{{ glpi_db_root_password }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
 
 - name: Create GLPI database
   community.mysql.mysql_db:
@@ -77,8 +108,8 @@
     encoding: utf8mb4
     collation: utf8mb4_unicode_ci
     state: present
-    login_user: root
-    login_password: "{{ glpi_db_root_password }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
 
 - name: Create GLPI database user
   community.mysql.mysql_user:
@@ -87,8 +118,17 @@
     host: "{{ glpi_db_app_access_host | default('%') }}"
     priv: "{{ glpi_db_name }}.*:ALL"
     state: present
-    login_user: root
-    login_password: "{{ glpi_db_root_password }}"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+
+- name: Validate GLPI database user access
+  community.mysql.mysql_query:
+    query: "SELECT 1;"
+    login_user: "{{ glpi_db_user }}"
+    login_password: "{{ glpi_db_password }}"
+    login_host: 127.0.0.1
+    login_db: "{{ glpi_db_name }}"
+  changed_when: false
 
 - name: Check MariaDB configuration file permissions
   ansible.builtin.stat:
