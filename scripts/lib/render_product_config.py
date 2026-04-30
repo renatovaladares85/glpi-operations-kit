@@ -395,6 +395,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "glpi_data_group": read_value(values, "GLPI_FILESYSTEM_GROUP", "www-data"),
         "glpi_php_fpm_service": read_value(values, "PHP_FPM_SERVICE_NAME", "php8.3-fpm"),
         "glpi_php_fpm_socket": read_value(values, "PHP_FPM_SOCKET", "/run/php/php8.3-fpm.sock"),
+        "nginx_http_port": as_int(read_value(values, "NGINX_HTTP_PORT", "80"), 80),
+        "nginx_https_port": as_int(read_value(values, "NGINX_HTTPS_PORT", "443"), 443),
         "glpi_app_packages": as_list(read_value(values, "GLPI_APP_PACKAGES", ""), DEFAULT_GLPI_APP_PACKAGES),
         "glpi_upload_max_filesize": read_value(values, "GLPI_UPLOAD_MAX_FILESIZE", "32M"),
         "glpi_post_max_size": read_value(values, "GLPI_POST_MAX_SIZE", "32M"),
