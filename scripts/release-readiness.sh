@@ -94,15 +94,17 @@ check_docs_navigation() {
   grep -Fq "(docs/manual/README.md)" "$SCRIPT_ROOT/../README.md"
   grep -Fq "(en/user-manual.md)" "$SCRIPT_ROOT/../docs/manual/README.md"
   grep -Fq "(pt-br/user-manual.md)" "$SCRIPT_ROOT/../docs/manual/README.md"
-  grep -Fq "(../../../manual-appendices/command-reference.md)" "$SCRIPT_ROOT/../docs/manual/en/appendices/index.md"
+  grep -Fq "(command-reference.md)" "$SCRIPT_ROOT/../docs/manual/en/appendices/index.md"
   grep -Fq "(command-reference.md)" "$SCRIPT_ROOT/../docs/manual/pt-br/appendices/index.md"
   grep -Fq "(../../product/configuration-reference.md)" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
   grep -Fq "(../../product/configuration-reference.md)" "$SCRIPT_ROOT/../docs/manual/pt-br/user-manual.md"
 }
 
 check_runtime_precedence_docs() {
-  grep -Fq "public values must be edited in \`config/<environment>.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
-  grep -Fq "scripts should prompt only for missing secrets" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
+  grep -Fq "Runtime precedence:" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
+  grep -Fq "1. \`public.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
+  grep -Fq "2. \`overrides.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
+  grep -Fq "3. \`secrets.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
   grep -Fq "values are merged in this order" "$SCRIPT_ROOT/../docs/product/configuration-reference.md"
 }
 
@@ -133,6 +135,20 @@ check_staging_certification_artifacts() {
   report_path="$(awk -F"'" '/^report_path:/ {print $2; exit}' "$PROMOTION_GATE_PATH")"
   if [[ -z "${report_path// }" || ! -f "$report_path" ]]; then
     echo "Referenced certification report not found: ${report_path:-missing}" >&2
+    return 1
+  fi
+}
+
+check_production_policy_contract() {
+  local tls_mode sso_enabled
+  tls_mode="$(read_product_config_value "$ENVIRONMENT" "tls.mode" || true)"
+  sso_enabled="$(read_product_config_value "$ENVIRONMENT" "security.sso_enabled" || true)"
+  if [[ "$tls_mode" != "provided" ]]; then
+    echo "Production policy violation: tls.mode must be provided." >&2
+    return 1
+  fi
+  if [[ "$sso_enabled" != "true" ]]; then
+    echo "Production policy violation: security.sso_enabled must be true." >&2
     return 1
   fi
 }
@@ -229,6 +245,9 @@ run_check critical docs-navigation "Validate documentation navigation chain." "$
 run_check critical docs-precedence "Validate documented precedence and secret policy." "$ARTIFACT_DIR/docs-precedence.log" check_runtime_precedence_docs
 if [[ "$ENVIRONMENT" == "staging" ]]; then
   run_check critical staging-certification-evidence "Validate staging certification gate and evidence linkage." "$ARTIFACT_DIR/staging-certification-evidence.log" check_staging_certification_artifacts
+fi
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  run_check critical production-policy-contract "Validate production security policy contract." "$ARTIFACT_DIR/production-policy-contract.log" check_production_policy_contract
 fi
 
 write_report_markdown

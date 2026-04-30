@@ -23,7 +23,7 @@ topology:
 network:
   ssh:
     user: "ubuntu"
-    private_key_path: "~/.ssh/id_rsa"
+    private_key_path: "~/.ssh/glpi_production_ed25519"
   database:
     app_access_host: "192.0.2.30"
     allowed_source_hosts:
@@ -126,6 +126,13 @@ alerting:
   tls_expiry_warning_days: 30
   backup_failure_enabled: true
   service_down_enabled: true
+
+security:
+  sso_enabled: true
+  allow_insecure_non_production: false
+  require_tls_in_production: true
+  require_https_in_production: true
+  require_sso_in_production: true
 
 paths:
   glpi_release_root: "/usr/share"

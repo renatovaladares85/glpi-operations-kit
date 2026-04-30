@@ -76,6 +76,10 @@ REQUIRED_KEYS = {
         "purpose": "Selects the active tuning profile.",
         "consumer": "generated public.runtime.yml",
     },
+    "security.sso_enabled": {
+        "purpose": "Defines whether SSO policy is currently enabled for the environment.",
+        "consumer": "production policy gate checks",
+    },
 }
 
 
@@ -209,6 +213,11 @@ def build_public_runtime(config):
         "monitoring_dashboard_profile": nested_get_default(monitoring, "dashboard_profile", "glpi-standard"),
         "monitoring_alert_routes": nested_get_default(monitoring, "alert_routes", {}),
         "alert_tls_expiry_warning_days": nested_get_default(alerting, "tls_expiry_warning_days", 30),
+        "security_sso_enabled": require(config, "security.sso_enabled"),
+        "security_allow_insecure_non_production": nested_get_default(config, "security.allow_insecure_non_production", True),
+        "security_require_tls_in_production": nested_get_default(config, "security.require_tls_in_production", True),
+        "security_require_https_in_production": nested_get_default(config, "security.require_https_in_production", True),
+        "security_require_sso_in_production": nested_get_default(config, "security.require_sso_in_production", True),
         "mariadb_bind_address": nested_get_default(config, "database.bind_address", "0.0.0.0"),
         "mariadb_port": nested_get_default(config, "database.port", 3306),
         "mariadb_version_packages": nested_get_default(

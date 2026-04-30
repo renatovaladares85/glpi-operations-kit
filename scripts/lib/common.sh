@@ -225,11 +225,17 @@ runtime_state_dir() {
   echo "$(runtime_environment_root "$environment")/state"
 }
 
+runtime_evidence_dir() {
+  local environment="$1"
+  echo "$(runtime_environment_root "$environment")/evidence"
+}
+
 ensure_runtime_foundation() {
   local environment="$1"
   ensure_directory_mode "$(runtime_environment_root "$environment")" "700"
   ensure_directory_mode "$(runtime_logs_dir "$environment")" "700"
   ensure_directory_mode "$(runtime_state_dir "$environment")" "700"
+  ensure_directory_mode "$(runtime_evidence_dir "$environment")" "700"
 }
 
 new_operation_id() {
@@ -827,6 +833,157 @@ preflight_print_result() {
   printf '[%s] [%s] %s\n' "$level" "$status" "$message"
 }
 
+preflight_items_file_path() {
+  local environment="$1"
+  echo "$(runtime_state_dir "$environment")/.precheck-items.tsv"
+}
+
+preflight_report_latest_path() {
+  local environment="$1"
+  echo "$(runtime_state_dir "$environment")/precheck-report-latest.yml"
+}
+
+preflight_report_markdown_path() {
+  local environment="$1"
+  echo "$(runtime_evidence_dir "$environment")/precheck-report-latest.md"
+}
+
+append_precheck_item() {
+  local environment="$1"
+  local item="$2"
+  local category="$3"
+  local applicability="$4"
+  local obligation="$5"
+  local reason="$6"
+  local validation="$7"
+  local autofix="$8"
+  local block="$9"
+  local status="${10}"
+  local suggested_action="${11}"
+  local items_file
+  items_file="$(preflight_items_file_path "$environment")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$item" "$category" "$applicability" "$obligation" "$reason" "$validation" "$autofix" "$block" "$status" "$suggested_action" "$(date -u +%FT%TZ)" >>"$items_file"
+}
+
+finalize_precheck_reports() {
+  local environment="$1"
+  local mandatory_failures="$2"
+  local optional_failures="$3"
+  local items_file report_path report_md_path timestamped_report
+  items_file="$(preflight_items_file_path "$environment")"
+  report_path="$(preflight_report_latest_path "$environment")"
+  report_md_path="$(preflight_report_markdown_path "$environment")"
+  timestamped_report="$(runtime_state_dir "$environment")/precheck-report-$(date -u +%Y%m%dT%H%M%SZ).yml"
+
+  {
+    echo "---"
+    echo "environment: '$environment'"
+    echo "generated_at: '$(date -u +%FT%TZ)'"
+    echo "mandatory_failures: $mandatory_failures"
+    echo "optional_failures: $optional_failures"
+    echo "overall_status: '$([[ "$mandatory_failures" -eq 0 ]] && echo pass || echo fail)'"
+    echo "items:"
+    while IFS=$'\t' read -r item category applicability obligation reason validation autofix block status suggested_action checked_at; do
+      [[ -z "${item// }" ]] && continue
+      echo "  - item: '$item'"
+      echo "    category: '$category'"
+      echo "    applicability: '$applicability'"
+      echo "    obligation: '$obligation'"
+      echo "    reason: '$reason'"
+      echo "    validation: '$validation'"
+      echo "    auto_fix: '$autofix'"
+      echo "    block_on_failure: '$block'"
+      echo "    status: '$status'"
+      echo "    suggested_action: '$suggested_action'"
+      echo "    checked_at: '$checked_at'"
+    done <"$items_file"
+  } >"$report_path"
+  cp "$report_path" "$timestamped_report"
+  chmod 600 "$report_path" "$timestamped_report"
+
+  {
+    echo "# Precheck Report"
+    echo
+    echo "- Environment: \`$environment\`"
+    echo "- Generated at (UTC): \`$(date -u +%FT%TZ)\`"
+    echo "- Overall status: \`$([[ "$mandatory_failures" -eq 0 ]] && echo PASS || echo FAIL)\`"
+    echo "- Mandatory failures: \`$mandatory_failures\`"
+    echo "- Optional findings: \`$optional_failures\`"
+    echo
+    echo "| Item | Category | Applicability | Obligation | Status | Block | Suggested action |"
+    echo "|---|---|---|---|---|---|---|"
+    while IFS=$'\t' read -r item category applicability obligation reason validation autofix block status suggested_action checked_at; do
+      [[ -z "${item// }" ]] && continue
+      echo "| $item | $category | $applicability | $obligation | $status | $block | $suggested_action |"
+    done <"$items_file"
+  } >"$report_md_path"
+  chmod 600 "$report_md_path"
+}
+
+ubuntu_supported() {
+  if [[ ! -f /etc/os-release ]]; then
+    return 1
+  fi
+  local distro_id distro_version
+  distro_id="$(awk -F= '/^ID=/ {gsub(/"/,"",$2); print $2}' /etc/os-release | head -n1)"
+  distro_version="$(awk -F= '/^VERSION_ID=/ {gsub(/"/,"",$2); print $2}' /etc/os-release | head -n1)"
+  if [[ "$distro_id" != "ubuntu" ]]; then
+    return 1
+  fi
+  if [[ "$distro_version" != "24.04" && "$distro_version" != "24.04.1" && "$distro_version" != "24.04.2" && "$distro_version" != "24.04.3" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+ssh_public_key_path_for_private_key() {
+  local private_key="$1"
+  if [[ "$private_key" == *.pub ]]; then
+    echo "$private_key"
+    return
+  fi
+  echo "${private_key}.pub"
+}
+
+ensure_ssh_key_material_for_environment() {
+  local environment="$1"
+  local topology_mode="$2"
+  local key_path="$3"
+  local ssh_user="$4"
+  local app_host="$5"
+  local db_host="$6"
+
+  local resolved_key_path public_key_path must_check_connectivity
+  resolved_key_path="$(expand_home_path "$key_path")"
+  public_key_path="$(ssh_public_key_path_for_private_key "$resolved_key_path")"
+  must_check_connectivity="false"
+  [[ "$topology_mode" == "dual-server" ]] && must_check_connectivity="true"
+
+  if [[ ! -f "$resolved_key_path" ]]; then
+    return 1
+  fi
+  if ! enforce_ssh_private_key_permissions "$resolved_key_path"; then
+    return 1
+  fi
+  if [[ ! -f "$public_key_path" ]]; then
+    return 1
+  fi
+
+  if [[ "$must_check_connectivity" == "true" ]]; then
+    if ! command -v ssh >/dev/null 2>&1; then
+      return 1
+    fi
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new -i "$resolved_key_path" "${ssh_user}@${app_host}" "echo ok" >/dev/null 2>&1; then
+      return 1
+    fi
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new -i "$resolved_key_path" "${ssh_user}@${db_host}" "echo ok" >/dev/null 2>&1; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
 package_for_command() {
   local command_name="$1"
   case "$command_name" in
@@ -928,7 +1085,12 @@ run_preflight_checks() {
   local disk_kb_required=1048576
   local runtime_base_dir="$SCRIPT_ROOT/../.runtime"
   local marker_file
+  local items_file
+  local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled
   marker_file="$(bootstrap_marker_path)"
+  items_file="$(preflight_items_file_path "$environment")"
+  : >"$items_file"
+  chmod 600 "$items_file"
 
   if (($# > 0)); then
     mandatory_commands=("$@")
@@ -941,8 +1103,21 @@ run_preflight_checks() {
   preflight_print_result "mandatory" "check" "bash available"
   if command -v bash >/dev/null 2>&1; then
     preflight_print_result "mandatory" "ok" "bash found"
+    append_precheck_item "$environment" "bash" "local-tooling" "all" "mandatory" \
+      "Script runtime requires bash." "command -v bash" "apt install bash" "true" "pass" "none"
   else
     preflight_print_result "mandatory" "fail" "bash not found"
+    append_precheck_item "$environment" "bash" "local-tooling" "all" "mandatory" \
+      "Script runtime requires bash." "command -v bash" "apt install bash" "true" "fail" "Install bash package."
+    mandatory_failures=$((mandatory_failures + 1))
+  fi
+
+  if ubuntu_supported; then
+    append_precheck_item "$environment" "ubuntu-supported" "platform" "all" "mandatory" \
+      "Official baseline is Ubuntu 24.04." "cat /etc/os-release" "manual host update" "true" "pass" "none"
+  else
+    append_precheck_item "$environment" "ubuntu-supported" "platform" "all" "mandatory" \
+      "Official baseline is Ubuntu 24.04." "cat /etc/os-release" "manual host update" "true" "fail" "Use Ubuntu 24.04 before deployment."
     mandatory_failures=$((mandatory_failures + 1))
   fi
 
@@ -950,62 +1125,163 @@ run_preflight_checks() {
     disk_kb_available="$(df -Pk . | awk 'NR==2 {print $4}')"
     if [[ "${disk_kb_available:-0}" =~ ^[0-9]+$ ]] && ((disk_kb_available >= disk_kb_required)); then
       preflight_print_result "mandatory" "ok" "at least 1 GB of local free disk space is available"
+      append_precheck_item "$environment" "local-free-disk" "local-host" "all" "mandatory" \
+        "Runtime artifacts and logs need local disk." "df -Pk ." "manual cleanup" "true" "pass" "none"
     else
       preflight_print_result "mandatory" "fail" "less than 1 GB of local free disk space is available"
+      append_precheck_item "$environment" "local-free-disk" "local-host" "all" "mandatory" \
+        "Runtime artifacts and logs need local disk." "df -Pk ." "manual cleanup" "true" "fail" "Free at least 1 GB locally."
       mandatory_failures=$((mandatory_failures + 1))
     fi
   else
     preflight_print_result "optional" "warn" "df not found; free disk space was not validated"
+    append_precheck_item "$environment" "local-free-disk" "local-host" "all" "optional" \
+      "Disk validation is recommended for stability." "df -Pk ." "apt install coreutils" "false" "warn" "Install coreutils for disk checks."
     optional_failures=$((optional_failures + 1))
   fi
 
   for cmd in "${mandatory_commands[@]}"; do
     if ! check_or_install_command "mandatory" "$cmd" "$(package_for_command "$cmd")"; then
+      append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
+        "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "fail" "Install package and rerun precheck."
       mandatory_failures=$((mandatory_failures + 1))
+    else
+      append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
+        "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "pass" "none"
     fi
   done
 
   for cmd in "${optional_commands[@]}"; do
     if ! check_or_install_command "optional" "$cmd" "$(package_for_command "$cmd")"; then
       preflight_print_result "optional" "warn" "command '$cmd' remains unavailable"
+      append_precheck_item "$environment" "$cmd" "local-tooling" "all" "optional" \
+        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "apt install $(package_for_command "$cmd")" "false" "warn" "Install optional package for diagnostics."
       optional_failures=$((optional_failures + 1))
+    else
+      append_precheck_item "$environment" "$cmd" "local-tooling" "all" "optional" \
+        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "apt install $(package_for_command "$cmd")" "false" "pass" "none"
     fi
   done
 
   if ! ensure_sudo_ready; then
     preflight_print_result "mandatory" "fail" "sudo/root capability is required"
+    append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
+      "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "fail" "Grant sudo or run as root."
     mandatory_failures=$((mandatory_failures + 1))
   else
     preflight_print_result "mandatory" "ok" "sudo/root capability validated"
+    append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
+      "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "pass" "none"
   fi
 
   if ! ensure_group_exists_and_membership "$GLPI_OPS_GROUP"; then
     preflight_print_result "mandatory" "fail" "operator must belong to group '$GLPI_OPS_GROUP'"
+    append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
+      "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "fail" "Add user to glpiops and relogin."
     mandatory_failures=$((mandatory_failures + 1))
   else
     preflight_print_result "mandatory" "ok" "operator belongs to group '$GLPI_OPS_GROUP'"
+    append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
+      "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "pass" "none"
   fi
 
   if ! ensure_directory_mode "$runtime_base_dir" "700"; then
     preflight_print_result "mandatory" "fail" "runtime base directory permissions are not compliant"
+    append_precheck_item "$environment" "runtime-base-permissions" "permissions" "all" "mandatory" \
+      "Runtime artifacts include sensitive data and must stay restricted." "stat -c '%a' .runtime" "chmod 700 .runtime" "true" "fail" "Apply secure permissions on .runtime."
     mandatory_failures=$((mandatory_failures + 1))
   else
     preflight_print_result "mandatory" "ok" "runtime base directory permissions are compliant"
+    append_precheck_item "$environment" "runtime-base-permissions" "permissions" "all" "mandatory" \
+      "Runtime artifacts include sensitive data and must stay restricted." "stat -c '%a' .runtime" "chmod 700 .runtime" "true" "pass" "none"
   fi
 
   if [[ -f "$marker_file" ]]; then
     if ! ensure_mode "$marker_file" "600"; then
       preflight_print_result "mandatory" "fail" "bootstrap marker permissions are not compliant"
+      append_precheck_item "$environment" "bootstrap-marker-permissions" "permissions" "all" "mandatory" \
+        "Bootstrap marker must stay restricted to the operator context." "stat -c '%a' .runtime/bootstrap.completed" "chmod 600 .runtime/bootstrap.completed" "true" "fail" "Fix bootstrap marker mode to 600."
       mandatory_failures=$((mandatory_failures + 1))
     else
       preflight_print_result "mandatory" "ok" "bootstrap marker permissions are compliant"
+      append_precheck_item "$environment" "bootstrap-marker-permissions" "permissions" "all" "mandatory" \
+        "Bootstrap marker must stay restricted to the operator context." "stat -c '%a' .runtime/bootstrap.completed" "chmod 600 .runtime/bootstrap.completed" "true" "pass" "none"
     fi
   fi
+
+  if [[ -f "$(config_file_path "$environment")" ]]; then
+    topology_mode="$(read_product_config_value "$environment" "topology.mode" || true)"
+    ssh_key_path="$(read_product_config_value "$environment" "network.ssh.private_key_path" || true)"
+    ssh_user="$(read_product_config_value "$environment" "network.ssh.user" || true)"
+    app_host="$(read_product_config_value "$environment" "topology.app.host" || true)"
+    db_host="$(read_product_config_value "$environment" "topology.db.host" || true)"
+    tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
+    sso_enabled="$(read_product_config_value "$environment" "security.sso_enabled" || true)"
+    [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
+    [[ -z "${tls_mode// }" ]] && tls_mode="none"
+
+    if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
+      append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
+    else
+      append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
+      mandatory_failures=$((mandatory_failures + 1))
+    fi
+
+    if [[ "$tls_mode" == "provided" ]]; then
+      local provided_cert provided_key
+      provided_cert="$(read_product_config_value "$environment" "tls.provided_local_cert_path" || true)"
+      provided_key="$(read_product_config_value "$environment" "tls.provided_local_key_path" || true)"
+      if [[ -n "${provided_cert// }" && -n "${provided_key// }" && -f "$(expand_home_path "$provided_cert")" && -f "$(expand_home_path "$provided_key")" ]]; then
+        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode=provided" "conditional-mandatory" \
+          "Provided TLS mode requires local certificate and key files." "test -f <cert> && test -f <key>" "set valid local paths in config" "true" "pass" "none"
+      else
+        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode=provided" "conditional-mandatory" \
+          "Provided TLS mode requires local certificate and key files." "test -f <cert> && test -f <key>" "set valid local paths in config" "true" "fail" "Provide valid local cert/key paths for provided mode."
+        mandatory_failures=$((mandatory_failures + 1))
+      fi
+    else
+      append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode!=provided" "not-applicable" \
+        "Provided TLS paths are only required when provided mode is selected." "n/a" "n/a" "false" "skip" "none"
+    fi
+
+    if [[ "$environment" == "production" ]]; then
+      if [[ "$tls_mode" == "provided" ]]; then
+        append_precheck_item "$environment" "production-tls-mode" "environment-policy" "production" "mandatory" \
+          "Production requires valid TLS certificate mode." "config.production tls.mode" "set tls.mode=provided" "true" "pass" "none"
+      else
+        append_precheck_item "$environment" "production-tls-mode" "environment-policy" "production" "mandatory" \
+          "Production cannot run with insecure TLS mode." "config.production tls.mode" "set tls.mode=provided" "true" "fail" "Production requires tls.mode=provided."
+        mandatory_failures=$((mandatory_failures + 1))
+      fi
+
+      if [[ "$sso_enabled" == "true" ]]; then
+        append_precheck_item "$environment" "production-sso" "environment-policy" "production" "mandatory" \
+          "Production policy requires SSO enabled by configuration gate." "config.production security.sso_enabled" "set security.sso_enabled=true" "true" "pass" "none"
+      else
+        append_precheck_item "$environment" "production-sso" "environment-policy" "production" "mandatory" \
+          "Production policy requires SSO enabled by configuration gate." "config.production security.sso_enabled" "set security.sso_enabled=true" "true" "fail" "Enable security.sso_enabled in production config."
+        mandatory_failures=$((mandatory_failures + 1))
+      fi
+    else
+      append_precheck_item "$environment" "production-tls-mode" "environment-policy" "non-production" "optional" \
+        "Insecure modes may be allowed in staging/dev by policy." "config.$environment tls.mode" "set stronger TLS mode if desired" "false" "info" "none"
+    fi
+  else
+    append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
+      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.yml" "create config file from example" "true" "fail" "Provide config/<environment>.yml."
+    mandatory_failures=$((mandatory_failures + 1))
+  fi
+
+  finalize_precheck_reports "$environment" "$mandatory_failures" "$optional_failures"
 
   if ((mandatory_failures > 0)); then
     echo "Mandatory pre-flight checks failed."
     echo "Fix the mandatory items before continuing."
     echo "If the user explicitly authorizes continuation, rerun with PREFLIGHT_FORCE_CONTINUE=true."
+    echo "Detailed report: $(preflight_report_latest_path "$environment")"
+    echo "Readable summary: $(preflight_report_markdown_path "$environment")"
     if [[ "$PREFLIGHT_FORCE_CONTINUE" != "true" ]]; then
       exit 1
     fi
@@ -1015,4 +1291,6 @@ run_preflight_checks() {
   if ((optional_failures > 0)); then
     echo "Optional pre-flight warnings were found. Review them before production use."
   fi
+  echo "Detailed report: $(preflight_report_latest_path "$environment")"
+  echo "Readable summary: $(preflight_report_markdown_path "$environment")"
 }
