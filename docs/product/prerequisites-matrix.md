@@ -27,8 +27,10 @@ Each item defines:
 | Script execute permission | Permissions | all | always | mandatory | Prevents first-run execution failures | `ls -l scripts/*.sh` | Yes (`chmod +x`) | Yes |
 | `.runtime` secure mode | Permissions | all | always | mandatory | Contains secrets, runtime state, and evidence | `stat -c '%a' .runtime` | Yes (`chmod`) | Yes |
 | Security mode default | Policy control | all | always | mandatory | Defines default policy behavior when `SECURITY_MODE` is not passed | `operations.security_mode_default` in config | No | Yes |
-| SSH key pair per environment | Security artifact | all | when remote execution is used | conditional-mandatory | Supports safe environment isolation and host access | key existence + mode `0600` | Partial | Yes |
-| SSH connectivity to app/db | Network access | all | `topology.mode=dual-server` | conditional-mandatory | Confirms execution host can reach both targets | `ssh -i <key> <user>@<host> "echo ok"` | No | Yes |
+| Execution mode contract | Execution contract | all | always | mandatory | Prevents wrong orchestration model for local/ssh execution | `execution.mode` or `GLPI_EXECUTION_MODE` | No | Yes |
+| Host role contract | Execution contract | all | always | mandatory | Ensures local host runs only allowed mutable actions | `execution.host_role_default` or `GLPI_HOST_ROLE` | No | Yes |
+| SSH key pair per environment | Security artifact | all | `execution.mode=ssh` | conditional-mandatory | Supports safe environment isolation and host access | key existence + mode `0600` | Partial | Yes |
+| SSH connectivity to app/db | Network access | all | `execution.mode=ssh` + `topology.mode=dual-server` | conditional-mandatory | Confirms execution host can reach both targets | `ssh -i <key> <user>@<host> "echo ok"` | No | Yes |
 | TLS local files | Security artifact | all | `tls.mode=provided` | conditional-mandatory | Required to install valid cert/key in app host | local file existence check | No | Yes |
 | Promotion gate file | Promotion control | all | `security.require_promotion_gate=true` | conditional-mandatory | Enforces certification before mutable rollout when policy is enabled | `.runtime/promotion/staging-certified.yml` exists | No | Yes in `secure`; No in `permissive` |
 | TLS mode policy | Security policy | all | `security.require_tls=true` | conditional-mandatory | Requires valid provided certificate mode when policy is enabled | `tls.mode=provided` | No | Yes in `secure`; No in `permissive` |

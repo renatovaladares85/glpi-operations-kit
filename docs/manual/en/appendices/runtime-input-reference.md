@@ -2,29 +2,43 @@
 
 ## 1. Public configuration source
 
-Main files:
+Primary files:
 
+- `config/product.example.yml`
 - `config/staging.yml`
 - `config/production.yml`
-- `config/product.example.yml`
 
-Public values are read from config files and rendered into runtime artifacts automatically.
+All non-secret operational values are read from these files.
 
-## 2. Runtime file map
+## 2. Execution contract keys (public)
 
-| File | Type | Producer | Consumer | Sensitivity | Purpose |
+These keys control how scripts run:
+
+- `execution.mode`: `local` or `ssh`
+- `execution.host_role_default`: `app`, `db`, or `all`
+
+Environment variable overrides:
+
+- `GLPI_EXECUTION_MODE`
+- `GLPI_HOST_ROLE`
+- `GLPI_ENVIRONMENT`
+
+## 3. Runtime artifact map
+
+| File | Type | Producer | Consumer | Sensitivity | Operational purpose |
 |---|---|---|---|---|---|
-| `.runtime/<env>/inventory.runtime.yml` | Generated | `glpictl` + renderer | Ansible inventory | restricted | Host targets and SSH access model |
-| `.runtime/<env>/public.runtime.yml` | Generated | `glpictl` + renderer | Ansible vars | restricted | Public operational values converted to role variables |
-| `.runtime/<env>/overrides.runtime.yml` | Mutable runtime | `glpictl` / operators | Ansible vars | restricted | Runtime overrides for mutable behavior (for example TLS transition) |
-| `.runtime/<env>/secrets.yml` | Runtime secret | operator prompts | Ansible vars | secret | Secret-only values not versioned in Git |
-| `.runtime/<env>/state/deploy-sequence.yml` | Generated state | `glpictl` | `glpictl` | restricted | Mandatory execution order control |
-| `.runtime/<env>/state/security-mode-last.yml` | Generated state | `glpictl` | operators/audit | restricted | Latest permissive-mode risk acceptance summary |
-| `.runtime/<env>/evidence/security-mode-*.yml` | Generated evidence | `glpictl` | operators/audit | restricted | Historical permissive-mode evidence with justification and policy violations |
-| `.runtime/<env>/state/precheck-report-latest.yml` | Generated state | precheck | operators/audit | restricted | Structured prerequisite status |
-| `.runtime/<env>/evidence/precheck-report-latest.md` | Generated evidence | precheck | operators/audit | restricted | Human-readable prerequisite report |
+| `.runtime/<env>/inventory.runtime.yml` | generated | renderer via `glpictl` | Ansible inventory | restricted | host targeting and connection model (`local` or `ssh`) |
+| `.runtime/<env>/public.runtime.yml` | generated | renderer via `glpictl` | Ansible vars | restricted | public operational data converted to role variables |
+| `.runtime/<env>/overrides.runtime.yml` | mutable runtime | `glpictl` / operator | Ansible vars | restricted | mutable overrides without editing `config/<env>.yml` |
+| `.runtime/<env>/secrets.yml` | runtime secret | operator prompts | Ansible vars | secret | non-versioned credentials and secret values |
+| `.runtime/<env>/state/precheck-report-latest.yml` | generated state | precheck | operators/audit | restricted | machine-readable prerequisite and policy status |
+| `.runtime/<env>/evidence/precheck-report-latest.md` | generated evidence | precheck | operators/audit | restricted | human-readable prerequisite report |
+| `.runtime/<env>/state/deploy-sequence.yml` | generated state | `glpictl` | `glpictl` | restricted | ordered deployment state tracking |
+| `.runtime/<env>/state/security-mode-last.yml` | generated state | `glpictl` | operators/audit | restricted | last accepted permissive-mode risk context |
+| `.runtime/<env>/evidence/security-mode-*.yml` | generated evidence | `glpictl` | operators/audit | restricted | historical permissive-mode policy exceptions |
+| `.runtime/<env>/logs/*.log` and `*.summary.yml` | generated log | operational scripts | operators/audit | restricted | execution trace and compact operation summary |
 
-## 3. Merge precedence
+## 4. Runtime merge precedence
 
 Values are merged in this order:
 
@@ -32,34 +46,39 @@ Values are merged in this order:
 2. `overrides.runtime.yml`
 3. `secrets.yml`
 
-Operational impact:
+Practical meaning:
 
-- public baseline comes from `config/<env>.yml`
-- mutable overrides change behavior without rewriting baseline
-- secrets always win over public values for secret keys
+- baseline comes from `config/<env>.yml`
+- mutable operations (for example TLS switching) are written to overrides
+- secrets always come from secret runtime file
 
-## 4. Required runtime secrets
+## 5. Mandatory secret keys
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-If missing:
+Behavior when missing:
 
-- script prompts interactively
-- script blocks until required secret is provided
+- scripts prompt interactively
+- mutable execution remains blocked until values are provided
 
-## 5. Conditional runtime requirements
+## 6. Conditional requirements
 
-- When `tls.mode=provided`:
-  - `tls.provided_local_cert_path` and `tls.provided_local_key_path` must be valid local files.
-- When `topology.mode=dual-server`:
-  - SSH key pair and target connectivity checks are mandatory.
-- When security policy flags are enabled:
-  - `security.require_tls=true` requires `tls.mode=provided`;
-  - `security.require_https=true` requires TLS enabled;
-  - `security.require_sso=true` requires `security.sso_enabled=true`;
+- If `execution.mode=local`:
+  - no remote SSH connectivity validation is required.
+  - in dual-server topology, run DB and APP actions on their respective hosts.
+- If `execution.mode=ssh`:
+  - SSH key pair and remote connectivity checks are mandatory.
+- If `tls.mode=provided`:
+  - `tls.provided_local_cert_path` and `tls.provided_local_key_path` must point to existing local files.
+- If security flags are enabled:
+  - `security.require_tls=true` requires `tls.mode=provided`.
+  - `security.require_https=true` requires TLS enabled (`self_signed` or `provided`).
+  - `security.require_sso=true` requires `security.sso_enabled=true`.
   - `security.require_promotion_gate=true` requires `.runtime/promotion/staging-certified.yml`.
-- Policy execution mode:
-  - `SECURITY_MODE=secure` blocks on policy violation.
-  - `SECURITY_MODE=permissive` continues with warning + evidence.
+
+## 7. Security mode policy handling
+
+- `SECURITY_MODE=secure`: policy violations block mutable operations.
+- `SECURITY_MODE=permissive`: policy violations become warnings and are persisted with justification.

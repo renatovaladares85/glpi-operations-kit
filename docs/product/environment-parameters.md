@@ -41,6 +41,17 @@ This document explains each environment parameter used by scripts and Ansible, i
 - Consumer: runtime renderer, policy checks.
 - Classification: public, mandatory.
 
+### `execution.*`
+
+- Purpose: defines whether execution is local per host or SSH remote.
+- Consumer: scripts, precheck, runtime inventory renderer.
+- Keys:
+  - `execution.mode`: `local` or `ssh`
+  - `execution.host_role_default`: `app`, `db`, or `all`
+- Classification: public, mandatory.
+- Override:
+  - `GLPI_EXECUTION_MODE` and `GLPI_HOST_ROLE` can override config values per execution.
+
 ### `topology.*`
 
 - Purpose: host model and targeting.
@@ -49,7 +60,8 @@ This document explains each environment parameter used by scripts and Ansible, i
   - `mode`: public, mandatory
   - hosts/aliases: public, mandatory
 - Impact:
-  - `dual-server` requires remote SSH connectivity checks.
+  - `dual-server` in `execution.mode=local` requires role-based per-host execution.
+  - `dual-server` in `execution.mode=ssh` requires remote SSH connectivity checks.
 
 ### `network.ssh.*`
 
@@ -59,10 +71,9 @@ This document explains each environment parameter used by scripts and Ansible, i
   - `user`: Linux username
   - `private_key_path`: path to environment key
 - Classification:
-  - public, mandatory
-  - conditional security requirement for remote execution
+  - public, conditional-mandatory when `execution.mode=ssh`
 - Impact:
-  - private key must be mode `0600`.
+  - in `ssh` mode, private key must be mode `0600`.
 
 ### `glpi.*`
 
@@ -135,11 +146,13 @@ This document explains each environment parameter used by scripts and Ansible, i
 | `product.name` | product display name | docs/runtime metadata | `GLPI Operations Kit` | public, mandatory | all |
 | `customer.display_name` | customer label | docs/monitoring labels | `Example Customer` | public, mandatory | all |
 | `environment.name` | runtime selector | scripts/renderer | `staging` | public, mandatory | all |
+| `execution.mode` | execution model selector | scripts/renderer/precheck | `local` | public, mandatory | local vs ssh orchestration |
+| `execution.host_role_default` | default host role selector | scripts/precheck | `app` | public, mandatory | local action scoping |
 | `topology.mode` | topology behavior | precheck/deploy | `dual-server` | public, mandatory | drives SSH checks |
 | `topology.app.host` | app endpoint | inventory | `192.0.2.10` | public, mandatory | host targeting |
 | `topology.db.host` | db endpoint | inventory | `192.0.2.20` | public, mandatory | host targeting |
-| `network.ssh.user` | SSH login user | inventory | `ubuntu` | public, mandatory | remote execution |
-| `network.ssh.private_key_path` | SSH private key path | inventory/precheck | `~/.ssh/glpi_staging_ed25519` | public, mandatory | key policy (`0600`) |
+| `network.ssh.user` | SSH login user | inventory | `ubuntu` | public, conditional-mandatory | remote execution (`execution.mode=ssh`) |
+| `network.ssh.private_key_path` | SSH private key path | inventory/precheck | `~/.ssh/glpi_staging_ed25519` | public, conditional-mandatory | key policy (`0600`) in `ssh` mode |
 | `network.database.app_access_host` | DB grant source | db role | `192.0.2.10` | public, mandatory | connectivity restriction |
 | `glpi.version` | GLPI version | app role | `11.0.0` | public, mandatory | release and package flow |
 | `glpi.domain` | app domain | nginx/smoke tests | `glpi.example.internal` | public, mandatory | endpoint behavior |

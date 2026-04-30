@@ -2,13 +2,13 @@
 
 ## 1. Modos TLS
 
-| Modo | Permitido em modo seguro | Permitido em modo permissivo | Comportamento |
+| Modo | Permitido em `secure` | Permitido em `permissive` | Comportamento |
 |---|---|---|---|
-| `none` | apenas quando `security.require_https=false` e `security.require_tls=false` | sim (com warning/evidência se política exigir TLS/HTTPS) | somente HTTP na porta 80 |
+| `none` | somente quando `security.require_https=false` e `security.require_tls=false` | sim (com warning/evidência se política exigir TLS/HTTPS) | HTTP na porta 80 |
 | `self_signed` | permitido quando `security.require_tls=false` | sim | HTTPS com certificado autoassinado |
-| `provided` | sim | sim | HTTPS com certificado válido fornecido |
+| `provided` | sim | sim | HTTPS com certificado fornecido pelo operador |
 
-## 2. Comandos de modo
+## 2. Comandos
 
 ```bash
 ./scripts/glpictl.sh staging tls disable
@@ -25,13 +25,13 @@
 
 Resultado esperado:
 
-- geração de certificado/chave no host da aplicação;
-- reaplicação da role da aplicação;
-- validação da configuração do Nginx.
+- geração de certificado/chave no host da aplicação
+- reaplicação da role da aplicação
+- validação de configuração do Nginx
 
 ## 4. Fluxo com certificado fornecido
 
-Antes do comando:
+Pré-validação local:
 
 ```bash
 ls -l /path/to/fullchain.crt
@@ -59,8 +59,8 @@ curl -I https://GLPI_DOMAIN
 ./scripts/glpictl.sh production ops cert renew
 ```
 
-Política:
+Política padrão:
 
-- alerta padrão com 30 dias para expiração;
-- troca antes do vencimento;
-- modo seguro pode exigir certificado `provided` conforme `security.require_tls`.
+- alerta com 30 dias para expiração
+- troca antes do vencimento
+- modo `secure` pode exigir `tls.mode=provided` conforme `security.require_tls`

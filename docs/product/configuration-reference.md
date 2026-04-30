@@ -28,6 +28,9 @@ Companion references:
    - `.runtime/<environment>/public.runtime.yml`
    - `.runtime/<environment>/overrides.runtime.yml`
    - `.runtime/<environment>/secrets.yml`
+5. Inventory generation follows execution contract:
+   - `execution.mode=local`: local inventory (`ansible_connection=local`) for host-scoped execution.
+   - `execution.mode=ssh`: remote inventory with `ansible_user` and `ansible_ssh_private_key_file`.
 
 ## Precedence
 
@@ -89,6 +92,19 @@ Operational rule:
   - Example: `production`
   - Type: public.
 
+### `execution`
+
+- `execution.mode`
+  - Purpose: selects the orchestration model (`local` or `ssh`).
+  - Used by: precheck, runtime inventory renderer, deploy safety checks.
+  - Example: `local`
+  - Type: public.
+- `execution.host_role_default`
+  - Purpose: default role for mutable local execution (`app`, `db`, or `all`).
+  - Used by: role-target consistency checks in local mode.
+  - Example: `app`
+  - Type: public.
+
 ### `topology`
 
 - `topology.mode`
@@ -121,14 +137,14 @@ Operational rule:
 
 - `network.ssh.user`
   - Purpose: SSH user for Ansible.
-  - Used by: generated inventory.
+  - Used by: generated inventory in `execution.mode=ssh`.
   - Example: `ubuntu`
-  - Type: public.
+  - Type: public, conditional-mandatory.
 - `network.ssh.private_key_path`
   - Purpose: path to SSH private key on the execution host.
-  - Used by: generated inventory and prechecks.
+  - Used by: generated inventory and prechecks in `execution.mode=ssh`.
   - Example: `~/.ssh/glpi_staging_ed25519`
-  - Type: public-sensitive path.
+  - Type: public-sensitive path, conditional-mandatory.
 - `network.database.app_access_host`
   - Purpose: app-side host allowed to connect to MariaDB.
   - Used by: db role grants and firewall.

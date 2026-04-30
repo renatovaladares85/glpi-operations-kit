@@ -44,12 +44,23 @@ Generated runtime artifacts:
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
+Execution contract (shared by all scripts):
+
+- `GLPI_ENVIRONMENT`
+- `GLPI_EXECUTION_MODE=local|ssh` (default: `local`)
+- `GLPI_HOST_ROLE=app|db|all`
+- `SECURITY_MODE=secure|permissive`
+
 Examples:
 
 ```bash
+export GLPI_ENVIRONMENT=staging
+export GLPI_EXECUTION_MODE=local
+export GLPI_HOST_ROLE=db
 bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy check all
 ./scripts/glpictl.sh staging deploy apply db
+export GLPI_HOST_ROLE=app
 ./scripts/glpictl.sh staging deploy apply app
 ./scripts/glpictl.sh staging deploy apply monitoring
 ./scripts/glpictl.sh staging deploy apply backup
