@@ -10,6 +10,7 @@ RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 PROMOTION_DIR="$SCRIPT_ROOT/../.runtime/promotion"
 INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
 PUBLIC_RUNTIME_PATH="$RUNTIME_DIR/public.runtime.yml"
+OVERRIDE_RUNTIME_PATH="$RUNTIME_DIR/overrides.runtime.yml"
 SECRET_PATH="$RUNTIME_DIR/secrets.yml"
 
 ensure_runtime_foundation "$ENVIRONMENT"
@@ -21,6 +22,7 @@ ensure_secret_keys "$ENVIRONMENT"
 ensure_directory_mode "$PROMOTION_DIR" "700"
 require_runtime_file "$INVENTORY_RUNTIME_PATH" "runtime inventory"
 require_runtime_file "$PUBLIC_RUNTIME_PATH" "public runtime file"
+require_runtime_file "$OVERRIDE_RUNTIME_PATH" "runtime override file"
 require_runtime_file "$SECRET_PATH" "runtime secret file"
 export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
@@ -54,7 +56,8 @@ nginx_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "ng
 php_fpm_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "php-fpm8.3 -t" -o; }
 db_connectivity_check() { ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "mysqladmin ping --silent" -o; }
 
-tls_mode="$(awk -F'"' '/^glpi_tls_mode:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
+[[ -z "${tls_mode// }" ]] && tls_mode="$(awk -F'"' '/^glpi_tls_mode:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
 app_domain="$(awk -F'"' '/^glpi_domain:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
 [[ -z "$tls_mode" ]] && tls_mode="none"
 smoke_url="http://${app_domain}"
@@ -71,7 +74,7 @@ smoke_check() {
 
 preflight_status="$(run_check "preflight-summary" "$EVIDENCE_DIR/preflight.log" run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory)"
 inventory_status="$(run_check "inventory-parse" "$EVIDENCE_DIR/inventory.log" ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list)"
-syntax_status="$(run_check "ansible-syntax" "$EVIDENCE_DIR/ansible-syntax.log" ansible-playbook -i "$INVENTORY_RUNTIME_PATH" "$SCRIPT_ROOT/../ansible/site.yml" --syntax-check --extra-vars "@$PUBLIC_RUNTIME_PATH" --extra-vars "@$SECRET_PATH")"
+syntax_status="$(run_check "ansible-syntax" "$EVIDENCE_DIR/ansible-syntax.log" ansible-playbook -i "$INVENTORY_RUNTIME_PATH" "$SCRIPT_ROOT/../ansible/site.yml" --syntax-check --extra-vars "@$PUBLIC_RUNTIME_PATH" --extra-vars "@$OVERRIDE_RUNTIME_PATH" --extra-vars "@$SECRET_PATH")"
 nginx_status="$(run_check "nginx-validation" "$EVIDENCE_DIR/nginx.log" nginx_check)"
 php_status="$(run_check "php-fpm-validation" "$EVIDENCE_DIR/php-fpm.log" php_fpm_check)"
 db_status="$(run_check "db-connectivity" "$EVIDENCE_DIR/db-connectivity.log" db_connectivity_check)"

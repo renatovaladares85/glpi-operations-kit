@@ -573,6 +573,11 @@ runtime_public_path() {
   echo "$(runtime_env_dir "$environment")/public.runtime.yml"
 }
 
+runtime_override_path() {
+  local environment="$1"
+  echo "$(runtime_env_dir "$environment")/overrides.runtime.yml"
+}
+
 runtime_secret_path() {
   local environment="$1"
   echo "$(runtime_env_dir "$environment")/secrets.yml"
@@ -647,14 +652,35 @@ materialize_runtime_from_config() {
   local environment="$1"
   local public_path
   local inventory_path
+  local override_path
   public_path="$(runtime_public_path "$environment")"
   inventory_path="$(runtime_inventory_path "$environment")"
+  override_path="$(runtime_override_path "$environment")"
   ensure_runtime_foundation "$environment"
   render_product_config "$environment" public-runtime >"$public_path"
   chmod 600 "$public_path"
   render_product_config "$environment" inventory >"$inventory_path"
   chmod 600 "$inventory_path"
+  if [[ ! -f "$override_path" ]]; then
+    cat >"$override_path" <<'EOF'
+---
+EOF
+  fi
+  chmod 600 "$override_path"
   cp "$public_path" "$(runtime_app_path "$environment")"
+}
+
+ensure_runtime_override_file() {
+  local environment="$1"
+  local override_path
+  override_path="$(runtime_override_path "$environment")"
+  ensure_runtime_foundation "$environment"
+  if [[ ! -f "$override_path" ]]; then
+    cat >"$override_path" <<'EOF'
+---
+EOF
+  fi
+  chmod 600 "$override_path"
 }
 
 read_yaml_top_level_value() {

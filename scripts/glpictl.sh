@@ -24,6 +24,7 @@ fi
 RUNTIME_DIR="$(runtime_env_dir "$ENVIRONMENT")"
 INVENTORY_RUNTIME_PATH="$(runtime_inventory_path "$ENVIRONMENT")"
 PUBLIC_RUNTIME_PATH="$(runtime_public_path "$ENVIRONMENT")"
+OVERRIDE_RUNTIME_PATH="$(runtime_override_path "$ENVIRONMENT")"
 SECRET_PATH="$(runtime_secret_path "$ENVIRONMENT")"
 CONFIG_PATH="$(config_file_path "$ENVIRONMENT")"
 PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
@@ -35,6 +36,7 @@ run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-in
 ensure_runtime_inputs_if_missing() {
   require_runtime_file "$CONFIG_PATH" "product configuration file"
   materialize_runtime_from_config "$ENVIRONMENT"
+  ensure_runtime_override_file "$ENVIRONMENT"
   ensure_secret_keys "$ENVIRONMENT"
   local ssh_key_path
   ssh_key_path="$(read_product_config_value "$ENVIRONMENT" "network.ssh.private_key_path" || true)"
@@ -64,7 +66,7 @@ run_deploy() {
   fi
 
   local tags=""
-  local extra_var_files=("$PUBLIC_RUNTIME_PATH" "$SECRET_PATH")
+  local extra_var_files=("$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH")
   case "$target" in
     base) tags="base" ;;
     app) tags="app" ;;
@@ -77,7 +79,7 @@ run_deploy() {
 
   case "$mode" in
     apply) invoke_ansible "$ENVIRONMENT" "$tags" "${extra_var_files[@]}" ;;
-    post-check) invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH" ;;
+    post-check) invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH" ;;
     *) echo "Unsupported deploy action: $mode (expected check|apply|post-check)" >&2; exit 1 ;;
   esac
 }
@@ -92,10 +94,9 @@ run_certify() {
 
 run_tls() {
   local tls_action="$ACTION"
-  local domain glpi_version local_cert_path local_key_path tls_mode
+  local domain local_cert_path local_key_path tls_mode
   ensure_runtime_inputs_if_missing
   domain="$(awk -F'"' '/glpi_domain:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
-  glpi_version="$(awk -F'"' '/glpi_version:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
   local_cert_path=""
   local_key_path=""
   tls_mode="none"
@@ -104,26 +105,29 @@ run_tls() {
     self-signed) tls_mode="self_signed" ;;
     install-provided)
       tls_mode="provided"
-      local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$PUBLIC_RUNTIME_PATH")"
-      local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$PUBLIC_RUNTIME_PATH")"
+      local_cert_path="$(read_existing_file "Local TLS certificate path" "Provided mode requires a valid local certificate file." "$OVERRIDE_RUNTIME_PATH")"
+      local_key_path="$(read_existing_file "Local TLS private key path" "Provided mode requires a valid local private key file." "$OVERRIDE_RUNTIME_PATH")"
       ;;
     reload)
-      tls_mode="$(awk -F'"' '/glpi_tls_mode:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
-      local_cert_path="$(awk -F'"' '/glpi_tls_provided_local_cert_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
-      local_key_path="$(awk -F'"' '/glpi_tls_provided_local_key_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+      tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
+      [[ -z "${tls_mode// }" ]] && tls_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" || true)"
+      local_cert_path="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" || true)"
+      [[ -z "${local_cert_path// }" ]] && local_cert_path="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" || true)"
+      local_key_path="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" || true)"
+      [[ -z "${local_key_path// }" ]] && local_key_path="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_key_path" || true)"
       ;;
     *)
       echo "Unsupported TLS action: $tls_action (expected disable|self-signed|install-provided|reload)" >&2
       exit 1
       ;;
   esac
-  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" "$tls_mode"
-  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_use_tls" "$([[ "$tls_mode" == "none" ]] && echo false || echo true)"
-  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_common_name" "$domain"
-  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" "$local_cert_path"
-  update_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" "$tls_mode"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_use_tls" "$([[ "$tls_mode" == "none" ]] && echo false || echo true)"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_common_name" "$domain"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" "$local_cert_path"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  invoke_ansible "$ENVIRONMENT" "app" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH"
+  invoke_ansible "$ENVIRONMENT" "app" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
   echo "TLS action '$tls_action' completed."
 }
 

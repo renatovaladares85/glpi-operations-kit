@@ -18,6 +18,7 @@ fi
 RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
 PUBLIC_RUNTIME_PATH="$RUNTIME_DIR/public.runtime.yml"
+OVERRIDE_RUNTIME_PATH="$RUNTIME_DIR/overrides.runtime.yml"
 SECRET_PATH="$RUNTIME_DIR/secrets.yml"
 PROTECTED_USERS=("root" "www-data" "mysql")
 
@@ -33,6 +34,7 @@ export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 case "$DOMAIN" in
   cert|audit)
     require_runtime_file "$PUBLIC_RUNTIME_PATH" "public runtime data"
+    require_runtime_file "$OVERRIDE_RUNTIME_PATH" "runtime override data"
     ;;
 esac
 
@@ -262,7 +264,8 @@ users_glpi_manual() {
 
 cert_check() {
   local cert_path days
-  cert_path="$(awk -F'"' '/glpi_tls_certificate_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
+  cert_path="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_certificate_path" || true)"
+  [[ -z "${cert_path// }" ]] && cert_path="$(awk -F'"' '/glpi_tls_certificate_path:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
   if [[ -z "$cert_path" ]]; then
     cert_path="/etc/ssl/certs/glpi-staging.crt"
   fi
@@ -294,7 +297,7 @@ cert_renew() {
 audit_check() {
   write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "audit-check" "started" "running operational audit checks"
   ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
-  invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$SECRET_PATH"
+  invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
   write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "audit-check" "completed" "audit checks completed"
 }
 
