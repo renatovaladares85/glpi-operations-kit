@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 
-REQUIRED_KEYS = {
+BASE_REQUIRED_KEYS = {
     "product.name": {
         "purpose": "Defines the product display name.",
         "consumer": "documentation and runtime metadata",
@@ -34,14 +34,6 @@ REQUIRED_KEYS = {
     },
     "topology.db.host": {
         "purpose": "Defines the real db host IP or FQDN.",
-        "consumer": "generated inventory.runtime.yml",
-    },
-    "network.ssh.user": {
-        "purpose": "Defines the SSH user for Ansible access.",
-        "consumer": "generated inventory.runtime.yml",
-    },
-    "network.ssh.private_key_path": {
-        "purpose": "Defines the SSH private key path for Ansible access.",
         "consumer": "generated inventory.runtime.yml",
     },
     "glpi.version": {
@@ -82,6 +74,20 @@ REQUIRED_KEYS = {
     },
 }
 
+SSH_REQUIRED_KEYS = {
+    "network.ssh.user": {
+        "purpose": "Defines the SSH user for Ansible access.",
+        "consumer": "generated inventory.runtime.yml when execution mode is ssh",
+    },
+    "network.ssh.private_key_path": {
+        "purpose": "Defines the SSH private key path for Ansible access.",
+        "consumer": "generated inventory.runtime.yml when execution mode is ssh",
+    },
+}
+
+EXECUTION_MODES = {"local", "ssh"}
+HOST_ROLES = {"app", "db", "all"}
+
 
 def nested_get(data, dotted):
     current = data
@@ -100,10 +106,11 @@ def nested_get_default(data, dotted, default=None):
 
 
 def fail_missing(path):
-    meta = REQUIRED_KEYS[path]
+    meta = BASE_REQUIRED_KEYS.get(path, SSH_REQUIRED_KEYS.get(path, {}))
     print(f"Missing required config key: {path}", file=sys.stderr)
-    print(f"Purpose: {meta['purpose']}", file=sys.stderr)
-    print(f"Used by: {meta['consumer']}", file=sys.stderr)
+    if meta:
+        print(f"Purpose: {meta['purpose']}", file=sys.stderr)
+        print(f"Used by: {meta['consumer']}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -114,7 +121,20 @@ def require(data, dotted):
         fail_missing(dotted)
 
 
-def build_public_runtime(config):
+def resolve_execution_contract(config):
+    mode = os.getenv("GLPI_EXECUTION_MODE", "").strip() or nested_get_default(config, "execution.mode", "local")
+    role = os.getenv("GLPI_HOST_ROLE", "").strip() or nested_get_default(config, "execution.host_role_default", "all")
+
+    if mode not in EXECUTION_MODES:
+        print(f"Invalid execution mode '{mode}'. Allowed: {sorted(EXECUTION_MODES)}", file=sys.stderr)
+        sys.exit(1)
+    if role not in HOST_ROLES:
+        print(f"Invalid host role '{role}'. Allowed: {sorted(HOST_ROLES)}", file=sys.stderr)
+        sys.exit(1)
+    return mode, role
+
+
+def build_public_runtime(config, execution_mode, host_role):
     active_profile_name = require(config, "resource_profiles.active")
     profiles = require(config, "resource_profiles.profiles")
     if active_profile_name not in profiles:
@@ -134,7 +154,7 @@ def build_public_runtime(config):
     tls_mode = require(config, "tls.mode")
     glpi_use_tls = tls_mode != "none"
 
-    ssh_key_path = os.path.expanduser(require(config, "network.ssh.private_key_path"))
+    ssh_key_path = os.path.expanduser(nested_get_default(config, "network.ssh.private_key_path", ""))
     public_runtime = {
         "product_name": require(config, "product.name"),
         "product_slug": nested_get_default(config, "product.slug", "glpi-operations-kit"),
@@ -142,6 +162,8 @@ def build_public_runtime(config):
         "customer_short_name": nested_get_default(config, "customer.short_name", "example-customer"),
         "environment_name": require(config, "environment.name"),
         "environment_stage": nested_get_default(config, "environment.stage", require(config, "environment.name")),
+        "execution_mode": execution_mode,
+        "execution_host_role": host_role,
         "topology_mode": nested_get_default(config, "topology.mode", "dual-server"),
         "glpi_version": glpi_version,
         "glpi_download_url": f"https://github.com/glpi-project/glpi/releases/download/{glpi_version}/glpi-{glpi_version}.tgz",
@@ -252,30 +274,70 @@ def build_public_runtime(config):
         "glpi_db_name": require(config, "database.name"),
         "glpi_db_user": require(config, "database.user"),
         "resource_profile_name": active_profile_name,
+        "ssh_key_path_resolved": ssh_key_path,
     }
     return public_runtime
 
 
-def build_inventory(config):
+def build_inventory(config, execution_mode, host_role):
+    environment_name = require(config, "environment.name")
+    app_alias = require(config, "topology.app.alias")
+    app_host = require(config, "topology.app.host")
+    db_alias = require(config, "topology.db.alias")
+    db_host = require(config, "topology.db.host")
+    topology_mode = nested_get_default(config, "topology.mode", "dual-server")
+
+    if execution_mode == "local":
+        children = {}
+        include_app = topology_mode == "single-server" or host_role in {"app", "all"}
+        include_db = topology_mode == "single-server" or host_role in {"db", "all"}
+
+        if include_app:
+            children["glpi_app"] = {
+                "hosts": {
+                    app_alias: {
+                        "ansible_connection": "local",
+                        "ansible_host": "127.0.0.1",
+                    }
+                }
+            }
+        if include_db:
+            children["glpi_db"] = {
+                "hosts": {
+                    db_alias: {
+                        "ansible_connection": "local",
+                        "ansible_host": "127.0.0.1",
+                    }
+                }
+            }
+        return {
+            "all": {
+                "vars": {
+                    "environment_name": environment_name,
+                },
+                "children": children,
+            }
+        }
+
     return {
         "all": {
             "vars": {
                 "ansible_user": require(config, "network.ssh.user"),
                 "ansible_ssh_private_key_file": os.path.expanduser(require(config, "network.ssh.private_key_path")),
-                "environment_name": require(config, "environment.name"),
+                "environment_name": environment_name,
             },
             "children": {
                 "glpi_app": {
                     "hosts": {
-                        require(config, "topology.app.alias"): {
-                            "ansible_host": require(config, "topology.app.host"),
+                        app_alias: {
+                            "ansible_host": app_host,
                         }
                     }
                 },
                 "glpi_db": {
                     "hosts": {
-                        require(config, "topology.db.alias"): {
-                            "ansible_host": require(config, "topology.db.host"),
+                        db_alias: {
+                            "ansible_host": db_host,
                         }
                     }
                 },
@@ -298,10 +360,19 @@ def main():
     with config_path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
 
-    for key in REQUIRED_KEYS:
-        require(data, key)
+    execution_mode, host_role = resolve_execution_contract(data)
 
-    result = build_public_runtime(data) if args.mode == "public-runtime" else build_inventory(data)
+    for key in BASE_REQUIRED_KEYS:
+        require(data, key)
+    if execution_mode == "ssh":
+        for key in SSH_REQUIRED_KEYS:
+            require(data, key)
+
+    result = (
+        build_public_runtime(data, execution_mode, host_role)
+        if args.mode == "public-runtime"
+        else build_inventory(data, execution_mode, host_role)
+    )
     yaml.safe_dump(result, sys.stdout, sort_keys=False, default_flow_style=False)
 
 

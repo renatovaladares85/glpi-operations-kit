@@ -5,7 +5,8 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_ROOT/lib/common.sh"
 
-ENVIRONMENT="staging"
+ENVIRONMENT="${GLPI_ENVIRONMENT:-staging}"
+export GLPI_ENVIRONMENT="$ENVIRONMENT"
 RUNTIME_DIR="$SCRIPT_ROOT/../.runtime/$ENVIRONMENT"
 PROMOTION_DIR="$SCRIPT_ROOT/../.runtime/promotion"
 INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
@@ -15,7 +16,7 @@ SECRET_PATH="$RUNTIME_DIR/secrets.yml"
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" "certify" "run" "all" bash git python3 ansible-playbook ansible-inventory
 require_runtime_file "$(config_file_path "$ENVIRONMENT")" "product configuration file"
 materialize_runtime_from_config "$ENVIRONMENT"
 ensure_secret_keys "$ENVIRONMENT"
@@ -72,7 +73,7 @@ smoke_check() {
   return 1
 }
 
-preflight_status="$(run_check "preflight-summary" "$EVIDENCE_DIR/preflight.log" run_preflight_checks "$ENVIRONMENT" git ansible-playbook ansible-inventory)"
+preflight_status="$(run_check "preflight-summary" "$EVIDENCE_DIR/preflight.log" run_preflight_checks "$ENVIRONMENT" "certify" "run" "all" git ansible-playbook ansible-inventory)"
 inventory_status="$(run_check "inventory-parse" "$EVIDENCE_DIR/inventory.log" ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list)"
 syntax_status="$(run_check "ansible-syntax" "$EVIDENCE_DIR/ansible-syntax.log" ansible-playbook -i "$INVENTORY_RUNTIME_PATH" "$SCRIPT_ROOT/../ansible/site.yml" --syntax-check --extra-vars "@$PUBLIC_RUNTIME_PATH" --extra-vars "@$OVERRIDE_RUNTIME_PATH" --extra-vars "@$SECRET_PATH")"
 nginx_status="$(run_check "nginx-validation" "$EVIDENCE_DIR/nginx.log" nginx_check)"

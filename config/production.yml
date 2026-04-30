@@ -11,6 +11,10 @@ environment:
   name: "production"
   stage: "production"
 
+execution:
+  mode: "local"
+  host_role_default: "all"
+
 topology:
   mode: "dual-server"
   app:

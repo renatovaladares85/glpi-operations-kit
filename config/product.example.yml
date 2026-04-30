@@ -11,6 +11,10 @@ environment:
   name: "staging"
   stage: "staging"
 
+execution:
+  mode: "local"
+  host_role_default: "all"
+
 topology:
   mode: "dual-server"
   app:

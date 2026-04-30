@@ -26,4 +26,4 @@ ensure_directory_mode "$SCRIPT_ROOT/../.runtime" "700"
 write_bootstrap_marker
 
 echo "Bootstrap completed."
-echo "Next step: ./scripts/deploy-staging.sh check"
+echo "Next step example: GLPI_EXECUTION_MODE=local GLPI_HOST_ROLE=db ./scripts/glpictl.sh staging deploy check all"

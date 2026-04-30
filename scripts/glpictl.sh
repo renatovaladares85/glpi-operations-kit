@@ -5,7 +5,7 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_ROOT/lib/common.sh"
 
-ENVIRONMENT="${1:-}"
+ENVIRONMENT="${1:-${GLPI_ENVIRONMENT:-}}"
 DOMAIN="${2:-}"
 ACTION="${3:-}"
 TARGET="${4:-all}"
@@ -13,6 +13,7 @@ SCOPE="${5:-}"
 
 if [[ -z "$ENVIRONMENT" || -z "$DOMAIN" || -z "$ACTION" ]]; then
   echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
+  echo "Execution contract: GLPI_ENVIRONMENT, GLPI_EXECUTION_MODE=local|ssh, GLPI_HOST_ROLE=app|db|all, SECURITY_MODE=secure|permissive" >&2
   exit 1
 fi
 
@@ -20,6 +21,7 @@ if [[ ! "$ENVIRONMENT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
   echo "Unsupported environment name: $ENVIRONMENT (allowed: letters, numbers, '.', '-', '_')." >&2
   exit 1
 fi
+export GLPI_ENVIRONMENT="$ENVIRONMENT"
 
 RUNTIME_DIR="$(runtime_env_dir "$ENVIRONMENT")"
 INVENTORY_RUNTIME_PATH="$(runtime_inventory_path "$ENVIRONMENT")"
@@ -41,6 +43,9 @@ PERMISSIVE_EVIDENCE_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PERMISSIVE_EVIDENCE_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/security-mode-last.yml"
 PERMISSIVE_EVIDENCE_REPORT_PATH="$(runtime_evidence_dir "$ENVIRONMENT")/security-mode-${PERMISSIVE_EVIDENCE_TIMESTAMP}-${DOMAIN}-${ACTION}.yml"
 declare -a POLICY_VIOLATIONS=()
+EXECUTION_MODE_EFFECTIVE=""
+HOST_ROLE_EFFECTIVE=""
+TOPOLOGY_MODE_EFFECTIVE="dual-server"
 
 normalize_bool() {
   local value="$1"
@@ -97,6 +102,60 @@ PY
   esac
   SECURITY_MODE_EFFECTIVE="$mode"
   export SECURITY_MODE="$mode"
+}
+
+resolve_execution_contract() {
+  EXECUTION_MODE_EFFECTIVE="$(resolve_execution_mode_for_environment "$ENVIRONMENT")"
+  if [[ "$EXECUTION_MODE_EFFECTIVE" == "invalid" ]]; then
+    echo "Invalid execution mode. Use GLPI_EXECUTION_MODE=local|ssh or config.execution.mode." >&2
+    exit 1
+  fi
+  HOST_ROLE_EFFECTIVE="$(resolve_host_role_for_environment "$ENVIRONMENT")"
+  if [[ "$HOST_ROLE_EFFECTIVE" == "invalid" ]]; then
+    echo "Invalid host role. Use GLPI_HOST_ROLE=app|db|all or config.execution.host_role_default." >&2
+    exit 1
+  fi
+  if [[ -f "$CONFIG_PATH" ]]; then
+    TOPOLOGY_MODE_EFFECTIVE="$(read_product_config_value "$ENVIRONMENT" "topology.mode" || true)"
+  else
+    TOPOLOGY_MODE_EFFECTIVE="dual-server"
+  fi
+  [[ -z "${TOPOLOGY_MODE_EFFECTIVE// }" ]] && TOPOLOGY_MODE_EFFECTIVE="dual-server"
+  export GLPI_EXECUTION_MODE="$EXECUTION_MODE_EFFECTIVE"
+  export GLPI_HOST_ROLE="$HOST_ROLE_EFFECTIVE"
+}
+
+enforce_local_target_consistency() {
+  local domain="$1"
+  local action="$2"
+  local target="$3"
+  if [[ "$EXECUTION_MODE_EFFECTIVE" != "local" ]]; then
+    return 0
+  fi
+  if [[ "$domain" != "deploy" || "$action" != "apply" ]]; then
+    return 0
+  fi
+  case "$target" in
+    db)
+      if [[ "$HOST_ROLE_EFFECTIVE" != "db" && "$HOST_ROLE_EFFECTIVE" != "all" ]]; then
+        echo "Local mode requires GLPI_HOST_ROLE=db|all for deploy apply db." >&2
+        exit 1
+      fi
+      ;;
+    app|monitoring|backup)
+      if [[ "$HOST_ROLE_EFFECTIVE" != "app" && "$HOST_ROLE_EFFECTIVE" != "all" ]]; then
+        echo "Local mode requires GLPI_HOST_ROLE=app|all for deploy apply $target." >&2
+        exit 1
+      fi
+      ;;
+    all)
+      if [[ "$TOPOLOGY_MODE_EFFECTIVE" == "dual-server" && "$HOST_ROLE_EFFECTIVE" != "all" ]]; then
+        echo "Local mode dual-server does not allow deploy apply all with GLPI_HOST_ROLE=$HOST_ROLE_EFFECTIVE." >&2
+        echo "Run apply db on DB host and apply app/monitoring/backup on APP host." >&2
+        exit 1
+      fi
+      ;;
+  esac
 }
 
 resolve_policy_contract() {
@@ -317,7 +376,11 @@ ensure_runtime_inputs_if_missing() {
   ensure_runtime_override_file "$ENVIRONMENT"
   ensure_secret_keys "$ENVIRONMENT"
   local ssh_key_path
-  ssh_key_path="$(read_product_config_value "$ENVIRONMENT" "network.ssh.private_key_path" || true)"
+  if [[ "$EXECUTION_MODE_EFFECTIVE" == "ssh" ]]; then
+    ssh_key_path="$(read_product_config_value "$ENVIRONMENT" "network.ssh.private_key_path" || true)"
+  else
+    ssh_key_path=""
+  fi
   if [[ -n "${ssh_key_path// }" ]]; then
     ssh_key_path="$(expand_home_path "$ssh_key_path")"
     enforce_ssh_private_key_permissions "$ssh_key_path"
@@ -327,6 +390,9 @@ ensure_runtime_inputs_if_missing() {
 run_deploy() {
   local mode="$1"
   local target="$2"
+  local post_check_tags="app,db"
+
+  enforce_local_target_consistency "deploy" "$mode" "$target"
 
   ensure_runtime_inputs_if_missing
   resolve_policy_contract
@@ -366,7 +432,23 @@ run_deploy() {
         require_deploy_flag "db_applied" "Run apply db before post-check."
         require_deploy_flag "app_applied" "Run apply app before post-check."
       fi
-      invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
+      case "$target" in
+        app|db) post_check_tags="$target" ;;
+        all)
+          if [[ "$EXECUTION_MODE_EFFECTIVE" == "local" && "$TOPOLOGY_MODE_EFFECTIVE" == "dual-server" ]]; then
+            if [[ "$HOST_ROLE_EFFECTIVE" == "app" ]]; then
+              post_check_tags="app"
+            elif [[ "$HOST_ROLE_EFFECTIVE" == "db" ]]; then
+              post_check_tags="db"
+            fi
+          fi
+          ;;
+        *)
+          echo "Unsupported post-check target: $target (expected app|db|all)" >&2
+          exit 1
+          ;;
+      esac
+      invoke_ansible "$ENVIRONMENT" "$post_check_tags" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
       mark_apply_sequence "$mode" "$target"
       ;;
     *) echo "Unsupported deploy action: $mode (expected check|apply|post-check)" >&2; exit 1 ;;
@@ -460,9 +542,10 @@ run_promote() {
 }
 
 resolve_security_mode
+resolve_execution_contract
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" "$DOMAIN" "$ACTION" "$TARGET" bash git python3 ansible-playbook ansible-inventory
 
 if is_mutating_operation && [[ "$SECURITY_MODE_EFFECTIVE" == "permissive" ]]; then
   ensure_permissive_justification

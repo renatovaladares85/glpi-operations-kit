@@ -5,10 +5,11 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_ROOT/lib/common.sh"
 
-ENVIRONMENT="${2:-staging}"
+ENVIRONMENT="${2:-${GLPI_ENVIRONMENT:-staging}}"
 DOMAIN="${1:-}"
 ACTION="${3:-}"
 SCOPE="${4:-}"
+export GLPI_ENVIRONMENT="$ENVIRONMENT"
 
 if [[ -z "$DOMAIN" ]]; then
   echo "Usage: ./scripts/ops-maintenance.sh <users|cert|audit|resume> [environment] [action] [scope]" >&2
@@ -24,7 +25,7 @@ PROTECTED_USERS=("root" "www-data" "mysql")
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" "ops" "${DOMAIN:-unknown}" "${ACTION:-${SCOPE:-all}}" bash git python3 ansible-playbook ansible-inventory
 require_runtime_file "$(config_file_path "$ENVIRONMENT")" "product configuration file"
 materialize_runtime_from_config "$ENVIRONMENT"
 ensure_secret_keys "$ENVIRONMENT"

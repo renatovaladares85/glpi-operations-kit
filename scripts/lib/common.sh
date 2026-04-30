@@ -5,6 +5,8 @@ PREFLIGHT_FORCE_CONTINUE="${PREFLIGHT_FORCE_CONTINUE:-false}"
 PREFLIGHT_AUTO_INSTALL="${PREFLIGHT_AUTO_INSTALL:-prompt}"
 GLPI_OPS_GROUP="${GLPI_OPS_GROUP:-glpiops}"
 CERT_RENEWAL_WARN_DAYS="${CERT_RENEWAL_WARN_DAYS:-30}"
+GLPI_EXECUTION_MODE="${GLPI_EXECUTION_MODE:-}"
+GLPI_HOST_ROLE="${GLPI_HOST_ROLE:-}"
 
 write_step() {
   printf '\n==> %s\n' "$1"
@@ -949,12 +951,16 @@ ssh_public_key_path_for_private_key() {
 ensure_ssh_key_material_for_environment() {
   local environment="$1"
   local topology_mode="$2"
-  local key_path="$3"
-  local ssh_user="$4"
-  local app_host="$5"
-  local db_host="$6"
+  local execution_mode="$3"
+  local key_path="$4"
+  local ssh_user="$5"
+  local app_host="$6"
+  local db_host="$7"
 
   local resolved_key_path public_key_path must_check_connectivity
+  if [[ "$execution_mode" != "ssh" ]]; then
+    return 0
+  fi
   resolved_key_path="$(expand_home_path "$key_path")"
   public_key_path="$(ssh_public_key_path_for_private_key "$resolved_key_path")"
   must_check_connectivity="false"
@@ -1088,6 +1094,34 @@ normalize_bool_value() {
   esac
 }
 
+resolve_execution_mode_for_environment() {
+  local environment="$1"
+  local mode="${GLPI_EXECUTION_MODE:-}"
+
+  if [[ -z "${mode// }" ]] && [[ -f "$(config_file_path "$environment")" ]]; then
+    mode="$(read_product_config_value "$environment" "execution.mode" || true)"
+  fi
+  [[ -z "${mode// }" ]] && mode="local"
+  case "$mode" in
+    local|ssh) echo "$mode" ;;
+    *) echo "invalid" ;;
+  esac
+}
+
+resolve_host_role_for_environment() {
+  local environment="$1"
+  local role="${GLPI_HOST_ROLE:-}"
+
+  if [[ -z "${role// }" ]] && [[ -f "$(config_file_path "$environment")" ]]; then
+    role="$(read_product_config_value "$environment" "execution.host_role_default" || true)"
+  fi
+  [[ -z "${role// }" ]] && role="all"
+  case "$role" in
+    app|db|all) echo "$role" ;;
+    *) echo "invalid" ;;
+  esac
+}
+
 resolve_security_mode_for_environment() {
   local environment="$1"
   local mode="${SECURITY_MODE:-}"
@@ -1104,7 +1138,10 @@ resolve_security_mode_for_environment() {
 
 run_preflight_checks() {
   local environment="${1:-unknown}"
-  shift || true
+  local command_domain="${2:-unknown}"
+  local command_action="${3:-unknown}"
+  local command_target="${4:-all}"
+  shift 4 || true
 
   local -a mandatory_commands=()
   local -a optional_commands=("ssh")
@@ -1118,6 +1155,7 @@ run_preflight_checks() {
   local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled
   local require_tls require_https require_sso require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
+  local execution_mode host_role
   local promotion_gate_path
   marker_file="$(bootstrap_marker_path)"
   items_file="$(preflight_items_file_path "$environment")"
@@ -1250,10 +1288,32 @@ run_preflight_checks() {
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
     sso_enabled="$(read_product_config_value "$environment" "security.sso_enabled" || true)"
     security_mode="$(resolve_security_mode_for_environment "$environment")"
+    execution_mode="$(resolve_execution_mode_for_environment "$environment")"
+    host_role="$(resolve_host_role_for_environment "$environment")"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
     [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
     promotion_gate_path="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
+
+    if [[ "$execution_mode" == "invalid" ]]; then
+      append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
+        "Execution mode must be local or ssh." "GLPI_EXECUTION_MODE env var or config.execution.mode" "set local or ssh" "true" "fail" "Fix execution.mode in config or GLPI_EXECUTION_MODE."
+      mandatory_failures=$((mandatory_failures + 1))
+      execution_mode="local"
+    else
+      append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
+        "Execution mode controls inventory rendering and connectivity checks." "GLPI_EXECUTION_MODE env var or config.execution.mode" "set local or ssh" "true" "pass" "mode=${execution_mode}"
+    fi
+
+    if [[ "$host_role" == "invalid" ]]; then
+      append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
+        "Host role must be app, db, or all." "GLPI_HOST_ROLE env var or config.execution.host_role_default" "set app/db/all" "true" "fail" "Fix host role in config or GLPI_HOST_ROLE."
+      mandatory_failures=$((mandatory_failures + 1))
+      host_role="all"
+    else
+      append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
+        "Host role controls allowed mutable actions in local mode." "GLPI_HOST_ROLE env var or config.execution.host_role_default" "set app/db/all" "true" "pass" "role=${host_role}"
+    fi
 
     if [[ "$security_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
@@ -1295,13 +1355,55 @@ run_preflight_checks() {
     require_promotion_gate="$(read_product_config_value "$environment" "security.require_promotion_gate" || true)"
     require_promotion_gate="$(normalize_bool_value "$require_promotion_gate" "false")"
 
-    if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
+    if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$execution_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when execution.mode=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
     else
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when execution.mode=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
       mandatory_failures=$((mandatory_failures + 1))
+    fi
+
+    if [[ "$execution_mode" == "local" ]]; then
+      local role_status role_remediation role_message
+      role_status="pass"
+      role_message="Host role and command target are consistent."
+      role_remediation="none"
+
+      if [[ "$command_domain" == "deploy" && "$command_action" == "apply" ]]; then
+        case "$command_target" in
+          db)
+            if [[ "$host_role" != "db" && "$host_role" != "all" ]]; then
+              role_status="fail"
+              role_message="Local mode requires GLPI_HOST_ROLE=db|all for deploy apply db."
+              role_remediation="Set GLPI_HOST_ROLE=db on DB host, or GLPI_HOST_ROLE=all for single-host deployment."
+            fi
+            ;;
+          app|monitoring|backup)
+            if [[ "$host_role" != "app" && "$host_role" != "all" ]]; then
+              role_status="fail"
+              role_message="Local mode requires GLPI_HOST_ROLE=app|all for deploy apply ${command_target}."
+              role_remediation="Set GLPI_HOST_ROLE=app on APP host, or GLPI_HOST_ROLE=all for single-host deployment."
+            fi
+            ;;
+          all)
+            if [[ "$topology_mode" == "dual-server" && "$host_role" != "all" ]]; then
+              role_status="fail"
+              role_message="Local mode dual-server does not allow deploy apply all with host role app/db."
+              role_remediation="Run role-specific apply commands on each host, or use GLPI_HOST_ROLE=all only for single-host deployment."
+            fi
+            ;;
+        esac
+      fi
+
+      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "execution.mode=local" "mandatory" \
+        "Local execution enforces host role and mutable command consistency." "GLPI_HOST_ROLE + command target" "set host role and run command on correct host" "true" "$role_status" "$role_remediation"
+      if [[ "$role_status" == "fail" ]]; then
+        mandatory_failures=$((mandatory_failures + 1))
+      fi
+    else
+      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "execution.mode=ssh" "not-applicable" \
+        "Role-target consistency checks are enforced only for local mode." "n/a" "n/a" "false" "skip" "none"
     fi
 
     if [[ "$tls_mode" == "provided" ]]; then
