@@ -13,14 +13,24 @@
 
 ## Falha de certificado
 
-- Check: `bash scripts/ops-maintenance.sh cert staging check`
-- Acao: aplicar novo certificado com `cert staging apply`
+- Check: `./scripts/glpictl.sh staging ops cert check`
+- Acao: aplicar novo certificado com `./scripts/glpictl.sh staging ops cert apply`
+
+## Caminho invalido da chave SSH no config do produto
+
+- Check: `ls -l <caminho-da-chave>`
+- Acao: corrigir `config/<environment>.yml` e garantir `chmod 600 <caminho-da-chave>`
+
+## Host app/db invalido no config do produto
+
+- Check: validar sintaxe do hostname ou IP informado
+- Acao: corrigir `config/<environment>.yml` e executar novamente o comando
 
 ## Falha em usuario DB
 
 - Check: revisar `.runtime/<env>/logs/*.log` e `.summary.yml`
-- Acao: rerun com `users staging disable db` ou `users staging add db`
+- Acao: rerun com `./scripts/glpictl.sh staging ops users disable db` ou `./scripts/glpictl.sh staging ops users add db`
 
 ## Continuar apos falha
 
-- Comando: `bash scripts/ops-maintenance.sh resume staging`
+- Comando: `./scripts/glpictl.sh staging ops resume`

@@ -1,74 +1,49 @@
-# GLPI-SoEnergy
+# GLPI Operations Kit
 
-![CI](https://img.shields.io/github/actions/workflow/status/SoEnergy/GLPI-SoEnergy/ci.yml?branch=main)
-![Release](https://img.shields.io/github/v/tag/SoEnergy/GLPI-SoEnergy)
-![License](https://img.shields.io/badge/license-private-red)
-![IaC](https://img.shields.io/badge/IaC-Ansible-blue)
-![Stack](https://img.shields.io/badge/stack-Nginx%20%7C%20PHP--FPM%20%7C%20MariaDB-green)
+Private infrastructure-as-code product for deploying and operating GLPI in reusable corporate environments.
 
-Private repository to standardize, automate, and operate the **GLPI** deployment for SoEnergy in corporate environments.
+## What this product is
 
-## Overview
+- a reusable GLPI deployment kit
+- based on `Ubuntu`, `Ansible`, `Nginx`, `PHP-FPM`, and `MariaDB`
+- designed for `staging` and `production`
+- adaptable to different customers through one public configuration file per environment
 
-- Automation with `Ansible`
-- Guided execution with `bash` scripts
-- Clear separation between `staging` and `production`
-- GLPI with sensitive directories outside the web root
-- Secrets collected at runtime and kept out of Git
+## Product configuration model
 
-## Target architecture
+Primary public configuration:
 
-- `Ubuntu 24.04`
-- `GLPI 11.x`
-- `Nginx + PHP-FPM + MariaDB`
-- initial deployment without containers
-- 2 servers per environment:
-  - app
-  - db
+- `config/staging.yml`
+- `config/production.yml`
+- `config/product.example.yml`
 
-Secure application layout:
+Runtime secrets:
 
-- code: `/usr/share/glpi`
-- config: `/etc/glpi`
-- data: `/var/lib/glpi/files`
-- plugins: `/var/lib/glpi/plugins`
-- logs: `/var/log/glpi`
+- `.runtime/<environment>/secrets.yml`
 
-## Repository structure
+Generated runtime artifacts:
 
-```text
-ansible/
-  inventories/{staging,production}
-  roles/{base,app,db,monitoring,backup}
-scripts/
-docs/
-AGENTS.md
+- `.runtime/<environment>/inventory.runtime.yml`
+- `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/logs/`
+- `.runtime/<environment>/state/`
+- `.runtime/<environment>/evidence/`
+
+## Supported topologies
+
+- dual-server
+  - one app host
+  - one db host
+- single-server
+  - one host running both roles
+
+## Official CLI
+
+```bash
+./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
-## Operational flow
-
-- edit and review locally
-- keep infrastructure as code in Git
-- request secrets at runtime
-- store runtime secrets only under `.runtime/`
-- run `ansible-playbook` through guided scripts
-
-Available scripts:
-
-- `scripts/glpictl.sh` (official central CLI)
-- `scripts/bootstrap-host.sh`
-- `scripts/bootstrap-permissions.sh`
-- `scripts/deploy-app.sh`
-- `scripts/deploy-db.sh`
-- `scripts/deploy-monitoring.sh`
-- `scripts/deploy-backup.sh`
-- `scripts/deploy-staging.sh`
-- `scripts/certify-staging.sh`
-- `scripts/deploy-production.sh`
-- `scripts/manage-tls.sh`
-- `scripts/ops-maintenance.sh`
-
-## Quick usage
+Examples:
 
 ```bash
 bash scripts/bootstrap-permissions.sh
@@ -82,47 +57,34 @@ bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh production deploy apply db
 ./scripts/glpictl.sh production deploy apply app
 ./scripts/glpictl.sh staging tls self-signed
-./scripts/glpictl.sh staging tls install-provided
 ./scripts/glpictl.sh staging ops cert check
-./scripts/glpictl.sh staging ops users add
 ```
 
-Specific scripts still work and now delegate to the same central execution path.
+Specific scripts remain available as wrappers over the same central flow.
 
-## Promotion gate (staging -> production)
+## Product capabilities
 
-- Production deployment is blocked unless staging certification is approved.
-- The certification process generates evidence under `.runtime/staging/evidence/<timestamp>/`.
-- The promotion gate file is persisted at `.runtime/promotion/staging-certified.yml`.
-- If any critical staging check fails, production remains blocked until resolved.
+- guided preflight and permission bootstrap
+- central public environment configuration
+- runtime secret isolation outside Git
+- app/db role separation
+- backup baseline
+- exporter baseline for monitoring
+- staging certification with production promotion gate
+- day-2 operational scripts
 
-## TLS modes
+## Core directories
 
-Supported staging TLS modes:
+- product config: `config/`
+- automation: `ansible/`
+- operational scripts: `scripts/`
+- manuals and product docs: `docs/`
 
-- `none`
-- `self_signed`
-- `provided`
+## Documentation
 
-The first staging deployment may run over plain HTTP.
-You can later switch to a self-signed certificate or a valid provided certificate with `scripts/manage-tls.sh`.
-
-## Expected validation
-
-- `ansible-inventory --list`
-- `ansible-playbook --syntax-check ansible/site.yml`
-- `nginx -t`
-- `php-fpm8.3 -t`
-- database connectivity validation
-- HTTP/HTTPS smoke tests
-
-## Live documentation
-
-- [implementation-plan.md](docs/implementation-plan.md)
-- [standards/index.md](docs/standards/index.md)
-- [manual/README.md (EN + PT-BR)](docs/manual/README.md)
-
-## Contact
-
-- Owner: Renato de Souza Valadares
-- Email: `rsvaladares@stefanini.com`
+- [Implementation plan](docs/implementation-plan.md)
+- [Operator manual](docs/manual/README.md)
+- [Configuration reference](docs/product/configuration-reference.md)
+- [Monitoring blueprint](docs/product/monitoring-blueprint.md)
+- [Product audit](docs/product/product-audit.md)
+- [Standards catalog](docs/standards/index.md)

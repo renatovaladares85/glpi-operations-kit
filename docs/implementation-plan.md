@@ -2,7 +2,7 @@
 
 ## Objective
 
-This repository defines the desired state for GLPI SoEnergy using Ansible, guided execution scripts, and operational documentation.
+This repository defines a reusable GLPI operations kit using Ansible, guided execution scripts, and operational documentation.
 
 The current implementation targets:
 
@@ -19,13 +19,13 @@ The current implementation targets:
 
 - App host: `2 vCPU / 4 GB RAM / 80 GB`
 - DB host: `2 vCPU / 4 GB RAM / 120 GB`
-- Domain: `servicedesk-hml.soenergy.com`
+- Domain example: `glpi-staging.example.internal`
 
 ### Production
 
 - App host: `4 vCPU / 12 GB RAM / 200 GB`
 - DB host: `8 vCPU / 32 GB RAM / 500 GB`
-- Domain: `servicedesk.soenergy.com`
+- Domain example: `glpi.example.internal`
 
 ## Directory layout
 
@@ -40,13 +40,14 @@ The current implementation targets:
 
 - All declarative state lives in Git.
 - Secrets do not live in Git.
-- Guided Bash scripts collect sensitive values at runtime.
+- Public configuration lives under `config/<environment>.yml`.
+- Guided Bash scripts collect only missing secret values at runtime.
 - Central execution CLI: `scripts/glpictl.sh <environment> <domain> <action> [target] [scope]`.
 - Specific scripts are supported as wrappers and follow the same central execution path.
-- Runtime secrets are stored locally under `.runtime/<environment>/` and are ignored by Git.
-- Runtime inventory and non-sensitive staging overrides are stored under `.runtime/<environment>/`.
+- Runtime secrets are stored locally under `.runtime/<environment>/secrets.yml` and are ignored by Git.
+- Runtime inventory and rendered public variables are stored under `.runtime/<environment>/`.
 - Runtime state is split by purpose:
-  - config files under `.runtime/<environment>/`
+  - rendered config files under `.runtime/<environment>/`
   - operation state/log/evidence under `.runtime/<environment>/{state,logs,evidence}`
 - Environment pre-flight checks must run before implementation starts.
 - Pre-flight results must be labeled as `mandatory` or `optional`.
@@ -133,10 +134,11 @@ Gate artifacts:
 
 ## Operational gaps that still need real environment data
 
+- real customer identity and branding values
 - real IPs and hostnames for all servers
 - final SSH user and key path
-- GLPI target version approval
-- TLS certificate strategy
+- final GLPI target version approval
+- final TLS certificate strategy
 - SMTP settings
 - LDAP/AD settings
 - backup encryption mechanism

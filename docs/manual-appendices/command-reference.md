@@ -1,89 +1,48 @@
 # Appendix: Command Reference
 
-## 1. Ubuntu Dependency Installation (Manual)
+## Ubuntu dependencies
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y bash git openssh-client ansible
+sudo apt-get install -y bash git openssh-client python3 python3-yaml ansible
 ```
 
-Validation:
-
-```bash
-command -v bash
-command -v git
-command -v ansible-playbook
-command -v ansible-inventory
-command -v ssh
-```
-
-## 2. Mandatory Permission Bootstrap
+## Mandatory bootstrap
 
 ```bash
 bash scripts/bootstrap-permissions.sh
 ```
 
-## 3. Staging Orchestrator
+## Public configuration
+
+Main files:
+
+- `config/staging.yml`
+- `config/production.yml`
+- `config/product.example.yml`
+
+## Official CLI examples
 
 ```bash
-./scripts/deploy-staging.sh check
-./scripts/deploy-staging.sh apply base
-./scripts/deploy-staging.sh apply db
-./scripts/deploy-staging.sh apply app
-./scripts/deploy-staging.sh apply monitoring
-./scripts/deploy-staging.sh apply backup
-./scripts/deploy-staging.sh apply all
-./scripts/deploy-staging.sh post-check all
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging certify run
+./scripts/glpictl.sh production deploy check all
+./scripts/glpictl.sh production deploy apply db
+./scripts/glpictl.sh production deploy apply app
+./scripts/glpictl.sh staging tls install-provided
+./scripts/glpictl.sh staging ops cert check
 ```
 
-## 4. Manual Ansible Fallback (No Script Path)
+## Manual Ansible fallback
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/db.secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/app.runtime.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/monitoring.secrets.yml --extra-vars @.runtime/staging/db.secrets.yml
-ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/app.runtime.yml
-```
-
-## 5. TLS Management
-
-```bash
-./scripts/manage-tls.sh disable staging
-./scripts/manage-tls.sh self-signed staging
-./scripts/manage-tls.sh install-provided staging
-./scripts/manage-tls.sh reload staging
-```
-
-## 6. Day-2 Operations
-
-```bash
-bash scripts/ops-maintenance.sh cert staging check
-bash scripts/ops-maintenance.sh cert staging renew
-bash scripts/ops-maintenance.sh cert staging apply
-bash scripts/ops-maintenance.sh users staging add os
-bash scripts/ops-maintenance.sh users staging disable db
-bash scripts/ops-maintenance.sh users staging remove glpi
-bash scripts/ops-maintenance.sh audit staging check
-bash scripts/ops-maintenance.sh resume staging
-```
-
-## 7. Targeted Script Entry Points
-
-```bash
-./scripts/bootstrap-host.sh staging
-./scripts/bootstrap-permissions.sh
-./scripts/deploy-db.sh staging
-./scripts/deploy-app.sh staging
-./scripts/deploy-monitoring.sh staging
-./scripts/deploy-backup.sh staging
-./scripts/ops-maintenance.sh cert staging check
-```
-
-## 8. Service Validation on Target Hosts
-
-```bash
-sudo nginx -t
-sudo php-fpm8.3 -t
-sudo systemctl status nginx php8.3-fpm mariadb --no-pager
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags db --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags app --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags monitoring --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
+ansible-playbook -i .runtime/staging/inventory.runtime.yml ansible/site.yml --tags backup --extra-vars @.runtime/staging/public.runtime.yml --extra-vars @.runtime/staging/secrets.yml
 ```

@@ -1,8 +1,8 @@
-# Runbook Operacional GLPI SoEnergy
+# Runbook Operacional GLPI Operations Kit
 
 ## 1. Finalidade
 
-Este manual e o runbook oficial para instalar, validar, promover e operar os ambientes GLPI SoEnergy.
+Este manual e o runbook oficial para instalar, validar, promover e operar ambientes GLPI entregues por este kit de produto.
 
 Ele se destina a:
 
@@ -32,6 +32,27 @@ Skill obrigatoria do operador:
 Perfil recomendado para IA:
 
 - agente que leia `README.md`, `AGENTS.md`, `docs/standards/index.md` e este runbook antes de agir
+
+## 2.1 Modelo de Configuracao do Produto
+
+Configuracao publica do produto:
+
+- `config/staging.yml`
+- `config/production.yml`
+
+Configuracao secreta em runtime:
+
+- `.runtime/<environment>/secrets.yml`
+
+Artefatos runtime gerados:
+
+- `.runtime/<environment>/inventory.runtime.yml`
+- `.runtime/<environment>/public.runtime.yml`
+
+Regra operacional:
+
+- valores publicos devem ser editados em `config/<environment>.yml`
+- scripts devem pedir apenas segredos ausentes
 
 ## 3. Topologias Suportadas
 
@@ -174,9 +195,8 @@ Raiz runtime:
 Arquivos de configuracao:
 
 - `inventory.runtime.yml`
-- `app.runtime.yml`
-- `db.secrets.yml`
-- `monitoring.secrets.yml`
+- `public.runtime.yml`
+- `secrets.yml`
 
 Estado operacional:
 
@@ -190,9 +210,9 @@ Gate de promocao:
 
 Comportamento importante:
 
-- se os arquivos runtime estiverem ausentes, o `glpictl` atualmente coleta todos os inputs runtime antes de continuar
-- isso significa que `apply db` pode pedir valores de app e monitoring tambem
-- isso e seguro, mas ainda nao esta otimizado para o menor numero de prompts
+- se os arquivos runtime estiverem ausentes, o `glpictl` os gera a partir de `config/<environment>.yml`
+- apenas segredos ausentes devem ser solicitados em runtime
+- valores publicos nao devem ser digitados interativamente quando ja existirem no config do produto
 
 ## 9. O Que `apply db` Faz
 
@@ -221,11 +241,9 @@ O que altera:
 
 O que precisa:
 
-- inventario runtime
-- nome do banco
-- usuario do banco
-- senha do banco
-- senha root do MariaDB
+- `config/<environment>.yml`
+- inventario runtime gerado
+- segredos em `.runtime/<environment>/secrets.yml`
 - acesso SSH ao host do banco
 
 O que validar depois:
@@ -264,12 +282,10 @@ O que altera:
 
 O que precisa:
 
-- inventario runtime
-- versao do GLPI
-- host da aplicacao
-- modo TLS
-- caminhos dos certificados se `provided`
-- arquivo runtime do banco ja preenchido com conectividade da aplicacao
+- `config/<environment>.yml`
+- inventario runtime gerado
+- configuracoes TLS vindas do config
+- segredos do banco em `.runtime/<environment>/secrets.yml`
 
 O que validar depois:
 
@@ -415,19 +431,7 @@ A execucao deve parar quando qualquer pre-requisito obrigatorio nao puder ser re
 
 ### 16.1 Melhoria de maior valor
 
-Separar a coleta de inputs runtime por dominio:
-
-- `apply db` deve pedir apenas valores de banco
-- `apply app` deve pedir apenas valores de app e TLS
-- `apply monitoring` deve pedir apenas valores de monitoring quando faltarem
-
-Motivo:
-
-- reduz confusao operacional
-- reduz numero de prompts
-- reduz risco de preencher valores desnecessarios cedo demais
-- reduz custo de contexto e tokens para IA
-- faz o comportamento do comando ficar mais previsivel
+Adicionar uma camada clara de override runtime para mudancas operacionais mutaveis, como transicoes de modo TLS, para que atualizacoes feitas pelo operador convivam com seguranca com o config principal versionado.
 
 ### 16.2 Outras melhorias
 

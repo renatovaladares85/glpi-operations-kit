@@ -13,7 +13,7 @@ Before proposing, analyzing, or executing any change, read in this order:
 
 ## 2. Project objective
 
-- Standardize, automate, and operate the GLPI deployment for SoEnergy.
+- Standardize, automate, and operate a reusable GLPI deployment product kit.
 - Preserve strict separation between `staging` and `production`.
 - Work with low context cost, low token waste, and minimal repetition.
 - Keep rules clear for rollback, auditability, and recovery.
@@ -69,6 +69,7 @@ Before proposing, analyzing, or executing any change, read in this order:
 - Attempt safe, low-risk environment updates only when they are clearly supported by the current workflow.
 - If a mandatory pre-flight item cannot be fixed, stop and do not continue unless the user explicitly authorizes continuation.
 - Never version secrets.
+- Keep public environment values in `config/<environment>.yml`.
 - Sensitive values must be requested at runtime when applicable.
 - When generating or suggesting usernames, service accounts, aliases, host labels, or similar identifiers, prefer biblical-context naming.
 - Never use common, obvious, or easily guessable usernames, passwords, or identifiers.

@@ -28,3 +28,9 @@
 - swap in use
 - service stopped
 - backup failure
+
+## Product blueprint requirements
+
+- Monitoring defaults must be represented in `config/<environment>.yml`.
+- Exporter toggles, labels, thresholds, and scrape profiles must be configurable from the product config.
+- Future Prometheus/Grafana/Alertmanager integration must consume the same product model.

@@ -2,6 +2,7 @@
 
 ## Main structure
 
+- `config/<environment>.yml`
 - `ansible/inventories/<environment>/hosts.yml`
 - `ansible/inventories/<environment>/group_vars/all.yml`
 - `ansible/roles/<role>/tasks/main.yml`
@@ -11,7 +12,8 @@
 ## Rules
 
 - Prefer small, focused roles.
-- Use `group_vars` for non-sensitive environment values.
+- Use `config/<environment>.yml` as the primary public configuration source.
+- Keep `group_vars` generic and safe as fallback defaults only.
 - Never version secrets in inventories or vars.
 - Use templates for variable configurations.
 - Validate syntax before considering a block ready for commit.
@@ -24,5 +26,6 @@
 ## Secrets
 
 - Secrets must enter at runtime through a guided script.
-- The script may generate a local temporary file outside Git.
+- Secrets must be stored only under `.runtime/<environment>/secrets.yml`.
+- The rendered public runtime file must be generated from `config/<environment>.yml`.
 - The playbook must fail with a clear message when a critical secret is missing.

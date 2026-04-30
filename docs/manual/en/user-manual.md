@@ -1,8 +1,8 @@
-# GLPI SoEnergy Operator Runbook
+# GLPI Operations Kit Operator Runbook
 
 ## 1. Purpose
 
-This manual is the official runbook for installing, validating, promoting, and operating GLPI SoEnergy environments.
+This manual is the official runbook for installing, validating, promoting, and operating GLPI environments delivered by this product kit.
 
 It is intended for:
 
@@ -32,6 +32,27 @@ Required operator skill:
 Recommended AI execution profile:
 
 - an agent that reads `README.md`, `AGENTS.md`, `docs/standards/index.md`, and this runbook before acting
+
+## 2.1 Product Configuration Model
+
+Public product configuration:
+
+- `config/staging.yml`
+- `config/production.yml`
+
+Secret runtime configuration:
+
+- `.runtime/<environment>/secrets.yml`
+
+Generated runtime artifacts:
+
+- `.runtime/<environment>/inventory.runtime.yml`
+- `.runtime/<environment>/public.runtime.yml`
+
+Operational rule:
+
+- public values must be edited in `config/<environment>.yml`
+- scripts should prompt only for missing secrets
 
 ## 3. Supported Topologies
 
@@ -174,9 +195,8 @@ Runtime root:
 Configuration files:
 
 - `inventory.runtime.yml`
-- `app.runtime.yml`
-- `db.secrets.yml`
-- `monitoring.secrets.yml`
+- `public.runtime.yml`
+- `secrets.yml`
 
 Operational state:
 
@@ -190,9 +210,9 @@ Promotion gate:
 
 Important behavior:
 
-- if runtime files are missing, `glpictl` currently collects all runtime inputs before continuing
-- this means `apply db` may ask for app and monitoring values too
-- this is safe, but not yet optimized for least-prompt execution
+- if runtime files are missing, `glpictl` renders them from `config/<environment>.yml`
+- only missing secrets should be requested at runtime
+- public values should not be entered interactively when already present in the product config
 
 ## 9. What `apply db` Does
 
@@ -221,11 +241,9 @@ What it changes:
 
 What it needs:
 
-- runtime inventory
-- DB name
-- DB username
-- DB password
-- MariaDB root password
+- `config/<environment>.yml`
+- rendered runtime inventory
+- DB secret values in `.runtime/<environment>/secrets.yml`
 - SSH access to the DB host
 
 What to validate after it finishes:
@@ -264,12 +282,10 @@ What it changes:
 
 What it needs:
 
-- runtime inventory
-- GLPI version
-- app host
-- TLS mode
-- certificate paths if `provided`
-- DB runtime file must already contain app DB connectivity values
+- `config/<environment>.yml`
+- rendered runtime inventory
+- TLS settings from config
+- DB secrets from `.runtime/<environment>/secrets.yml`
 
 What to validate after it finishes:
 
@@ -415,19 +431,7 @@ Execution must stop when any mandatory prerequisite is not resolved:
 
 ### 16.1 Highest-value improvement
 
-Split runtime input collection by domain:
-
-- `apply db` should ask only DB-relevant values
-- `apply app` should ask only app and TLS values
-- `apply monitoring` should ask only monitoring-relevant values when missing
-
-Why this improves the project:
-
-- reduces operator confusion
-- reduces prompt volume
-- reduces risk of entering unnecessary values too early
-- reduces AI context and token waste
-- makes command behavior match operator expectation
+Add a clean runtime override layer for mutable operational changes such as TLS mode transitions, so that operator-driven updates can coexist safely with the committed product config.
 
 ### 16.2 Additional improvement areas
 

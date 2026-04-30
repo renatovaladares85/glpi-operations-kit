@@ -1,32 +1,44 @@
-# Apêndice: Referência de Entradas Runtime
+# Apendice: Configuracao do Produto e Segredos Runtime
 
-Arquivos gerados:
+## Visao geral
 
-- `.runtime/staging/inventory.runtime.yml`
-- `.runtime/staging/app.runtime.yml`
-- `.runtime/staging/db.secrets.yml`
-- `.runtime/staging/monitoring.secrets.yml`
+O produto agora usa:
 
-Topologias:
+- configuracao publica em `config/<environment>.yml`
+- segredos runtime em `.runtime/<environment>/secrets.yml`
 
-- Single-server: app host e db host iguais.
-- Dual-server: app host e db host distintos.
+Arquivos runtime gerados:
 
-Entradas obrigatórias:
+- `.runtime/<environment>/inventory.runtime.yml`
+- `.runtime/<environment>/public.runtime.yml`
 
-- app host IP/hostname
-- db host IP/hostname
-- usuário SSH
-- caminho da chave SSH
-- versão final do GLPI
-- modo TLS (`none`, `self_signed`, `provided`)
-- caminhos de cert/key (modo `provided`)
-- nome do banco
-- usuário do banco
-- senha do banco
-- senha root do MariaDB
-- usuário/senha do `mysqld_exporter`
+## O que fica no config publico
 
-Modelos de arquivo:
+Exemplos:
 
-- Use os mesmos modelos em [runtime-input-reference.md](../../../manual-appendices/runtime-input-reference.md).
+- nome do cliente
+- hosts ou IPs de app/db
+- usuario SSH e caminho da chave
+- versao do GLPI
+- dominio
+- modo TLS
+- nome do banco e usuario do banco
+- usuario do exporter de monitoracao
+- defaults de backup e monitoracao
+- perfil de tuning
+
+## O que fica nos segredos runtime
+
+- `glpi_db_password`
+- `glpi_db_root_password`
+- `mysqld_exporter_password`
+
+## Caminho manual sem script
+
+Se os scripts nao puderem ser usados, crie:
+
+- `.runtime/<environment>/inventory.runtime.yml`
+- `.runtime/<environment>/public.runtime.yml`
+- `.runtime/<environment>/secrets.yml`
+
+A fonte recomendada para os valores publicos continua sendo `config/<environment>.yml`.

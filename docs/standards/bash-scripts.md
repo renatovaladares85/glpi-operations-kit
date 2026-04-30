@@ -18,7 +18,7 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 
 ## Runtime secrets
 
-- Store only under `.runtime/<environment>/`
+- Store only under `.runtime/<environment>/secrets.yml`
 - Never version `.runtime/`
 - Never echo secrets to the terminal
 - If a script ever suggests or generates account names, prefer biblical-context naming.
@@ -27,11 +27,18 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 ## Standard flow
 
 - `bootstrap-permissions`
+- `config render`
 - `pre-flight`
 - `check`
 - `apply`
 - `post-check`
 - `day-2-ops`
+
+## Public configuration
+
+- Use `config/<environment>.yml` as the single public configuration source.
+- Render `.runtime/<environment>/public.runtime.yml` and `inventory.runtime.yml` from that file.
+- Prompt only for missing secret values, not for public values already present in config.
 
 ## Pre-flight policy
 

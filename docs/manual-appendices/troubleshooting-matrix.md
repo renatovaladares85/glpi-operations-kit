@@ -14,7 +14,7 @@
 - Likely cause: `scripts/bootstrap-permissions.sh` was not executed yet
 - Check: `ls -l .runtime/bootstrap.completed`
 - Fix path: `bash scripts/bootstrap-permissions.sh`
-- Safe resume: rerun `./scripts/deploy-staging.sh check`
+- Safe resume: rerun `./scripts/glpictl.sh staging deploy check all`
 
 ## User not in `glpiops`
 
@@ -54,7 +54,7 @@
 - Likely cause: Ansible package not installed on execution host
 - Check: `command -v ansible-playbook && command -v ansible-inventory`
 - Fix path: accept script install prompt or run `sudo apt-get update && sudo apt-get install -y ansible`
-- Safe resume: rerun `./scripts/deploy-staging.sh check`
+- Safe resume: rerun `./scripts/glpictl.sh staging deploy check all`
 
 ## Auto-install prompt denied
 
@@ -64,29 +64,29 @@
 - Fix path: install dependencies manually
 - Safe resume: rerun the same command that was interrupted
 
-## Invalid SSH private key path
+## Invalid SSH private key path in product config or runtime secret flow
 
-- Symptom: runtime input loop rejects path
+- Symptom: pre-flight or config rendering rejects the SSH key path
 - Likely cause: wrong path, missing file, or wrong permissions
 - Check: `ls -l <path-to-key>`
 - Fix path: use real key file and set `chmod 600 <path-to-key>`
-- Safe resume: continue prompt loop with corrected path
+- Safe resume: correct `config/<environment>.yml`, rerun bootstrap if needed, then rerun the original command
 
-## Invalid app/db host input
+## Invalid app/db host value in product config
 
-- Symptom: runtime input loop rejects host value
+- Symptom: config rendering or inventory validation rejects host value
 - Likely cause: malformed hostname or IP
 - Check: verify syntax and DNS/IP correctness
 - Fix path: provide valid hostname or IPv4
-- Safe resume: continue prompt loop with corrected host
+- Safe resume: correct `config/<environment>.yml`, then rerun the original command
 
 ## TLS provided mode rejects certificate path
 
-- Symptom: runtime input loop rejects cert/key path
+- Symptom: TLS action rejects provided cert/key path
 - Likely cause: missing local files
 - Check: `ls -l <cert-path> <key-path>`
 - Fix path: provide existing files or switch to `self_signed` / `none`
-- Safe resume: rerun `./scripts/manage-tls.sh install-provided staging`
+- Safe resume: rerun `./scripts/glpictl.sh staging tls install-provided`
 
 ## SSH remote access fails in dual-server mode
 
@@ -107,10 +107,10 @@
 ## Nginx validation failure
 
 - Symptom: app role fails on `nginx -t`
-- Likely cause: invalid rendered template or TLS file mismatch
+- Likely cause: invalid rendered template, outdated runtime override, or TLS file mismatch
 - Check: `sudo nginx -t` and inspect `/etc/nginx/sites-available/glpi.conf`
 - Fix path: correct runtime TLS data and rerun app target
-- Safe resume: `./scripts/deploy-staging.sh apply app`
+- Safe resume: `./scripts/glpictl.sh staging deploy apply app`
 
 ## PHP-FPM validation failure
 
@@ -118,15 +118,15 @@
 - Likely cause: invalid php-fpm pool or ini config
 - Check: `sudo php-fpm8.3 -t` and inspect `/etc/php/8.3/fpm/` configs and logs
 - Fix path: correct runtime/app vars and rerun app target
-- Safe resume: `./scripts/deploy-staging.sh apply app`
+- Safe resume: `./scripts/glpictl.sh staging deploy apply app`
 
 ## DB credential mismatch
 
 - Symptom: GLPI installer cannot connect to DB
 - Likely cause: wrong db secrets provided at runtime
-- Check: verify `.runtime/staging/db.secrets.yml` and DB user grants
+- Check: verify `.runtime/staging/secrets.yml` and DB user grants
 - Fix path: rerun db target with correct credentials
-- Safe resume: `./scripts/deploy-staging.sh apply db`, then retry installer
+- Safe resume: `./scripts/glpictl.sh staging deploy apply db`, then retry installer
 
 ## App deployed but GLPI page does not load
 
@@ -134,4 +134,4 @@
 - Likely cause: service not running, firewall mismatch, wrong host/IP, or TLS mode issue
 - Check: Nginx/PHP-FPM service status and network reachability
 - Fix path: rerun pre-flight, verify runtime inventory, rerun base/app targets
-- Safe resume: `./scripts/deploy-staging.sh apply base` then `./scripts/deploy-staging.sh apply app`
+- Safe resume: `./scripts/glpictl.sh staging deploy apply base` then `./scripts/glpictl.sh staging deploy apply app`
