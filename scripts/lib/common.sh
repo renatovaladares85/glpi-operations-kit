@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+COMMON_LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PREFLIGHT_FORCE_CONTINUE="${PREFLIGHT_FORCE_CONTINUE:-false}"
 PREFLIGHT_AUTO_INSTALL="${PREFLIGHT_AUTO_INSTALL:-prompt}"
 GLPI_OPS_GROUP="${GLPI_OPS_GROUP:-glpiops}"
@@ -626,7 +628,7 @@ render_product_config() {
   config_path="$(config_file_path "$environment")"
   require_runtime_file "$config_path" "product configuration file"
   require_python_yaml_support
-  python3 "$SCRIPT_ROOT/render_product_config.py" --config "$config_path" --mode "$mode"
+  python3 "$COMMON_LIB_ROOT/render_product_config.py" --config "$config_path" --mode "$mode"
 }
 
 read_product_config_value() {
@@ -635,7 +637,7 @@ read_product_config_value() {
   local config_path
   config_path="$(config_file_path "$environment")"
   require_runtime_file "$config_path" "product configuration file"
-  python3 "$SCRIPT_ROOT/render_product_config.py" --config "$config_path" --mode get --key "$dotted_key"
+  python3 "$COMMON_LIB_ROOT/render_product_config.py" --config "$config_path" --mode get --key "$dotted_key"
 }
 
 materialize_runtime_from_config() {
