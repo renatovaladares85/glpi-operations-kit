@@ -309,7 +309,11 @@ begin_operation_log() {
   } >"$summary_path"
   chmod 600 "$summary_path"
 
-  exec > >(tee -a "$log_path") 2>&1
+  exec > >(
+    while IFS= read -r line; do
+      printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$line"
+    done | tee -a "$log_path"
+  ) 2>&1
   echo "Operation log: $log_path"
 }
 
@@ -810,7 +814,27 @@ invoke_ansible() {
     args+=("--extra-vars" "@$file")
   done
 
-  ansible-playbook "${args[@]}"
+  run_with_heartbeat 30 "ansible-playbook is still running (tags=${tags:-all})" ansible-playbook "${args[@]}"
+}
+
+run_with_heartbeat() {
+  local interval_seconds="$1"
+  local heartbeat_message="$2"
+  shift 2
+
+  "$@" &
+  local cmd_pid=$!
+  local elapsed=0
+
+  while kill -0 "$cmd_pid" >/dev/null 2>&1; do
+    sleep "$interval_seconds"
+    elapsed=$((elapsed + interval_seconds))
+    if kill -0 "$cmd_pid" >/dev/null 2>&1; then
+      echo "[heartbeat] ${heartbeat_message}. elapsed=${elapsed}s"
+    fi
+  done
+
+  wait "$cmd_pid"
 }
 
 preflight_print_result() {
