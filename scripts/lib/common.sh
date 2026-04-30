@@ -814,6 +814,7 @@ invoke_ansible() {
     args+=("--extra-vars" "@$file")
   done
 
+  echo "Executing command: ansible-playbook ${args[*]}"
   run_with_heartbeat 30 "ansible-playbook is still running (tags=${tags:-all})" ansible-playbook "${args[@]}"
 }
 

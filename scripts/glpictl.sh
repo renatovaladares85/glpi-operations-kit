@@ -40,6 +40,42 @@ DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
 OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
 OPERATION_STATUS="completed"
 
+print_post_execution_checks() {
+  echo "Validation commands (run on target host):"
+  if [[ "$DOMAIN" == "deploy" && "$ACTION" == "apply" ]]; then
+    case "$TARGET" in
+      db|all)
+        echo "  - sudo systemctl status mariadb --no-pager"
+        echo "  - sudo systemctl is-active mariadb"
+        echo "  - mysql -h <db-host> -u <glpi-db-user> -p -e \"SELECT 1;\""
+        ;;
+    esac
+    case "$TARGET" in
+      app|all)
+        echo "  - sudo systemctl status nginx --no-pager"
+        echo "  - sudo systemctl status php8.3-fpm --no-pager"
+        echo "  - sudo systemctl is-active nginx php8.3-fpm"
+        echo "  - curl -I http://<app-host>/"
+        ;;
+    esac
+    case "$TARGET" in
+      monitoring|all)
+        echo "  - sudo systemctl status prometheus-node-exporter --no-pager || true"
+        echo "  - sudo systemctl status mysqld-exporter --no-pager || true"
+        ;;
+    esac
+  fi
+  if [[ "$DOMAIN" == "deploy" && "$ACTION" == "post-check" ]]; then
+    echo "  - cat .runtime/${ENVIRONMENT}/evidence/precheck-report-latest.md"
+    echo "  - ls -l .runtime/${ENVIRONMENT}/logs/"
+  fi
+  if [[ "$DOMAIN" == "tls" ]]; then
+    echo "  - sudo nginx -t"
+    echo "  - sudo systemctl reload nginx"
+    echo "  - openssl s_client -connect <app-host>:443 -servername <app-host> </dev/null 2>/dev/null | openssl x509 -noout -dates"
+  fi
+}
+
 finalize_glpictl_operation() {
   local exit_code="${1:-0}"
   local remediation_hint="none"
@@ -48,6 +84,16 @@ finalize_glpictl_operation() {
     remediation_hint="Review console output and .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
   fi
   complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
+  if [[ "$exit_code" -eq 0 ]]; then
+    echo "FINAL STATUS: SUCCESS"
+    echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
+    echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml"
+    print_post_execution_checks
+  else
+    echo "FINAL STATUS: FAILED" >&2
+    echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
+    echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml" >&2
+  fi
 }
 
 SECURITY_MODE_EFFECTIVE=""
