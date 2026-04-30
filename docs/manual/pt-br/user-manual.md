@@ -19,17 +19,17 @@ Perfil mínimo:
 - gestão de chaves SSH;
 - uso de `sudo`;
 - execução e troubleshooting com Ansible;
-- disciplina de controle de mudança e evidências.
+- disciplina de controle de mudanças e evidências.
 
 ## 3. Topologias Suportadas
 
-- Dual-server (recomendado): 1 host app + 1 host db
-- Single-server (suportado): app e db no mesmo host
+- Dual-server (recomendado): 1 host app + 1 host db.
+- Single-server (suportado): app e db no mesmo host.
 
 Origem de execução:
 
-- host app, host db ou host único
-- o host executor precisa ter clone do repositório e ferramentas obrigatórias
+- host app, host db ou host único;
+- o host executor precisa ter clone do repositório e ferramentas obrigatórias.
 
 ## 4. Modelo de Configuração e Runtime
 
@@ -66,12 +66,12 @@ Obrigatório em todos os ambientes:
 
 Condicional obrigatório:
 
-- par de chaves SSH por ambiente + conectividade com alvos quando houver execução remota
-- arquivos locais de certificado/chave quando `tls.mode=provided`
+- par de chaves SSH por ambiente + conectividade com alvos quando houver execução remota;
+- arquivos locais de certificado/chave quando `tls.mode=provided`.
 
 Opcional:
 
-- checks de diagnóstico com `ssh` (recomendado)
+- checks de diagnóstico com `ssh` (recomendado).
 
 Comportamento do precheck:
 
@@ -116,10 +116,10 @@ ssh -i ~/.ssh/glpi_staging_ed25519 ubuntu@DB_HOST "echo ok"
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
-Ambientes:
+Ambientes suportados:
 
-- `staging`
-- `production`
+- qualquer ambiente que possua `config/<environment>.yml`;
+- exemplos comuns: `staging`, `production`.
 
 Domínios:
 
@@ -135,14 +135,14 @@ Domínios:
 | `deploy apply monitoring` | aplica baseline de exporters e configuração de monitoramento | app/db conforme role | após db + app |
 | `deploy apply backup` | aplica baseline de backup e retenção | app/db conforme role | após db + app |
 | `deploy post-check all` | executa validações de pós-deploy para app e db | `glpi_app`, `glpi_db` | após etapas de apply |
-| `staging certify run` | gera pacote de evidências de homologação e gate de promoção | checks locais + remotos | antes de produção |
+| `staging certify run` | gera pacote de evidências de homologação e artefato de certificação | checks locais + remotos | antes de rollout sensível |
 | `tls <action>` | altera modo TLS (`none`, `self-signed`, `provided`) e reaplica app com segurança | `glpi_app` | operações de certificado |
 | `ops ...` | operação day-2: usuários, certificado, auditoria, retomada | depende da operação | manutenção pós-implantação |
 | `audit check` | executa trilha de auditoria operacional e compliance | app + db | após mudanças day-2 |
 
-## 9. Ordem Obrigatória de Execução
+## 9. Política de Ordem de Execução
 
-O projeto bloqueia execução fora desta ordem:
+Ordem recomendada:
 
 1. `deploy check all`
 2. `deploy apply db`
@@ -151,21 +151,39 @@ O projeto bloqueia execução fora desta ordem:
 5. `deploy apply backup`
 6. `deploy post-check all`
 
-Arquivo de estado:
+Comportamento:
 
-- `.runtime/<env>/state/deploy-sequence.yml`
+- quando `security.require_ordered_execution=true` e `SECURITY_MODE=secure`, execução fora de ordem é bloqueada;
+- quando `security.require_ordered_execution=true` e `SECURITY_MODE=permissive`, execução fora de ordem continua com warning + evidência;
+- arquivo de estado: `.runtime/<env>/state/deploy-sequence.yml`.
 
-## 10. Condições de Bloqueio em Produção (Hard Gate)
+## 10. Modo de Segurança por Execução
 
-O apply de produção é bloqueado sem:
+A política de segurança não depende mais do nome do ambiente.
 
-- gate de staging:
-  - `.runtime/promotion/staging-certified.yml`
-- `tls.mode=provided`
-- HTTPS/TLS habilitado
-- `security.sso_enabled=true` quando a política de produção exige SSO
+Use um dos modos:
 
-Em staging/dev, modo inseguro pode ser aceito somente quando a política permitir.
+- `SECURITY_MODE=secure`
+- `SECURITY_MODE=permissive`
+
+Comportamento de política:
+
+- `secure`:
+  - violações de política bloqueiam operações mutáveis (`deploy apply`, `post-check`, `tls`, `promote`, `ops`).
+- `permissive`:
+  - violações de política viram warning;
+  - execução continua;
+  - justificativa é obrigatória;
+  - evidência é persistida em:
+    - `.runtime/<env>/state/security-mode-last.yml`
+    - `.runtime/<env>/evidence/security-mode-*.yml`
+
+Exemplo:
+
+```bash
+SECURITY_MODE=secure ./scripts/glpictl.sh staging deploy apply db
+SECURITY_MODE=permissive SECURITY_JUSTIFICATION="Janela de teste aprovada no CAB-0426" ./scripts/glpictl.sh production deploy apply app
+```
 
 ## 11. Arquivos Runtime e Seus Significados
 
@@ -177,7 +195,9 @@ Em staging/dev, modo inseguro pode ser aceito somente quando a política permiti
 | `secrets.yml` | segredos runtime | prompts do operador | Ansible |
 | `state/precheck-report-latest.yml` | relatório estruturado de pré-requisitos | precheck | auditoria/troubleshooting |
 | `evidence/precheck-report-latest.md` | relatório legível de pré-requisitos | precheck | operação |
-| `state/deploy-sequence.yml` | status da ordem obrigatória | CLI | CLI |
+| `state/deploy-sequence.yml` | status da ordem de execução | CLI | CLI |
+| `state/security-mode-last.yml` | último resumo de risco aceito em modo permissivo | CLI | auditoria/compliance |
+| `evidence/security-mode-*.yml` | trilha histórica de justificativas e violações de política | CLI | auditoria/compliance |
 | `logs/*.log` + `*.summary.yml` | trilhas de execução e resumo | scripts de operação | auditoria/investigação |
 
 ## 12. Fluxos Passo a Passo
@@ -202,13 +222,13 @@ Dual-server (a partir do host app ou db):
 
 ## 13. Operações TLS e Certificado
 
-Autoassinado em staging/dev:
+Autoassinado:
 
 ```bash
 ./scripts/glpictl.sh staging tls self-signed
 ```
 
-Certificado válido em produção:
+Certificado fornecido:
 
 ```bash
 ./scripts/glpictl.sh production tls install-provided

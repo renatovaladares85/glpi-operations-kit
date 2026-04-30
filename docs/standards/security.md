@@ -7,8 +7,9 @@
 - Use least privilege for SSH, database, and filesystem access.
 - Restrict database access to authorized hosts only.
 - Preserve TLS and restricted permissions.
-- Production must not run without secure TLS/HTTPS.
-- Production policy may require SSO and must be enforced by configuration gate.
+- Security policy is environment-agnostic and controlled per execution by `SECURITY_MODE`.
+- In `secure` mode, policy rules block execution.
+- In `permissive` mode, policy rules become warnings and require explicit risk justification with persisted evidence.
 - Never use common, obvious, or easily guessable usernames, passwords, or identifiers.
 - When generating or suggesting names for users, service accounts, aliases, or internal labels, use biblical-context naming by default.
 - Biblical context must not reduce secret strength: passwords, tokens, and keys must remain high-entropy and non-predictable.

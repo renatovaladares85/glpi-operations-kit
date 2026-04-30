@@ -2,11 +2,11 @@
 
 ## 1. Modos TLS
 
-| Modo | Permitido em staging/dev | Permitido em produção | Comportamento |
+| Modo | Permitido em modo seguro | Permitido em modo permissivo | Comportamento |
 |---|---|---|---|
-| `none` | Sim (quando política permitir) | Não | somente HTTP na porta 80 |
-| `self_signed` | Sim | Não | HTTPS com certificado autoassinado |
-| `provided` | Sim | Sim (obrigatório) | HTTPS com certificado válido fornecido |
+| `none` | apenas quando `security.require_https=false` e `security.require_tls=false` | sim (com warning/evidência se política exigir TLS/HTTPS) | somente HTTP na porta 80 |
+| `self_signed` | permitido quando `security.require_tls=false` | sim | HTTPS com certificado autoassinado |
+| `provided` | sim | sim | HTTPS com certificado válido fornecido |
 
 ## 2. Comandos de modo
 
@@ -17,7 +17,7 @@
 ./scripts/glpictl.sh staging tls reload
 ```
 
-## 3. Fluxo autoassinado (staging/dev)
+## 3. Fluxo autoassinado
 
 ```bash
 ./scripts/glpictl.sh staging tls self-signed
@@ -29,7 +29,7 @@ Resultado esperado:
 - reaplicação da role da aplicação;
 - validação da configuração do Nginx.
 
-## 4. Fluxo com certificado válido (produção obrigatório)
+## 4. Fluxo com certificado fornecido
 
 Antes do comando:
 
@@ -62,4 +62,5 @@ curl -I https://GLPI_DOMAIN
 Política:
 
 - alerta padrão com 30 dias para expiração;
-- troca antes do vencimento.
+- troca antes do vencimento;
+- modo seguro pode exigir certificado `provided` conforme `security.require_tls`.

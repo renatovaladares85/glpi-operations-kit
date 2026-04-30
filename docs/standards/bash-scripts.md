@@ -10,11 +10,13 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 - Use `set -euo pipefail`
 - Centralize shared functions in `scripts/lib/common.sh`
 - Run environment pre-flight checks before implementation logic
+- Resolve effective security mode before mutating operations (`SECURITY_MODE` or config default)
 - Explain why each sensitive value is being requested
 - Explain where the value will be written
 - Stop execution when critical information is missing
 - Persist execution logs for each operational run
 - Persist checkpoint/state data for resumable operations
+- When running in `permissive`, persist risk-acceptance evidence with justification and violated policies
 
 ## Runtime secrets
 

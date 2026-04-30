@@ -73,6 +73,7 @@ Specific scripts remain available as wrappers over the same central flow.
 - backup baseline
 - exporter baseline for monitoring
 - staging certification with production promotion gate
+- selectable policy mode per execution (`SECURITY_MODE=secure|permissive`)
 - day-2 operational scripts
 
 ## Core directories

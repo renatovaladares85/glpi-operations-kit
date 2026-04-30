@@ -37,7 +37,7 @@ This document explains each environment parameter used by scripts and Ansible, i
 
 ### `environment.*`
 
-- Purpose: explicit environment selection (`staging` or `production`).
+- Purpose: explicit environment selection (`staging`, `production`, or another configured environment).
 - Consumer: runtime renderer, policy checks.
 - Classification: public, mandatory.
 
@@ -86,20 +86,23 @@ This document explains each environment parameter used by scripts and Ansible, i
   - `mode`: public, mandatory
   - `provided_local_*`: conditional-mandatory when `mode=provided`
 - Environment impact:
-  - production requires `mode=provided`.
+  - `security.require_tls=true` requires `mode=provided` in `secure` mode.
 
 ### `security.*`
 
 - Purpose: environment security policy gates.
 - Consumer: precheck + deploy policy enforcement.
 - Keys:
-  - `sso_enabled` (mandatory; must be `true` in production when required)
+  - `sso_enabled` (mandatory when `security.require_sso=true`)
   - `allow_insecure_non_production` (public policy flag)
-  - `require_tls_in_production` (public policy flag)
-  - `require_https_in_production` (public policy flag)
-  - `require_sso_in_production` (public policy flag)
-- Environment impact:
-  - production blocks when required policy flags are violated.
+  - `require_tls` (public policy flag)
+  - `require_https` (public policy flag)
+  - `require_sso` (public policy flag)
+  - `require_promotion_gate` (public policy flag)
+  - `require_ordered_execution` (public policy flag)
+- Execution impact:
+  - in `SECURITY_MODE=secure`, required policy violations block;
+  - in `SECURITY_MODE=permissive`, required policy violations are warnings with evidence.
 
 ### `monitoring.*` and `alerting.*`
 
@@ -115,7 +118,7 @@ This document explains each environment parameter used by scripts and Ansible, i
 
 ### `operations.*`
 
-- Purpose: timezone, cron schedule, ops group policy.
+- Purpose: timezone, cron schedule, ops group policy, and security mode default.
 - Consumer: base/app role and scripts.
 - Classification: public, mandatory.
 
@@ -143,19 +146,22 @@ This document explains each environment parameter used by scripts and Ansible, i
 | `database.name` | schema name | db role | `glpi_operational` | public, mandatory | data location |
 | `database.user` | DB login name | db/app roles | `nehemiah_glpi` | public, mandatory | DB auth |
 | `database.port` | DB listener port | db role | `3306` | public, mandatory | network/firewall |
-| `tls.mode` | TLS operation mode | app role/policy gate | `none`/`self_signed`/`provided` | public, mandatory | production block logic |
+| `tls.mode` | TLS operation mode | app role/policy gate | `none`/`self_signed`/`provided` | public, mandatory | policy-dependent block/warn |
 | `tls.certificate_path` | cert path on target host | nginx template | `/etc/ssl/certs/glpi-production.crt` | public, conditional | required when TLS enabled |
 | `tls.private_key_path` | key path on target host | nginx template | `/etc/ssl/private/glpi-production.key` | public-sensitive, conditional | required when TLS enabled |
 | `tls.provided_local_cert_path` | local cert source path | TLS install flow | `/home/operator/certs/fullchain.crt` | public-sensitive, conditional | required when `mode=provided` |
 | `tls.provided_local_key_path` | local key source path | TLS install flow | `/home/operator/certs/private.key` | public-sensitive, conditional | required when `mode=provided` |
-| `security.sso_enabled` | SSO gate status | production policy check | `true` | public, mandatory | can block production |
-| `security.require_tls_in_production` | enforce secure TLS | production policy check | `true` | public policy flag | can block production |
-| `security.require_https_in_production` | enforce HTTPS | production policy check | `true` | public policy flag | can block production |
-| `security.require_sso_in_production` | enforce SSO policy | production policy check | `true` | public policy flag | can block production |
+| `security.sso_enabled` | SSO gate status | policy check | `true` | public, conditional | required when `security.require_sso=true` |
+| `security.require_tls` | enforce provided TLS mode | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
+| `security.require_https` | enforce HTTPS/TLS | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
+| `security.require_sso` | enforce SSO policy | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
+| `security.require_promotion_gate` | enforce certification gate file | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
+| `security.require_ordered_execution` | enforce deploy ordering | deploy workflow | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
 | `backup.retention_days` | retention | backup role | `30` | public, mandatory | restore/recovery policy |
 | `monitoring.exporters.node.enabled` | node exporter toggle | monitoring role | `true` | public, mandatory | observability |
 | `monitoring.exporters.mysqld.user` | mysqld exporter user | monitoring role | `issachar_monitor` | public, mandatory | observability |
 | `operations.required_ops_group` | required operator group | scripts/precheck | `glpiops` | public, mandatory | access control |
+| `operations.security_mode_default` | default security mode | scripts/precheck | `secure` | public, mandatory | fallback for policy behavior |
 | `resource_profiles.active` | tuning profile | renderer | `small` | public, mandatory | sizing behavior |
 
 ## Secret Key Table
@@ -176,11 +182,9 @@ Classification:
 
 - secret, mandatory, runtime-only
 
-## Policy summary by environment
+## Policy summary by execution mode
 
-- Staging/dev:
-  - may allow insecure TLS modes if policy permits.
-- Production:
-  - requires promotion gate
-  - requires secure TLS/HTTPS policy
-  - requires SSO policy gate when configured
+- `SECURITY_MODE=secure`:
+  - policy violations block mutable operations.
+- `SECURITY_MODE=permissive`:
+  - policy violations become warnings and require persisted justification/evidence.

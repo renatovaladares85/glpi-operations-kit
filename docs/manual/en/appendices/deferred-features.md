@@ -15,6 +15,6 @@ Partially implemented:
 Implemented and enforced now:
 
 - environment-specific precheck report with mandatory/optional/conditional items
-- production policy gate for TLS/HTTPS/SSO by configuration
-- mandatory deploy sequence blocking
-- staging certification gate for production rollout
+- selectable policy mode per execution (`SECURITY_MODE=secure|permissive`)
+- ordered deploy enforcement controlled by policy (`security.require_ordered_execution`)
+- promotion gate enforcement controlled by policy (`security.require_promotion_gate`)

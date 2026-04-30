@@ -118,8 +118,8 @@ ssh -i ~/.ssh/glpi_staging_ed25519 ubuntu@DB_HOST "echo ok"
 
 Supported environments:
 
-- `staging`
-- `production`
+- any environment that has `config/<environment>.yml`
+- common examples: `staging`, `production`
 
 Supported domains:
 
@@ -140,9 +140,9 @@ Supported domains:
 | `ops ...` | Day-2 operations: users, certificates, audit, resume | depends on operation | post-implementation lifecycle |
 | `audit check` | Runs compliance and operational audit path | app + db | after day-2 changes |
 
-## 9. Mandatory Execution Order
+## 9. Ordered Execution Policy
 
-The project enforces this order and blocks out-of-order execution:
+Recommended order:
 
 1. `deploy check all`
 2. `deploy apply db`
@@ -151,21 +151,39 @@ The project enforces this order and blocks out-of-order execution:
 5. `deploy apply backup`
 6. `deploy post-check all`
 
-State file:
+Behavior:
 
-- `.runtime/<env>/state/deploy-sequence.yml`
+- when `security.require_ordered_execution=true` and `SECURITY_MODE=secure`, out-of-order runs are blocked;
+- when `security.require_ordered_execution=true` and `SECURITY_MODE=permissive`, out-of-order runs continue with warning + evidence;
+- deploy state file: `.runtime/<env>/state/deploy-sequence.yml`
 
-## 10. Production Block Conditions (Hard Gate)
+## 10. Security Mode Per Execution
 
-Production apply is blocked unless:
+Security policy is no longer hardcoded to environment name.
 
-- staging certification gate exists:
-  - `.runtime/promotion/staging-certified.yml`
-- `tls.mode=provided`
-- HTTPS/TLS is enabled
-- `security.sso_enabled=true` when production SSO policy is required
+Use one of:
 
-Staging/dev may run insecure modes only when policy allows.
+- `SECURITY_MODE=secure`
+- `SECURITY_MODE=permissive`
+
+How policy works:
+
+- `secure`:
+  - policy violations block mutable operations (`deploy apply`, `post-check`, `tls`, `promote`, `ops`).
+- `permissive`:
+  - policy violations become warnings;
+  - execution continues;
+  - justification is mandatory;
+  - evidence is persisted in:
+    - `.runtime/<env>/state/security-mode-last.yml`
+    - `.runtime/<env>/evidence/security-mode-*.yml`
+
+Example:
+
+```bash
+SECURITY_MODE=secure ./scripts/glpictl.sh staging deploy apply db
+SECURITY_MODE=permissive SECURITY_JUSTIFICATION="Temporary test window approved by CAB-0426" ./scripts/glpictl.sh production deploy apply app
+```
 
 ## 11. Runtime Files and Their Meaning
 
@@ -202,13 +220,13 @@ Dual-server (from app or db host):
 
 ## 13. TLS and Certificate Operations
 
-Staging/dev self-signed:
+Self-signed:
 
 ```bash
 ./scripts/glpictl.sh staging tls self-signed
 ```
 
-Production valid cert:
+Provided certificate:
 
 ```bash
 ./scripts/glpictl.sh production tls install-provided

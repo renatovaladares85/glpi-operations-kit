@@ -328,28 +328,39 @@ Operational rule:
 
 - `security.sso_enabled`
   - Purpose: indicates whether SSO policy is enabled for the environment.
-  - Used by: production deployment policy gate.
-  - Example: `true` (production), `false` (staging until SSO rollout).
+  - Used by: policy checks when `security.require_sso=true`.
+  - Example: `true`.
   - Type: public policy flag.
-  - Requirement: mandatory in all environment configs.
+  - Requirement: conditional-mandatory based on policy.
 - `security.allow_insecure_non_production`
   - Purpose: allows `none` or `self_signed` TLS modes outside production.
   - Used by: operator policy and precheck guidance.
   - Type: public policy flag.
-- `security.require_tls_in_production`
-  - Purpose: forces secure TLS mode in production.
+- `security.require_tls`
+  - Purpose: forces secure TLS mode (`tls.mode=provided`) in secure policy mode.
   - Used by: deploy gate.
   - Type: public policy flag.
-  - Requirement: when `true`, production blocks unless `tls.mode=provided`.
-- `security.require_https_in_production`
-  - Purpose: forces HTTPS behavior in production.
+  - Requirement: when `true`, secure mode blocks unless `tls.mode=provided`.
+- `security.require_https`
+  - Purpose: forces HTTPS behavior in secure policy mode.
   - Used by: deploy gate.
   - Type: public policy flag.
-- `security.require_sso_in_production`
-  - Purpose: forces SSO policy gate in production.
+  - Requirement: when `true`, secure mode blocks unless TLS mode is not `none`.
+- `security.require_sso`
+  - Purpose: forces SSO policy gate in secure policy mode.
   - Used by: deploy gate.
   - Type: public policy flag.
-  - Requirement: when `true`, production blocks unless `security.sso_enabled=true`.
+  - Requirement: when `true`, secure mode blocks unless `security.sso_enabled=true`.
+- `security.require_promotion_gate`
+  - Purpose: enforces staging certification gate usage.
+  - Used by: mutable deploy/promote policy checks.
+  - Type: public policy flag.
+  - Requirement: when `true`, secure mode blocks without `.runtime/promotion/staging-certified.yml`.
+- `security.require_ordered_execution`
+  - Purpose: enforces check -> db -> app -> monitoring/backup deployment sequence.
+  - Used by: deploy apply/post-check flow.
+  - Type: public policy flag.
+  - Requirement: when `true`, secure mode blocks out-of-order runs.
 
 ### `paths`
 
@@ -379,6 +390,11 @@ Operational rule:
   - Purpose: required operator group.
   - Used by: scripts and docs.
   - Example: `glpiops`
+  - Type: public.
+- `operations.security_mode_default`
+  - Purpose: default execution policy mode when `SECURITY_MODE` is not set.
+  - Used by: precheck and mutable execution policy gating.
+  - Example: `secure`
   - Type: public.
 
 ### `resource_profiles`

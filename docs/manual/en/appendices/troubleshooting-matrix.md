@@ -21,25 +21,24 @@
 - Fix: `chmod 600 ~/.ssh/glpi_<env>_ed25519`
 - Safe resume: rerun deploy check
 
-## Production blocked by TLS policy
+## Blocked by secure policy mode
 
-- Symptom: production apply exits with TLS mode/HTTPS error.
-- Check: `config/production.yml` -> `tls.mode`, `security.require_tls_in_production`, `security.require_https_in_production`
-- Fix: set `tls.mode=provided`, configure valid certificate paths
-- Safe resume: rerun `production deploy check all`, then apply
-
-## Production blocked by SSO policy
-
-- Symptom: production apply exits with SSO policy error.
-- Check: `config/production.yml` -> `security.sso_enabled`
-- Fix: set `security.sso_enabled: true`
-- Safe resume: rerun precheck and apply flow
+- Symptom: mutable command exits with policy violation (TLS/HTTPS/SSO/gate/order).
+- Check:
+  - `echo "$SECURITY_MODE"` or `operations.security_mode_default`;
+  - `config/<env>.yml` policy flags: `security.require_tls`, `security.require_https`, `security.require_sso`, `security.require_promotion_gate`, `security.require_ordered_execution`.
+- Fix: either comply with policy requirements or run in permissive mode with explicit justification.
+- Safe resume:
+  - secure path: fix config and rerun command;
+  - permissive path: rerun with `SECURITY_MODE=permissive SECURITY_JUSTIFICATION="<reason>"`.
 
 ## Execution order blocked
 
 - Symptom: `apply app` blocked before `apply db`.
 - Check: `.runtime/<env>/state/deploy-sequence.yml`
-- Fix: execute mandatory sequence from `check -> apply db -> apply app ...`
+- Fix:
+  - secure mode: execute sequence `check -> apply db -> apply app -> monitoring -> backup -> post-check`;
+  - permissive mode: you can continue, but warnings/evidence are registered automatically.
 - Safe resume: run next required stage only
 
 ## TLS provided files missing

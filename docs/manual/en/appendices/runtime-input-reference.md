@@ -19,6 +19,8 @@ Public values are read from config files and rendered into runtime artifacts aut
 | `.runtime/<env>/overrides.runtime.yml` | Mutable runtime | `glpictl` / operators | Ansible vars | restricted | Runtime overrides for mutable behavior (for example TLS transition) |
 | `.runtime/<env>/secrets.yml` | Runtime secret | operator prompts | Ansible vars | secret | Secret-only values not versioned in Git |
 | `.runtime/<env>/state/deploy-sequence.yml` | Generated state | `glpictl` | `glpictl` | restricted | Mandatory execution order control |
+| `.runtime/<env>/state/security-mode-last.yml` | Generated state | `glpictl` | operators/audit | restricted | Latest permissive-mode risk acceptance summary |
+| `.runtime/<env>/evidence/security-mode-*.yml` | Generated evidence | `glpictl` | operators/audit | restricted | Historical permissive-mode evidence with justification and policy violations |
 | `.runtime/<env>/state/precheck-report-latest.yml` | Generated state | precheck | operators/audit | restricted | Structured prerequisite status |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | Generated evidence | precheck | operators/audit | restricted | Human-readable prerequisite report |
 
@@ -53,5 +55,11 @@ If missing:
   - `tls.provided_local_cert_path` and `tls.provided_local_key_path` must be valid local files.
 - When `topology.mode=dual-server`:
   - SSH key pair and target connectivity checks are mandatory.
-- In production:
-  - TLS/HTTPS and SSO policy gates are mandatory.
+- When security policy flags are enabled:
+  - `security.require_tls=true` requires `tls.mode=provided`;
+  - `security.require_https=true` requires TLS enabled;
+  - `security.require_sso=true` requires `security.sso_enabled=true`;
+  - `security.require_promotion_gate=true` requires `.runtime/promotion/staging-certified.yml`.
+- Policy execution mode:
+  - `SECURITY_MODE=secure` blocks on policy violation.
+  - `SECURITY_MODE=permissive` continues with warning + evidence.

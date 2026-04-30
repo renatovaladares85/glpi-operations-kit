@@ -15,7 +15,7 @@ Arquivo de estado:
 
 - `.runtime/<env>/state/deploy-sequence.yml`
 
-Ordem obrigatória:
+Ordem recomendada:
 
 1. `deploy check all`
 2. `deploy apply db`
@@ -24,7 +24,10 @@ Ordem obrigatória:
 5. `deploy apply backup`
 6. `deploy post-check all`
 
-Chamadas fora de ordem são bloqueadas.
+Comportamento de política:
+
+- quando `security.require_ordered_execution=true` e `SECURITY_MODE=secure`, chamadas fora de ordem são bloqueadas;
+- quando `security.require_ordered_execution=true` e `SECURITY_MODE=permissive`, chamadas fora de ordem continuam com warning + evidência.
 
 ## 3. Checks de serviço após apply
 
@@ -55,5 +58,7 @@ Validar:
 - `.runtime/<env>/logs/*.log`
 - `.runtime/<env>/logs/*.summary.yml`
 - `.runtime/<env>/state/*.state.yml`
+- `.runtime/<env>/state/security-mode-last.yml` (quando usar modo permissivo)
+- `.runtime/<env>/evidence/security-mode-*.yml` (quando usar modo permissivo)
 
 Esses artefatos são necessários para auditoria e investigação.

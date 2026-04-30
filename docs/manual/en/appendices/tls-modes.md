@@ -2,11 +2,11 @@
 
 ## 1. TLS modes
 
-| Mode | Allowed in staging/dev | Allowed in production | Behavior |
+| Mode | Allowed in secure mode | Allowed in permissive mode | Behavior |
 |---|---|---|---|
-| `none` | Yes (policy-controlled) | No | HTTP only on port 80 |
-| `self_signed` | Yes | No | HTTPS with self-signed certificate |
-| `provided` | Yes | Yes (required) | HTTPS with operator-provided valid certificate |
+| `none` | Only when `security.require_https=false` and `security.require_tls=false` | Yes (with warning/evidence if policy requires TLS/HTTPS) | HTTP only on port 80 |
+| `self_signed` | Allowed when `security.require_tls=false` | Yes | HTTPS with self-signed certificate |
+| `provided` | Yes | Yes | HTTPS with operator-provided valid certificate |
 
 ## 2. Mode commands
 
@@ -31,7 +31,7 @@ Expected behavior:
 - app role is re-applied
 - Nginx config is validated
 
-## 4. Provided certificate flow (production required)
+## 4. Provided certificate flow
 
 Before command, ensure local files exist:
 
@@ -65,3 +65,4 @@ Policy:
 
 - warning threshold defaults to 30 days
 - replace cert before expiration
+- secure mode may require provided certificates based on `security.require_tls`.

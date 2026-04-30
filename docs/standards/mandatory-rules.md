@@ -18,8 +18,9 @@ These rules must not be broken by agents.
 - Stop when a mandatory pre-flight item fails and cannot be fixed.
 - Continue after a mandatory pre-flight failure only with explicit user approval.
 - Enforce operator membership in `glpiops` for deployment operations.
-- Block production deployment unless staging certification gate exists.
-- Block production deployment when TLS/HTTPS/SSO policy requirements are not satisfied.
+- Apply security policy checks in every environment using `SECURITY_MODE=secure|permissive`.
+- In `secure`, policy violations block execution.
+- In `permissive`, policy violations become warnings and must be persisted as evidence with justification.
 - Use `scripts/ops-maintenance.sh` for post-implementation user and certificate lifecycle tasks.
 - Persist day-2 operation logs and checkpoints under `.runtime/<env>/logs` and `.runtime/<env>/state`.
 - Never version secrets.

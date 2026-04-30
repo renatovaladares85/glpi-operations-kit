@@ -73,7 +73,10 @@ ssh -i ~/.ssh/glpi_staging_ed25519 ubuntu@DB_HOST "echo ok"
 
 Finalidade:
 
-- executar fluxo obrigatório em ordem; chamadas fora de ordem são bloqueadas.
+- executar fluxo recomendado em ordem.
+- quando `security.require_ordered_execution=true`:
+  - em `SECURITY_MODE=secure`, chamadas fora de ordem bloqueiam;
+  - em `SECURITY_MODE=permissive`, chamadas fora de ordem continuam com warning + evidência.
 
 ## 5. Certificação e prontidão
 
@@ -84,9 +87,9 @@ bash scripts/release-readiness.sh staging
 
 Finalidade:
 
-- gerar evidências de homologação e gate de promoção.
+- gerar evidências de homologação e trilha de prontidão.
 
-## 6. Produção (com bloqueios obrigatórios)
+## 6. Comandos mutáveis com modo de segurança selecionável
 
 ```bash
 ./scripts/glpictl.sh production deploy check all
@@ -97,12 +100,22 @@ Finalidade:
 ./scripts/glpictl.sh production deploy post-check all
 ```
 
-Bloqueios automáticos:
+Exemplo modo seguro:
 
-- ausência de `.runtime/promotion/staging-certified.yml`;
-- `tls.mode` diferente de `provided`;
-- HTTPS/TLS desabilitado;
-- `security.sso_enabled` diferente de `true` quando política de produção exige SSO.
+```bash
+SECURITY_MODE=secure ./scripts/glpictl.sh production deploy apply app
+```
+
+Exemplo modo permissivo:
+
+```bash
+SECURITY_MODE=permissive SECURITY_JUSTIFICATION="Janela de teste aprovada no CAB-0426" ./scripts/glpictl.sh production deploy apply app
+```
+
+Comportamento:
+
+- `secure`: violações de política bloqueiam.
+- `permissive`: violações viram warning e são registradas em `.runtime/<env>/state/security-mode-last.yml` e `.runtime/<env>/evidence/security-mode-*.yml`.
 
 ## 7. Operações TLS
 

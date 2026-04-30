@@ -55,7 +55,9 @@ The current implementation targets:
 - Mandatory failures must block execution unless the user explicitly authorizes continuation.
 - Missing critical information must stop execution with a clear explanation.
 - Ansible applies the server state after the guided script prepares the context.
-- Production execution is blocked by a formal promotion gate generated from staging certification evidence.
+- Policy enforcement is execution-mode based:
+  - `SECURITY_MODE=secure`: policy violations block mutable operations.
+  - `SECURITY_MODE=permissive`: policy violations become warnings with mandatory risk evidence.
 - Readiness declaration must run `bash scripts/release-readiness.sh <environment>` and pass all critical checks.
 
 ## Current repository structure
@@ -114,7 +116,7 @@ docs/
   - generate timestamped evidence package;
   - mark gate as approved only when all mandatory checks pass.
 - `Phase 2 - Production rollout`
-  - blocked by default without approved gate;
+  - policy gate enforcement is controlled by `security.require_promotion_gate`;
   - run production deployment with runtime values only;
   - execute post-check and collect evidence.
 
@@ -131,7 +133,7 @@ Gate artifacts:
 - Firewall is enabled locally.
 - PHP session cookies are hardened.
 - Database access is intended only from application hosts.
-- Staging supports `none`, `self_signed`, and `provided` TLS modes.
+- TLS mode enforcement is controlled by policy flags (`security.require_tls`, `security.require_https`) and execution mode.
 - Valid certificate replacement must be handled by a script-driven workflow.
 
 ## Operational gaps that still need real environment data
@@ -159,7 +161,7 @@ Gate artifacts:
 - MariaDB connectivity checks
 - guided secret prompt flow
 - smoke test after deployment
-- promotion gate approval before any production apply run
+- policy evidence validation when permissive mode is used
 
 ## Change log
 

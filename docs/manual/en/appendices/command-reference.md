@@ -74,7 +74,10 @@ ssh -i ~/.ssh/glpi_staging_ed25519 ubuntu@DB_HOST "echo ok"
 
 Purpose:
 
-- executes the mandatory ordered flow. Out-of-order execution is blocked by script policy.
+- executes the recommended ordered flow.
+- if `security.require_ordered_execution=true`:
+  - `SECURITY_MODE=secure` blocks out-of-order runs;
+  - `SECURITY_MODE=permissive` allows continuation with warning + evidence.
 
 ## 5. Certification and readiness
 
@@ -87,7 +90,7 @@ Purpose:
 
 - certifies staging and generates audit evidence and promotion gate artifacts.
 
-## 6. Production commands (blocked unless gate and policy pass)
+## 6. Mutable commands with selectable security mode
 
 ```bash
 ./scripts/glpictl.sh production deploy check all
@@ -98,12 +101,22 @@ Purpose:
 ./scripts/glpictl.sh production deploy post-check all
 ```
 
-Hard block conditions:
+Secure mode example:
 
-- missing `.runtime/promotion/staging-certified.yml`
-- `tls.mode != provided`
-- HTTPS/TLS disabled
-- `security.sso_enabled != true` when production SSO policy is required
+```bash
+SECURITY_MODE=secure ./scripts/glpictl.sh production deploy apply app
+```
+
+Permissive mode example:
+
+```bash
+SECURITY_MODE=permissive SECURITY_JUSTIFICATION="Temporary controlled test approved by CAB-0426" ./scripts/glpictl.sh production deploy apply app
+```
+
+Policy behavior:
+
+- `secure`: policy violations block.
+- `permissive`: policy violations warn and are written to `.runtime/<env>/state/security-mode-last.yml` and `.runtime/<env>/evidence/security-mode-*.yml`.
 
 ## 7. TLS operations
 

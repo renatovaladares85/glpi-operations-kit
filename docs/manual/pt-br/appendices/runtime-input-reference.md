@@ -18,7 +18,9 @@ Valores públicos devem ser mantidos nesses arquivos e renderizados para runtime
 | `.runtime/<env>/public.runtime.yml` | gerado | `glpictl` + render | variáveis Ansible | restrito | converte valores públicos em variáveis de role |
 | `.runtime/<env>/overrides.runtime.yml` | mutável runtime | `glpictl` / operador | variáveis Ansible | restrito | sobrescreve comportamentos mutáveis (por exemplo TLS) |
 | `.runtime/<env>/secrets.yml` | segredo runtime | prompts do operador | variáveis Ansible | secreto | armazena apenas segredos fora do Git |
-| `.runtime/<env>/state/deploy-sequence.yml` | estado gerado | `glpictl` | `glpictl` | restrito | controla ordem obrigatória de execução |
+| `.runtime/<env>/state/deploy-sequence.yml` | estado gerado | `glpictl` | `glpictl` | restrito | controla ordem de execução |
+| `.runtime/<env>/state/security-mode-last.yml` | estado gerado | `glpictl` | operação/auditoria | restrito | resumo do último aceite de risco em modo permissivo |
+| `.runtime/<env>/evidence/security-mode-*.yml` | evidência gerada | `glpictl` | operação/auditoria | restrito | trilha histórica de justificativas e violações de política |
 | `.runtime/<env>/state/precheck-report-latest.yml` | estado gerado | precheck | operação/auditoria | restrito | relatório estruturado de pré-requisitos |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | evidência gerada | precheck | operação/auditoria | restrito | resumo legível de pré-requisitos |
 
@@ -51,5 +53,11 @@ Se faltar:
   - caminhos locais de certificado/chave devem existir.
 - Se `topology.mode=dual-server`:
   - chave SSH por ambiente e conectividade com app/db são obrigatórias.
-- Em produção:
-  - políticas de TLS/HTTPS/SSO são obrigatórias e bloqueantes.
+- Se flags de política estiverem habilitadas:
+  - `security.require_tls=true` exige `tls.mode=provided`;
+  - `security.require_https=true` exige TLS habilitado;
+  - `security.require_sso=true` exige `security.sso_enabled=true`;
+  - `security.require_promotion_gate=true` exige `.runtime/promotion/staging-certified.yml`.
+- Modo de execução:
+  - `SECURITY_MODE=secure`: bloqueia em caso de violação de política.
+  - `SECURITY_MODE=permissive`: continua com warning + evidência.
