@@ -670,7 +670,7 @@ materialize_runtime_from_config() {
   chmod 600 "$inventory_path"
   if [[ ! -f "$override_path" ]]; then
     cat >"$override_path" <<'EOF'
----
+{}
 EOF
   fi
   chmod 600 "$override_path"
@@ -684,7 +684,7 @@ ensure_runtime_override_file() {
   ensure_runtime_foundation "$environment"
   if [[ ! -f "$override_path" ]]; then
     cat >"$override_path" <<'EOF'
----
+{}
 EOF
   fi
   chmod 600 "$override_path"
