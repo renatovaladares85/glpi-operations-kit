@@ -6,8 +6,8 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_ROOT/lib/common.sh"
 
 ENVIRONMENT="${1:-staging}"
-if [[ "$ENVIRONMENT" != "staging" && "$ENVIRONMENT" != "production" ]]; then
-  echo "Usage: bash scripts/release-readiness.sh <staging|production>" >&2
+if [[ ! "$ENVIRONMENT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "Usage: bash scripts/release-readiness.sh <environment>" >&2
   exit 1
 fi
 
@@ -140,15 +140,29 @@ check_staging_certification_artifacts() {
 }
 
 check_production_policy_contract() {
-  local tls_mode sso_enabled
+  local tls_mode sso_enabled require_tls require_https require_sso
   tls_mode="$(read_product_config_value "$ENVIRONMENT" "tls.mode" || true)"
   sso_enabled="$(read_product_config_value "$ENVIRONMENT" "security.sso_enabled" || true)"
-  if [[ "$tls_mode" != "provided" ]]; then
-    echo "Production policy violation: tls.mode must be provided." >&2
+  require_tls="$(read_product_config_value "$ENVIRONMENT" "security.require_tls" || true)"
+  [[ -z "${require_tls// }" ]] && require_tls="$(read_product_config_value "$ENVIRONMENT" "security.require_tls_in_production" || true)"
+  [[ -z "${require_tls// }" ]] && require_tls="false"
+  require_https="$(read_product_config_value "$ENVIRONMENT" "security.require_https" || true)"
+  [[ -z "${require_https// }" ]] && require_https="$(read_product_config_value "$ENVIRONMENT" "security.require_https_in_production" || true)"
+  [[ -z "${require_https// }" ]] && require_https="false"
+  require_sso="$(read_product_config_value "$ENVIRONMENT" "security.require_sso" || true)"
+  [[ -z "${require_sso// }" ]] && require_sso="$(read_product_config_value "$ENVIRONMENT" "security.require_sso_in_production" || true)"
+  [[ -z "${require_sso// }" ]] && require_sso="false"
+
+  if [[ "$require_tls" == "true" && "$tls_mode" != "provided" ]]; then
+    echo "Policy violation: tls.mode must be provided when security.require_tls=true." >&2
     return 1
   fi
-  if [[ "$sso_enabled" != "true" ]]; then
-    echo "Production policy violation: security.sso_enabled must be true." >&2
+  if [[ "$require_https" == "true" && "$tls_mode" == "none" ]]; then
+    echo "Policy violation: tls.mode cannot be none when security.require_https=true." >&2
+    return 1
+  fi
+  if [[ "$require_sso" == "true" && "$sso_enabled" != "true" ]]; then
+    echo "Policy violation: security.sso_enabled must be true when security.require_sso=true." >&2
     return 1
   fi
 }

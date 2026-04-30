@@ -1073,6 +1073,35 @@ check_or_install_command() {
   return 1
 }
 
+normalize_bool_value() {
+  local value="$1"
+  local default_value="$2"
+  case "$value" in
+    true|false) echo "$value" ;;
+    *)
+      if [[ -n "$default_value" ]]; then
+        echo "$default_value"
+      else
+        echo "false"
+      fi
+      ;;
+  esac
+}
+
+resolve_security_mode_for_environment() {
+  local environment="$1"
+  local mode="${SECURITY_MODE:-}"
+
+  if [[ -z "${mode// }" ]] && [[ -f "$(config_file_path "$environment")" ]]; then
+    mode="$(read_product_config_value "$environment" "operations.security_mode_default" || true)"
+  fi
+  [[ -z "${mode// }" ]] && mode="secure"
+  case "$mode" in
+    secure|permissive) echo "$mode" ;;
+    *) echo "invalid" ;;
+  esac
+}
+
 run_preflight_checks() {
   local environment="${1:-unknown}"
   shift || true
@@ -1087,6 +1116,9 @@ run_preflight_checks() {
   local marker_file
   local items_file
   local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled
+  local require_tls require_https require_sso require_promotion_gate
+  local security_mode policy_obligation policy_status policy_block
+  local promotion_gate_path
   marker_file="$(bootstrap_marker_path)"
   items_file="$(preflight_items_file_path "$environment")"
   : >"$items_file"
@@ -1217,8 +1249,51 @@ run_preflight_checks() {
     db_host="$(read_product_config_value "$environment" "topology.db.host" || true)"
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
     sso_enabled="$(read_product_config_value "$environment" "security.sso_enabled" || true)"
+    security_mode="$(resolve_security_mode_for_environment "$environment")"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
+    [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
+    promotion_gate_path="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
+
+    if [[ "$security_mode" == "invalid" ]]; then
+      append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
+        "The default security mode must be secure or permissive." "config.<env>.operations.security_mode_default" "set secure or permissive" "true" "fail" "Fix operations.security_mode_default to secure|permissive."
+      mandatory_failures=$((mandatory_failures + 1))
+      security_mode="secure"
+    else
+      append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
+        "Execution mode controls policy block behavior." "SECURITY_MODE env var or config value" "set secure or permissive" "true" "pass" "mode=${security_mode}"
+    fi
+
+    policy_obligation="mandatory"
+    policy_status="pass"
+    policy_block="true"
+    if [[ "$security_mode" == "permissive" ]]; then
+      policy_obligation="conditional-mandatory"
+      policy_status="warn"
+      policy_block="false"
+    fi
+
+    require_tls="$(read_product_config_value "$environment" "security.require_tls" || true)"
+    if [[ -z "${require_tls// }" ]]; then
+      require_tls="$(read_product_config_value "$environment" "security.require_tls_in_production" || true)"
+    fi
+    require_tls="$(normalize_bool_value "$require_tls" "false")"
+
+    require_https="$(read_product_config_value "$environment" "security.require_https" || true)"
+    if [[ -z "${require_https// }" ]]; then
+      require_https="$(read_product_config_value "$environment" "security.require_https_in_production" || true)"
+    fi
+    require_https="$(normalize_bool_value "$require_https" "false")"
+
+    require_sso="$(read_product_config_value "$environment" "security.require_sso" || true)"
+    if [[ -z "${require_sso// }" ]]; then
+      require_sso="$(read_product_config_value "$environment" "security.require_sso_in_production" || true)"
+    fi
+    require_sso="$(normalize_bool_value "$require_sso" "false")"
+
+    require_promotion_gate="$(read_product_config_value "$environment" "security.require_promotion_gate" || true)"
+    require_promotion_gate="$(normalize_bool_value "$require_promotion_gate" "false")"
 
     if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
@@ -1246,27 +1321,64 @@ run_preflight_checks() {
         "Provided TLS paths are only required when provided mode is selected." "n/a" "n/a" "false" "skip" "none"
     fi
 
-    if [[ "$environment" == "production" ]]; then
+    if [[ "$require_tls" == "true" ]]; then
       if [[ "$tls_mode" == "provided" ]]; then
-        append_precheck_item "$environment" "production-tls-mode" "environment-policy" "production" "mandatory" \
-          "Production requires valid TLS certificate mode." "config.production tls.mode" "set tls.mode=provided" "true" "pass" "none"
+        append_precheck_item "$environment" "policy-require-tls" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires provided TLS mode." "config.<env>.tls.mode" "set tls.mode=provided" "$policy_block" "pass" "none"
       else
-        append_precheck_item "$environment" "production-tls-mode" "environment-policy" "production" "mandatory" \
-          "Production cannot run with insecure TLS mode." "config.production tls.mode" "set tls.mode=provided" "true" "fail" "Production requires tls.mode=provided."
-        mandatory_failures=$((mandatory_failures + 1))
+        append_precheck_item "$environment" "policy-require-tls" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires provided TLS mode." "config.<env>.tls.mode" "set tls.mode=provided" "$policy_block" "$policy_status" "Enable provided TLS mode or run in secure mode only after compliance."
+        if [[ "$security_mode" == "secure" ]]; then
+          mandatory_failures=$((mandatory_failures + 1))
+        else
+          optional_failures=$((optional_failures + 1))
+        fi
       fi
+    fi
 
-      if [[ "$sso_enabled" == "true" ]]; then
-        append_precheck_item "$environment" "production-sso" "environment-policy" "production" "mandatory" \
-          "Production policy requires SSO enabled by configuration gate." "config.production security.sso_enabled" "set security.sso_enabled=true" "true" "pass" "none"
+    if [[ "$require_https" == "true" ]]; then
+      if [[ "$tls_mode" != "none" ]]; then
+        append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires HTTPS/TLS enabled." "config.<env>.tls.mode" "set tls.mode to self_signed or provided" "$policy_block" "pass" "none"
       else
-        append_precheck_item "$environment" "production-sso" "environment-policy" "production" "mandatory" \
-          "Production policy requires SSO enabled by configuration gate." "config.production security.sso_enabled" "set security.sso_enabled=true" "true" "fail" "Enable security.sso_enabled in production config."
-        mandatory_failures=$((mandatory_failures + 1))
+        append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires HTTPS/TLS enabled." "config.<env>.tls.mode" "set tls.mode to self_signed or provided" "$policy_block" "$policy_status" "Enable TLS mode or accept risk in permissive mode."
+        if [[ "$security_mode" == "secure" ]]; then
+          mandatory_failures=$((mandatory_failures + 1))
+        else
+          optional_failures=$((optional_failures + 1))
+        fi
       fi
-    else
-      append_precheck_item "$environment" "production-tls-mode" "environment-policy" "non-production" "optional" \
-        "Insecure modes may be allowed in staging/dev by policy." "config.$environment tls.mode" "set stronger TLS mode if desired" "false" "info" "none"
+    fi
+
+    if [[ "$require_sso" == "true" ]]; then
+      if [[ "$sso_enabled" == "true" ]]; then
+        append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires SSO enabled." "config.<env>.security.sso_enabled" "set security.sso_enabled=true" "$policy_block" "pass" "none"
+      else
+        append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy requires SSO enabled." "config.<env>.security.sso_enabled" "set security.sso_enabled=true" "$policy_block" "$policy_status" "Enable SSO or accept risk in permissive mode."
+        if [[ "$security_mode" == "secure" ]]; then
+          mandatory_failures=$((mandatory_failures + 1))
+        else
+          optional_failures=$((optional_failures + 1))
+        fi
+      fi
+    fi
+
+    if [[ "$require_promotion_gate" == "true" ]]; then
+      if [[ -f "$promotion_gate_path" ]]; then
+        append_precheck_item "$environment" "policy-require-promotion-gate" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy may require a valid staging certification gate." "test -f .runtime/promotion/staging-certified.yml" "run staging certification or disable gate requirement" "$policy_block" "pass" "none"
+      else
+        append_precheck_item "$environment" "policy-require-promotion-gate" "environment-policy" "all" "$policy_obligation" \
+          "Secure policy may require a valid staging certification gate." "test -f .runtime/promotion/staging-certified.yml" "run staging certification or disable gate requirement" "$policy_block" "$policy_status" "Generate promotion gate or accept risk in permissive mode."
+        if [[ "$security_mode" == "secure" ]]; then
+          mandatory_failures=$((mandatory_failures + 1))
+        else
+          optional_failures=$((optional_failures + 1))
+        fi
+      fi
     fi
   else
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
@@ -1289,7 +1401,7 @@ run_preflight_checks() {
   fi
 
   if ((optional_failures > 0)); then
-    echo "Optional pre-flight warnings were found. Review them before production use."
+    echo "Optional pre-flight warnings were found. Review them before continuing mutable operations."
   fi
   echo "Detailed report: $(preflight_report_latest_path "$environment")"
   echo "Readable summary: $(preflight_report_markdown_path "$environment")"

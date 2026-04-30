@@ -12,12 +12,12 @@ TARGET="${4:-all}"
 SCOPE="${5:-}"
 
 if [[ -z "$ENVIRONMENT" || -z "$DOMAIN" || -z "$ACTION" ]]; then
-  echo "Usage: ./scripts/glpictl.sh <staging|production> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
+  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
   exit 1
 fi
 
-if [[ "$ENVIRONMENT" != "staging" && "$ENVIRONMENT" != "production" ]]; then
-  echo "Unsupported environment: $ENVIRONMENT (expected staging|production)" >&2
+if [[ ! "$ENVIRONMENT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  echo "Unsupported environment name: $ENVIRONMENT (allowed: letters, numbers, '.', '-', '_')." >&2
   exit 1
 fi
 
@@ -30,9 +30,161 @@ CONFIG_PATH="$(config_file_path "$ENVIRONMENT")"
 PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
 
-ensure_runtime_foundation "$ENVIRONMENT"
-ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+SECURITY_MODE_EFFECTIVE=""
+REQUIRE_TLS="false"
+REQUIRE_HTTPS="false"
+REQUIRE_SSO="false"
+REQUIRE_PROMOTION_GATE="false"
+REQUIRE_ORDERED_EXECUTION="true"
+PERMISSIVE_JUSTIFICATION="${SECURITY_JUSTIFICATION:-}"
+PERMISSIVE_EVIDENCE_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+PERMISSIVE_EVIDENCE_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/security-mode-last.yml"
+PERMISSIVE_EVIDENCE_REPORT_PATH="$(runtime_evidence_dir "$ENVIRONMENT")/security-mode-${PERMISSIVE_EVIDENCE_TIMESTAMP}-${DOMAIN}-${ACTION}.yml"
+declare -a POLICY_VIOLATIONS=()
+
+normalize_bool() {
+  local value="$1"
+  local default_value="${2:-false}"
+  case "$value" in
+    true|false) echo "$value" ;;
+    *) echo "$default_value" ;;
+  esac
+}
+
+yaml_escape() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  printf "%s" "$value"
+}
+
+read_policy_flag() {
+  local key="$1"
+  local legacy_key="$2"
+  local default_value="$3"
+  local value
+  value="$(read_product_config_value "$ENVIRONMENT" "$key" || true)"
+  if [[ -z "${value// }" && -n "${legacy_key// }" ]]; then
+    value="$(read_product_config_value "$ENVIRONMENT" "$legacy_key" || true)"
+  fi
+  normalize_bool "$value" "$default_value"
+}
+
+resolve_security_mode() {
+  local mode="${SECURITY_MODE:-}"
+  if [[ -z "${mode// }" && -f "$CONFIG_PATH" ]]; then
+    if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
+      mode="$(python3 - "$CONFIG_PATH" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+ops = data.get("operations", {}) if isinstance(data, dict) else {}
+value = ops.get("security_mode_default", "")
+print(value if isinstance(value, str) else "")
+PY
+)"
+    fi
+  fi
+  [[ -z "${mode// }" ]] && mode="secure"
+  case "$mode" in
+    secure|permissive) ;;
+    *)
+      echo "Invalid SECURITY_MODE '$mode'. Allowed values: secure|permissive." >&2
+      exit 1
+      ;;
+  esac
+  SECURITY_MODE_EFFECTIVE="$mode"
+  export SECURITY_MODE="$mode"
+}
+
+resolve_policy_contract() {
+  REQUIRE_TLS="$(read_policy_flag "security.require_tls" "security.require_tls_in_production" "false")"
+  REQUIRE_HTTPS="$(read_policy_flag "security.require_https" "security.require_https_in_production" "false")"
+  REQUIRE_SSO="$(read_policy_flag "security.require_sso" "security.require_sso_in_production" "false")"
+  REQUIRE_PROMOTION_GATE="$(read_policy_flag "security.require_promotion_gate" "" "false")"
+  REQUIRE_ORDERED_EXECUTION="$(read_policy_flag "security.require_ordered_execution" "" "true")"
+}
+
+is_mutating_operation() {
+  case "$DOMAIN/$ACTION" in
+    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_permissive_justification() {
+  if [[ "$SECURITY_MODE_EFFECTIVE" != "permissive" ]]; then
+    return 0
+  fi
+  if [[ -n "${PERMISSIVE_JUSTIFICATION// }" ]]; then
+    return 0
+  fi
+  PERMISSIVE_JUSTIFICATION="$(read_required_value \
+    "Permissive mode justification" \
+    "Risk acceptance is mandatory when policies are downgraded to warning." \
+    "$PERMISSIVE_EVIDENCE_STATE_PATH")"
+  export SECURITY_JUSTIFICATION="$PERMISSIVE_JUSTIFICATION"
+}
+
+persist_permissive_evidence() {
+  if [[ "$SECURITY_MODE_EFFECTIVE" != "permissive" ]]; then
+    return 0
+  fi
+  ensure_permissive_justification
+  ensure_runtime_foundation "$ENVIRONMENT"
+
+  local operator host now
+  operator="$(id -un)"
+  host="$(hostname)"
+  now="$(date -u +%FT%TZ)"
+
+  {
+    echo "---"
+    echo "environment: '$(yaml_escape "$ENVIRONMENT")'"
+    echo "security_mode: 'permissive'"
+    echo "operator: '$(yaml_escape "$operator")'"
+    echo "host: '$(yaml_escape "$host")'"
+    echo "domain: '$(yaml_escape "$DOMAIN")'"
+    echo "action: '$(yaml_escape "$ACTION")'"
+    echo "target: '$(yaml_escape "$TARGET")'"
+    echo "timestamp_utc: '$now'"
+    echo "justification: '$(yaml_escape "$PERMISSIVE_JUSTIFICATION")'"
+    echo "violated_policies_count: ${#POLICY_VIOLATIONS[@]}"
+    echo "violated_policies:"
+    if ((${#POLICY_VIOLATIONS[@]} == 0)); then
+      echo "  - id: 'none'"
+      echo "    message: 'No policy violation registered in this execution.'"
+      echo "    remediation: 'none'"
+    else
+      local entry id message remediation
+      for entry in "${POLICY_VIOLATIONS[@]}"; do
+        IFS="|" read -r id message remediation <<<"$entry"
+        echo "  - id: '$(yaml_escape "$id")'"
+        echo "    message: '$(yaml_escape "$message")'"
+        echo "    remediation: '$(yaml_escape "$remediation")'"
+      done
+    fi
+  } >"$PERMISSIVE_EVIDENCE_STATE_PATH"
+  cp "$PERMISSIVE_EVIDENCE_STATE_PATH" "$PERMISSIVE_EVIDENCE_REPORT_PATH"
+  chmod 600 "$PERMISSIVE_EVIDENCE_STATE_PATH" "$PERMISSIVE_EVIDENCE_REPORT_PATH"
+}
+
+policy_violation() {
+  local policy_id="$1"
+  local message="$2"
+  local remediation="${3:-Review policy requirements and rerun.}"
+  if [[ "$SECURITY_MODE_EFFECTIVE" == "secure" ]]; then
+    echo "Execution blocked by security policy [$policy_id]: $message" >&2
+    echo "Remediation: $remediation" >&2
+    exit 1
+  fi
+  ensure_permissive_justification
+  echo "WARNING: permissive mode accepted policy risk [$policy_id]: $message" >&2
+  POLICY_VIOLATIONS+=("${policy_id}|${message}|${remediation}")
+  persist_permissive_evidence
+}
 
 ensure_deploy_sequence_file() {
   if [[ ! -f "$DEPLOY_SEQUENCE_PATH" ]]; then
@@ -71,22 +223,23 @@ require_deploy_flag() {
   local value
   value="$(read_deploy_flag "$key")"
   if [[ "$value" != "true" ]]; then
-    echo "Execution blocked by mandatory order rule: $human_msg" >&2
-    echo "Sequence state file: $DEPLOY_SEQUENCE_PATH" >&2
-    exit 1
+    policy_violation "ordered-execution" "$human_msg" "Follow deploy sequence. State file: $DEPLOY_SEQUENCE_PATH"
   fi
 }
 
 enforce_apply_sequence() {
   local target="$1"
+  if [[ "$REQUIRE_ORDERED_EXECUTION" != "true" ]]; then
+    return 0
+  fi
   ensure_deploy_sequence_file
-  require_deploy_flag "check_passed" "run deploy check before apply."
+  require_deploy_flag "check_passed" "Run deploy check before apply."
   case "$target" in
     db) ;;
-    app) require_deploy_flag "db_applied" "run apply db before apply app." ;;
+    app) require_deploy_flag "db_applied" "Run apply db before apply app." ;;
     monitoring|backup)
-      require_deploy_flag "db_applied" "run apply db before monitoring/backup."
-      require_deploy_flag "app_applied" "run apply app before monitoring/backup."
+      require_deploy_flag "db_applied" "Run apply db before monitoring/backup."
+      require_deploy_flag "app_applied" "Run apply app before monitoring/backup."
       ;;
     all) ;;
     *) ;;
@@ -120,37 +273,41 @@ mark_apply_sequence() {
   esac
 }
 
-enforce_production_security_policy() {
-  if [[ "$ENVIRONMENT" != "production" ]]; then
-    return 0
-  fi
-  local runtime_tls_mode runtime_use_tls sso_enabled require_tls require_https require_sso
-  runtime_tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
-  [[ -z "${runtime_tls_mode// }" ]] && runtime_tls_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" || true)"
-  [[ -z "${runtime_tls_mode// }" ]] && runtime_tls_mode="none"
-  runtime_use_tls="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_use_tls" || true)"
-  [[ -z "${runtime_use_tls// }" ]] && runtime_use_tls="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_use_tls" || true)"
-  [[ -z "${runtime_use_tls// }" ]] && runtime_use_tls="false"
-  require_tls="$(read_product_config_value "$ENVIRONMENT" "security.require_tls_in_production" || true)"
-  [[ -z "${require_tls// }" ]] && require_tls="true"
-  require_https="$(read_product_config_value "$ENVIRONMENT" "security.require_https_in_production" || true)"
-  [[ -z "${require_https// }" ]] && require_https="true"
-  require_sso="$(read_product_config_value "$ENVIRONMENT" "security.require_sso_in_production" || true)"
-  [[ -z "${require_sso// }" ]] && require_sso="true"
+enforce_security_policy_contract() {
+  local effective_tls_mode="${1:-}"
+  local effective_use_tls="${2:-}"
+  local sso_enabled
+
   sso_enabled="$(read_product_config_value "$ENVIRONMENT" "security.sso_enabled" || true)"
   [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
 
-  if [[ "$require_tls" == "true" && "$runtime_tls_mode" != "provided" ]]; then
-    echo "Production blocked: tls.mode must be 'provided'." >&2
-    exit 1
+  if [[ -z "${effective_tls_mode// }" ]]; then
+    effective_tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
+    [[ -z "${effective_tls_mode// }" ]] && effective_tls_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" || true)"
+    [[ -z "${effective_tls_mode// }" ]] && effective_tls_mode="none"
   fi
-  if [[ "$require_https" == "true" && "$runtime_use_tls" != "true" ]]; then
-    echo "Production blocked: TLS/HTTPS must be enabled." >&2
-    exit 1
+  if [[ -z "${effective_use_tls// }" ]]; then
+    effective_use_tls="false"
+    [[ "$effective_tls_mode" != "none" ]] && effective_use_tls="true"
   fi
-  if [[ "$require_sso" == "true" && "$sso_enabled" != "true" ]]; then
-    echo "Production blocked: security.sso_enabled must be true in config/production.yml." >&2
-    exit 1
+
+  if [[ "$REQUIRE_TLS" == "true" && "$effective_tls_mode" != "provided" ]]; then
+    policy_violation "require-tls" "Policy requires tls.mode=provided, current mode is '$effective_tls_mode'." "Set tls.mode=provided or choose secure mode only when compliant."
+  fi
+  if [[ "$REQUIRE_HTTPS" == "true" && "$effective_use_tls" != "true" ]]; then
+    policy_violation "require-https" "Policy requires HTTPS/TLS enabled, current mode '$effective_tls_mode' resolves to HTTP-only." "Enable TLS mode self_signed/provided."
+  fi
+  if [[ "$REQUIRE_SSO" == "true" && "$sso_enabled" != "true" ]]; then
+    policy_violation "require-sso" "Policy requires security.sso_enabled=true in config/$ENVIRONMENT.yml." "Enable security.sso_enabled in environment config."
+  fi
+}
+
+enforce_promotion_gate_policy_if_required() {
+  if [[ "$REQUIRE_PROMOTION_GATE" != "true" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$PROMOTION_GATE_PATH" ]]; then
+    policy_violation "require-promotion-gate" "Missing promotion gate file: $PROMOTION_GATE_PATH" "Run staging certification or disable security.require_promotion_gate."
   fi
 }
 
@@ -170,15 +327,13 @@ ensure_runtime_inputs_if_missing() {
 run_deploy() {
   local mode="$1"
   local target="$2"
-  if [[ "$ENVIRONMENT" == "production" && "$mode" != "check" ]]; then
-    if [[ ! -f "$PROMOTION_GATE_PATH" ]]; then
-      echo "Production blocked. Missing promotion gate file: $PROMOTION_GATE_PATH" >&2
-      exit 1
-    fi
-  fi
 
   ensure_runtime_inputs_if_missing
-  enforce_production_security_policy
+  resolve_policy_contract
+  if [[ "$mode" != "check" ]]; then
+    enforce_promotion_gate_policy_if_required
+    enforce_security_policy_contract
+  fi
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
   if [[ "$mode" == "check" ]]; then
@@ -207,8 +362,10 @@ run_deploy() {
       mark_apply_sequence "$mode" "$target"
       ;;
     post-check)
-      require_deploy_flag "db_applied" "run apply db before post-check."
-      require_deploy_flag "app_applied" "run apply app before post-check."
+      if [[ "$REQUIRE_ORDERED_EXECUTION" == "true" ]]; then
+        require_deploy_flag "db_applied" "Run apply db before post-check."
+        require_deploy_flag "app_applied" "Run apply app before post-check."
+      fi
       invoke_ansible "$ENVIRONMENT" "app,db" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
       mark_apply_sequence "$mode" "$target"
       ;;
@@ -226,8 +383,9 @@ run_certify() {
 
 run_tls() {
   local tls_action="$ACTION"
-  local domain local_cert_path local_key_path tls_mode
+  local domain local_cert_path local_key_path tls_mode use_tls
   ensure_runtime_inputs_if_missing
+  resolve_policy_contract
   domain="$(awk -F'"' '/glpi_domain:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
   local_cert_path=""
   local_key_path=""
@@ -253,8 +411,11 @@ run_tls() {
       exit 1
       ;;
   esac
+  use_tls="false"
+  [[ "$tls_mode" != "none" ]] && use_tls="true"
+  enforce_security_policy_contract "$tls_mode" "$use_tls"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" "$tls_mode"
-  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_use_tls" "$([[ "$tls_mode" == "none" ]] && echo false || echo true)"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_use_tls" "$use_tls"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_common_name" "$domain"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" "$local_cert_path"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
@@ -264,6 +425,8 @@ run_tls() {
 }
 
 run_ops() {
+  resolve_policy_contract
+  enforce_security_policy_contract
   if [[ "$ACTION" == "users" ]]; then
     local users_action="$TARGET"
     local users_scope="${SCOPE:-os}"
@@ -291,16 +454,20 @@ run_audit() {
 }
 
 run_promote() {
-  if [[ "$ENVIRONMENT" != "production" ]]; then
-    echo "Promote domain applies to production environment only." >&2
-    exit 1
-  fi
-  if [[ ! -f "$PROMOTION_GATE_PATH" ]]; then
-    echo "Missing promotion gate: $PROMOTION_GATE_PATH" >&2
-    exit 1
-  fi
+  resolve_policy_contract
+  enforce_promotion_gate_policy_if_required
   run_deploy apply "$TARGET"
 }
+
+resolve_security_mode
+ensure_runtime_foundation "$ENVIRONMENT"
+ensure_bootstrap_baseline "$SCRIPT_ROOT"
+run_preflight_checks "$ENVIRONMENT" bash git python3 ansible-playbook ansible-inventory
+
+if is_mutating_operation && [[ "$SECURITY_MODE_EFFECTIVE" == "permissive" ]]; then
+  ensure_permissive_justification
+  persist_permissive_evidence
+fi
 
 case "$DOMAIN" in
   deploy) run_deploy "$ACTION" "$TARGET" ;;
@@ -314,3 +481,7 @@ case "$DOMAIN" in
     exit 1
     ;;
 esac
+
+if is_mutating_operation && [[ "$SECURITY_MODE_EFFECTIVE" == "permissive" ]]; then
+  persist_permissive_evidence
+fi

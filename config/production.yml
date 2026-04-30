@@ -130,9 +130,11 @@ alerting:
 security:
   sso_enabled: true
   allow_insecure_non_production: false
-  require_tls_in_production: true
-  require_https_in_production: true
-  require_sso_in_production: true
+  require_tls: true
+  require_https: true
+  require_sso: true
+  require_promotion_gate: true
+  require_ordered_execution: true
 
 paths:
   glpi_release_root: "/usr/share"
@@ -146,6 +148,7 @@ operations:
   timezone: "America/Sao_Paulo"
   glpi_cron_schedule: "*/5 * * * *"
   required_ops_group: "glpiops"
+  security_mode_default: "secure"
 
 resource_profiles:
   active: "large"

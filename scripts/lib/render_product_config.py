@@ -215,9 +215,24 @@ def build_public_runtime(config):
         "alert_tls_expiry_warning_days": nested_get_default(alerting, "tls_expiry_warning_days", 30),
         "security_sso_enabled": require(config, "security.sso_enabled"),
         "security_allow_insecure_non_production": nested_get_default(config, "security.allow_insecure_non_production", True),
-        "security_require_tls_in_production": nested_get_default(config, "security.require_tls_in_production", True),
-        "security_require_https_in_production": nested_get_default(config, "security.require_https_in_production", True),
-        "security_require_sso_in_production": nested_get_default(config, "security.require_sso_in_production", True),
+        "security_require_tls": nested_get_default(
+            config,
+            "security.require_tls",
+            nested_get_default(config, "security.require_tls_in_production", False),
+        ),
+        "security_require_https": nested_get_default(
+            config,
+            "security.require_https",
+            nested_get_default(config, "security.require_https_in_production", False),
+        ),
+        "security_require_sso": nested_get_default(
+            config,
+            "security.require_sso",
+            nested_get_default(config, "security.require_sso_in_production", False),
+        ),
+        "security_require_promotion_gate": nested_get_default(config, "security.require_promotion_gate", False),
+        "security_require_ordered_execution": nested_get_default(config, "security.require_ordered_execution", True),
+        "operations_security_mode_default": nested_get_default(config, "operations.security_mode_default", "secure"),
         "mariadb_bind_address": nested_get_default(config, "database.bind_address", "0.0.0.0"),
         "mariadb_port": nested_get_default(config, "database.port", 3306),
         "mariadb_version_packages": nested_get_default(
