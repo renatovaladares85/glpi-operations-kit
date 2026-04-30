@@ -37,6 +37,18 @@ SECRET_PATH="$(runtime_secret_path "$ENVIRONMENT")"
 CONFIG_PATH="$(config_file_path "$ENVIRONMENT")"
 PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
+OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
+OPERATION_STATUS="completed"
+
+finalize_glpictl_operation() {
+  local exit_code="${1:-0}"
+  local remediation_hint="none"
+  if [[ "$exit_code" -ne 0 ]]; then
+    OPERATION_STATUS="failed"
+    remediation_hint="Review console output and .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
+  fi
+  complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
+}
 
 SECURITY_MODE_EFFECTIVE=""
 REQUIRE_TLS="false"
@@ -364,10 +376,19 @@ enforce_promotion_gate_policy_if_required() {
 }
 
 ensure_runtime_inputs_if_missing() {
+  local include_secrets="${1:-true}"
+  write_step "Loading environment config from $CONFIG_PATH"
   require_runtime_file "$CONFIG_PATH" "product configuration file"
+  write_step "Rendering runtime files for environment '$ENVIRONMENT'"
   materialize_runtime_from_config "$ENVIRONMENT"
+  write_step "Ensuring runtime override file"
   ensure_runtime_override_file "$ENVIRONMENT"
-  ensure_secret_keys "$ENVIRONMENT"
+  if [[ "$include_secrets" == "true" ]]; then
+    write_step "Ensuring runtime secrets file"
+    ensure_secret_keys "$ENVIRONMENT"
+  else
+    write_step "Skipping secrets prompt for check-only flow"
+  fi
   local ssh_key_path
   if [[ "$EXECUTION_MODE_EFFECTIVE" == "ssh" ]]; then
     ssh_key_path="$(read_product_config_value "$ENVIRONMENT" "network.ssh.private_key_path" || true)"
@@ -387,7 +408,11 @@ run_deploy() {
 
   enforce_local_target_consistency "deploy" "$mode" "$target"
 
-  ensure_runtime_inputs_if_missing
+  if [[ "$mode" == "check" ]]; then
+    ensure_runtime_inputs_if_missing "false"
+  else
+    ensure_runtime_inputs_if_missing "true"
+  fi
   resolve_policy_contract
   if [[ "$mode" != "check" ]]; then
     enforce_promotion_gate_policy_if_required
@@ -396,6 +421,7 @@ run_deploy() {
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
   if [[ "$mode" == "check" ]]; then
+    write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
     mark_apply_sequence "$mode" "$target"
     echo "Check completed successfully."
@@ -537,6 +563,8 @@ run_promote() {
 resolve_security_mode
 resolve_execution_contract
 ensure_runtime_foundation "$ENVIRONMENT"
+begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
+trap 'finalize_glpictl_operation "$?"' EXIT
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
 run_preflight_checks "$ENVIRONMENT" "$DOMAIN" "$ACTION" "$TARGET" bash git python3 ansible-playbook ansible-inventory
 
