@@ -101,11 +101,11 @@ check_docs_navigation() {
 }
 
 check_runtime_precedence_docs() {
-  grep -Fq "Runtime precedence:" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
-  grep -Fq "1. \`public.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
-  grep -Fq "2. \`overrides.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
-  grep -Fq "3. \`secrets.yml\`" "$SCRIPT_ROOT/../docs/manual/en/user-manual.md"
-  grep -Fq "values are merged in this order" "$SCRIPT_ROOT/../docs/product/configuration-reference.md"
+  grep -Fq "variable precedence is explicit" "$SCRIPT_ROOT/../docs/manual/en/appendices/runtime-input-reference.md"
+  grep -Fq "1. \`public.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/appendices/runtime-input-reference.md"
+  grep -Fq "2. \`overrides.runtime.yml\`" "$SCRIPT_ROOT/../docs/manual/en/appendices/runtime-input-reference.md"
+  grep -Fq "3. \`secrets.yml\`" "$SCRIPT_ROOT/../docs/manual/en/appendices/runtime-input-reference.md"
+  grep -Fq "Runtime values are merged in this order" "$SCRIPT_ROOT/../docs/product/configuration-reference.md"
 }
 
 check_render_public_runtime() {
@@ -154,15 +154,15 @@ check_production_policy_contract() {
   [[ -z "${require_sso// }" ]] && require_sso="false"
 
   if [[ "$require_tls" == "true" && "$tls_mode" != "provided" ]]; then
-    echo "Policy violation: tls.mode must be provided when security.require_tls=true." >&2
+    echo "Policy violation: TLS_MODE must be provided when SECURITY_REQUIRE_TLS=true." >&2
     return 1
   fi
   if [[ "$require_https" == "true" && "$tls_mode" == "none" ]]; then
-    echo "Policy violation: tls.mode cannot be none when security.require_https=true." >&2
+    echo "Policy violation: TLS_MODE cannot be none when SECURITY_REQUIRE_HTTPS=true." >&2
     return 1
   fi
   if [[ "$require_sso" == "true" && "$sso_enabled" != "true" ]]; then
-    echo "Policy violation: security.sso_enabled must be true when security.require_sso=true." >&2
+    echo "Policy violation: SECURITY_SSO_ENABLED must be true when SECURITY_REQUIRE_SSO=true." >&2
     return 1
   fi
 }

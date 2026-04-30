@@ -81,6 +81,6 @@ What blocks direct commercial handoff:
 Position the repository as:
 
 - a reusable GLPI operations kit
-- customer-adaptable by `config/<environment>.yml`
+- customer-adaptable by `config/<environment>.env`
 - secrets injected at runtime
 - ready for controlled enterprise delivery after one more cleanup/refinement cycle

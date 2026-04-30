@@ -5,6 +5,12 @@ SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_ROOT/lib/common.sh"
 
+if [[ "$(uname -s 2>/dev/null || true)" != "Linux" ]]; then
+  echo "This CLI is for Linux operational execution only." >&2
+  echo "You can edit this repository on Windows, but run deploy/ops commands on Ubuntu hosts." >&2
+  exit 1
+fi
+
 ENVIRONMENT="${1:-${GLPI_ENVIRONMENT:-}}"
 DOMAIN="${2:-}"
 ACTION="${3:-}"
@@ -77,20 +83,7 @@ read_policy_flag() {
 resolve_security_mode() {
   local mode="${SECURITY_MODE:-}"
   if [[ -z "${mode// }" && -f "$CONFIG_PATH" ]]; then
-    if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" >/dev/null 2>&1; then
-      mode="$(python3 - "$CONFIG_PATH" <<'PY'
-import sys
-import yaml
-from pathlib import Path
-
-path = Path(sys.argv[1])
-data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-ops = data.get("operations", {}) if isinstance(data, dict) else {}
-value = ops.get("security_mode_default", "")
-print(value if isinstance(value, str) else "")
-PY
-)"
-    fi
+    mode="$(read_product_config_value "$ENVIRONMENT" "operations.security_mode_default" || true)"
   fi
   [[ -z "${mode// }" ]] && mode="secure"
   case "$mode" in
@@ -107,12 +100,12 @@ PY
 resolve_execution_contract() {
   EXECUTION_MODE_EFFECTIVE="$(resolve_execution_mode_for_environment "$ENVIRONMENT")"
   if [[ "$EXECUTION_MODE_EFFECTIVE" == "invalid" ]]; then
-    echo "Invalid execution mode. Use GLPI_EXECUTION_MODE=local|ssh or config.execution.mode." >&2
+    echo "Invalid execution mode. Use GLPI_EXECUTION_MODE=local|ssh or EXECUTION_MODE in config/<environment>.env." >&2
     exit 1
   fi
   HOST_ROLE_EFFECTIVE="$(resolve_host_role_for_environment "$ENVIRONMENT")"
   if [[ "$HOST_ROLE_EFFECTIVE" == "invalid" ]]; then
-    echo "Invalid host role. Use GLPI_HOST_ROLE=app|db|all or config.execution.host_role_default." >&2
+    echo "Invalid host role. Use GLPI_HOST_ROLE=app|db|all or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env." >&2
     exit 1
   fi
   if [[ -f "$CONFIG_PATH" ]]; then
@@ -351,13 +344,13 @@ enforce_security_policy_contract() {
   fi
 
   if [[ "$REQUIRE_TLS" == "true" && "$effective_tls_mode" != "provided" ]]; then
-    policy_violation "require-tls" "Policy requires tls.mode=provided, current mode is '$effective_tls_mode'." "Set tls.mode=provided or choose secure mode only when compliant."
+    policy_violation "require-tls" "Policy requires TLS_MODE=provided, current mode is '$effective_tls_mode'." "Set TLS_MODE=provided or choose secure mode only when compliant."
   fi
   if [[ "$REQUIRE_HTTPS" == "true" && "$effective_use_tls" != "true" ]]; then
     policy_violation "require-https" "Policy requires HTTPS/TLS enabled, current mode '$effective_tls_mode' resolves to HTTP-only." "Enable TLS mode self_signed/provided."
   fi
   if [[ "$REQUIRE_SSO" == "true" && "$sso_enabled" != "true" ]]; then
-    policy_violation "require-sso" "Policy requires security.sso_enabled=true in config/$ENVIRONMENT.yml." "Enable security.sso_enabled in environment config."
+    policy_violation "require-sso" "Policy requires SECURITY_SSO_ENABLED=true in config/$ENVIRONMENT.env." "Enable SECURITY_SSO_ENABLED in environment config."
   fi
 }
 
@@ -366,7 +359,7 @@ enforce_promotion_gate_policy_if_required() {
     return 0
   fi
   if [[ ! -f "$PROMOTION_GATE_PATH" ]]; then
-    policy_violation "require-promotion-gate" "Missing promotion gate file: $PROMOTION_GATE_PATH" "Run staging certification or disable security.require_promotion_gate."
+    policy_violation "require-promotion-gate" "Missing promotion gate file: $PROMOTION_GATE_PATH" "Run staging certification or disable SECURITY_REQUIRE_PROMOTION_GATE."
   fi
 }
 

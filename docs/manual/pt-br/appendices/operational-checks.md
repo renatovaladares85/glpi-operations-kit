@@ -1,15 +1,15 @@
-# Apêndice: Checks Operacionais
+# Apêndice - Checagens Operacionais (PT-BR)
 
-## 1. Saídas do precheck
+## Saídas do precheck
 
-Após `deploy check`, validar:
+Após `deploy check`, valide:
 
 - `.runtime/<env>/state/precheck-report-latest.yml`
 - `.runtime/<env>/evidence/precheck-report-latest.md`
 
-Esses artefatos classificam cada item como obrigatório, opcional, condicional, ou não aplicável.
+Esses artefatos classificam itens como obrigatórios, opcionais, condicionais ou não aplicáveis.
 
-## 2. Controle de sequência de deploy
+## Controle de sequência de deploy
 
 Arquivo de estado:
 
@@ -26,10 +26,10 @@ Ordem recomendada:
 
 Comportamento:
 
-- com `security.require_ordered_execution=true` e `SECURITY_MODE=secure`, execução fora de ordem bloqueia;
-- com `SECURITY_MODE=permissive`, continua com warning e trilha de evidência.
+- com `SECURITY_REQUIRE_ORDERED_EXECUTION=true` e `SECURITY_MODE=secure`, execução fora de ordem bloqueia;
+- com `SECURITY_MODE=permissive`, a execução continua com warning e trilha de evidência.
 
-## 3. Checks de serviço após apply
+## Checagens de serviço após apply
 
 ```bash
 ansible-inventory -i .runtime/staging/inventory.runtime.yml --list >/dev/null
@@ -38,7 +38,7 @@ sudo php-fpm8.3 -t
 sudo systemctl status nginx php8.3-fpm mariadb --no-pager
 ```
 
-## 4. Evidências de certificação e prontidão
+## Evidências de certificação e prontidão
 
 ```bash
 ./scripts/glpictl.sh staging certify run
@@ -51,9 +51,9 @@ Artefatos esperados:
 - `.runtime/staging/evidence/readiness-report.json`
 - `.runtime/promotion/staging-certified.yml` (quando gate estiver habilitado)
 
-## 5. Evidências de operação day-2
+## Evidências de operação day-2
 
-Validar:
+Valide:
 
 - `.runtime/<env>/logs/*.log`
 - `.runtime/<env>/logs/*.summary.yml`

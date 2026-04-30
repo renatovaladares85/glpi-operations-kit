@@ -52,7 +52,10 @@ prompt_yes_no() {
   local answer=""
   while true; do
     echo "$prompt [y/n]"
-    read -r answer
+    if ! read -r answer; then
+      echo "No interactive input available; treating response as 'no'." >&2
+      return 1
+    fi
     case "$answer" in
       y|Y|yes|YES) return 0 ;;
       n|N|no|NO) return 1 ;;
@@ -598,16 +601,16 @@ runtime_app_path() {
 
 config_file_path() {
   local environment="$1"
-  echo "$SCRIPT_ROOT/../config/$environment.yml"
+  echo "$SCRIPT_ROOT/../config/$environment.env"
 }
 
 config_example_path() {
-  echo "$SCRIPT_ROOT/../config/product.example.yml"
+  echo "$SCRIPT_ROOT/../config/product.env"
 }
 
 require_python_yaml_support() {
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 is required to parse product configuration files." >&2
+    echo "python3 is required to render runtime files." >&2
     return 1
   fi
   if ! python3 -c "import yaml" >/dev/null 2>&1; then
@@ -632,28 +635,7 @@ read_product_config_value() {
   local config_path
   config_path="$(config_file_path "$environment")"
   require_runtime_file "$config_path" "product configuration file"
-  require_python_yaml_support
-  python3 - "$config_path" "$dotted_key" <<'PY'
-import sys
-import yaml
-from pathlib import Path
-
-path = Path(sys.argv[1])
-key = sys.argv[2]
-data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-current = data
-for part in key.split("."):
-    if not isinstance(current, dict) or part not in current:
-        print("")
-        sys.exit(0)
-    current = current[part]
-if isinstance(current, bool):
-    print("true" if current else "false")
-elif current is None:
-    print("")
-else:
-    print(current)
-PY
+  python3 "$SCRIPT_ROOT/render_product_config.py" --config "$config_path" --mode get --key "$dotted_key"
 }
 
 materialize_runtime_from_config() {
@@ -1030,16 +1012,12 @@ prompt_install_missing_command() {
   if [[ "$PREFLIGHT_AUTO_INSTALL" == "always" ]]; then
     answer="y"
   else
-    while true; do
-      echo "Command '${command_name}' is missing (${level})."
-      echo "Install now on this Ubuntu host using package '${package_name}'? [y/n]"
-      read -r answer
-      case "$answer" in
-        y|Y|yes|YES) answer="y"; break ;;
-        n|N|no|NO) answer="n"; break ;;
-        *) echo "Please answer 'y' or 'n'." ;;
-      esac
-    done
+    echo "Command '${command_name}' is missing (${level})."
+    if prompt_yes_no "Install now on this Ubuntu host using package '${package_name}'?"; then
+      answer="y"
+    else
+      answer="n"
+    fi
   fi
 
   if [[ "$answer" != "y" ]]; then
@@ -1076,6 +1054,51 @@ check_or_install_command() {
   preflight_print_result "$level" "fail" "command '$command_name' not found"
   if [[ -n "$package_name" ]] && prompt_install_missing_command "$level" "$command_name" "$package_name"; then
     return 0
+  fi
+  return 1
+}
+
+check_or_install_python_yaml_support() {
+  local level="$1"
+  local answer=""
+  if ! command -v python3 >/dev/null 2>&1; then
+    preflight_print_result "$level" "fail" "python3 command not found for python3-yaml validation"
+    return 1
+  fi
+  if python3 -c "import yaml" >/dev/null 2>&1; then
+    preflight_print_result "$level" "ok" "python3-yaml module found"
+    return 0
+  fi
+
+  preflight_print_result "$level" "fail" "python3-yaml module not found"
+  if [[ "$PREFLIGHT_AUTO_INSTALL" == "always" ]]; then
+    answer="y"
+  else
+    echo "python3-yaml module is missing (${level})."
+    if prompt_yes_no "Install now on this Ubuntu host using package 'python3-yaml'?"; then
+      answer="y"
+    else
+      answer="n"
+    fi
+  fi
+
+  if [[ "$answer" != "y" ]]; then
+    return 1
+  fi
+
+  if install_command_ubuntu "python3-yaml" "python3-yaml"; then
+    if python3 -c "import yaml" >/dev/null 2>&1; then
+      preflight_print_result "$level" "ok" "python3-yaml module installed successfully"
+      return 0
+    fi
+  fi
+
+  echo "Automatic installation failed for 'python3-yaml'." >&2
+  echo "Manual remediation (Ubuntu):" >&2
+  if command -v sudo >/dev/null 2>&1; then
+    echo "  sudo apt-get update && sudo apt-get install -y python3-yaml" >&2
+  else
+    echo "  apt-get update && apt-get install -y python3-yaml" >&2
   fi
   return 1
 }
@@ -1222,6 +1245,15 @@ run_preflight_checks() {
     fi
   done
 
+  if ! check_or_install_python_yaml_support "mandatory"; then
+    append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
+      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "fail" "Install python3-yaml and rerun precheck."
+    mandatory_failures=$((mandatory_failures + 1))
+  else
+    append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
+      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "pass" "none"
+  fi
+
   for cmd in "${optional_commands[@]}"; do
     if ! check_or_install_command "optional" "$cmd" "$(package_for_command "$cmd")"; then
       preflight_print_result "optional" "warn" "command '$cmd' remains unavailable"
@@ -1298,27 +1330,27 @@ run_preflight_checks() {
 
     if [[ "$execution_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
-        "Execution mode must be local or ssh." "GLPI_EXECUTION_MODE env var or config.execution.mode" "set local or ssh" "true" "fail" "Fix execution.mode in config or GLPI_EXECUTION_MODE."
+        "Execution mode must be local or ssh." "GLPI_EXECUTION_MODE env var or EXECUTION_MODE in config/<environment>.env" "set local or ssh" "true" "fail" "Fix EXECUTION_MODE in config or GLPI_EXECUTION_MODE."
       mandatory_failures=$((mandatory_failures + 1))
       execution_mode="local"
     else
       append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
-        "Execution mode controls inventory rendering and connectivity checks." "GLPI_EXECUTION_MODE env var or config.execution.mode" "set local or ssh" "true" "pass" "mode=${execution_mode}"
+        "Execution mode controls inventory rendering and connectivity checks." "GLPI_EXECUTION_MODE env var or EXECUTION_MODE in config/<environment>.env" "set local or ssh" "true" "pass" "mode=${execution_mode}"
     fi
 
     if [[ "$host_role" == "invalid" ]]; then
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
-        "Host role must be app, db, or all." "GLPI_HOST_ROLE env var or config.execution.host_role_default" "set app/db/all" "true" "fail" "Fix host role in config or GLPI_HOST_ROLE."
+        "Host role must be app, db, or all." "GLPI_HOST_ROLE env var or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env" "set app/db/all" "true" "fail" "Fix host role in config or GLPI_HOST_ROLE."
       mandatory_failures=$((mandatory_failures + 1))
       host_role="all"
     else
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
-        "Host role controls allowed mutable actions in local mode." "GLPI_HOST_ROLE env var or config.execution.host_role_default" "set app/db/all" "true" "pass" "role=${host_role}"
+        "Host role controls allowed mutable actions in local mode." "GLPI_HOST_ROLE env var or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env" "set app/db/all" "true" "pass" "role=${host_role}"
     fi
 
     if [[ "$security_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
-        "The default security mode must be secure or permissive." "config.<env>.operations.security_mode_default" "set secure or permissive" "true" "fail" "Fix operations.security_mode_default to secure|permissive."
+        "The default security mode must be secure or permissive." "OPERATIONS_SECURITY_MODE_DEFAULT in config/<environment>.env" "set secure or permissive" "true" "fail" "Fix OPERATIONS_SECURITY_MODE_DEFAULT to secure|permissive."
       mandatory_failures=$((mandatory_failures + 1))
       security_mode="secure"
     else
@@ -1358,10 +1390,10 @@ run_preflight_checks() {
 
     if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$execution_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when execution.mode=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
     else
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when execution.mode=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
       mandatory_failures=$((mandatory_failures + 1))
     fi
 
@@ -1397,13 +1429,13 @@ run_preflight_checks() {
         esac
       fi
 
-      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "execution.mode=local" "mandatory" \
+      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "EXECUTION_MODE=local" "mandatory" \
         "Local execution enforces host role and mutable command consistency." "GLPI_HOST_ROLE + command target" "set host role and run command on correct host" "true" "$role_status" "$role_remediation"
       if [[ "$role_status" == "fail" ]]; then
         mandatory_failures=$((mandatory_failures + 1))
       fi
     else
-      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "execution.mode=ssh" "not-applicable" \
+      append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "EXECUTION_MODE=ssh" "not-applicable" \
         "Role-target consistency checks are enforced only for local mode." "n/a" "n/a" "false" "skip" "none"
     fi
 
@@ -1412,25 +1444,25 @@ run_preflight_checks() {
       provided_cert="$(read_product_config_value "$environment" "tls.provided_local_cert_path" || true)"
       provided_key="$(read_product_config_value "$environment" "tls.provided_local_key_path" || true)"
       if [[ -n "${provided_cert// }" && -n "${provided_key// }" && -f "$(expand_home_path "$provided_cert")" && -f "$(expand_home_path "$provided_key")" ]]; then
-        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode=provided" "conditional-mandatory" \
+        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "TLS_MODE=provided" "conditional-mandatory" \
           "Provided TLS mode requires local certificate and key files." "test -f <cert> && test -f <key>" "set valid local paths in config" "true" "pass" "none"
       else
-        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode=provided" "conditional-mandatory" \
+        append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "TLS_MODE=provided" "conditional-mandatory" \
           "Provided TLS mode requires local certificate and key files." "test -f <cert> && test -f <key>" "set valid local paths in config" "true" "fail" "Provide valid local cert/key paths for provided mode."
         mandatory_failures=$((mandatory_failures + 1))
       fi
     else
-      append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "tls.mode!=provided" "not-applicable" \
+      append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "TLS_MODE!=provided" "not-applicable" \
         "Provided TLS paths are only required when provided mode is selected." "n/a" "n/a" "false" "skip" "none"
     fi
 
     if [[ "$require_tls" == "true" ]]; then
       if [[ "$tls_mode" == "provided" ]]; then
         append_precheck_item "$environment" "policy-require-tls" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires provided TLS mode." "config.<env>.tls.mode" "set tls.mode=provided" "$policy_block" "pass" "none"
+          "Secure policy requires provided TLS mode." "TLS_MODE in config/<environment>.env" "set TLS_MODE=provided" "$policy_block" "pass" "none"
       else
         append_precheck_item "$environment" "policy-require-tls" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires provided TLS mode." "config.<env>.tls.mode" "set tls.mode=provided" "$policy_block" "$policy_status" "Enable provided TLS mode or run in secure mode only after compliance."
+          "Secure policy requires provided TLS mode." "TLS_MODE in config/<environment>.env" "set TLS_MODE=provided" "$policy_block" "$policy_status" "Enable provided TLS mode or run in secure mode only after compliance."
         if [[ "$security_mode" == "secure" ]]; then
           mandatory_failures=$((mandatory_failures + 1))
         else
@@ -1442,10 +1474,10 @@ run_preflight_checks() {
     if [[ "$require_https" == "true" ]]; then
       if [[ "$tls_mode" != "none" ]]; then
         append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires HTTPS/TLS enabled." "config.<env>.tls.mode" "set tls.mode to self_signed or provided" "$policy_block" "pass" "none"
+          "Secure policy requires HTTPS/TLS enabled." "TLS_MODE in config/<environment>.env" "set TLS_MODE to self_signed or provided" "$policy_block" "pass" "none"
       else
         append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires HTTPS/TLS enabled." "config.<env>.tls.mode" "set tls.mode to self_signed or provided" "$policy_block" "$policy_status" "Enable TLS mode or accept risk in permissive mode."
+          "Secure policy requires HTTPS/TLS enabled." "TLS_MODE in config/<environment>.env" "set TLS_MODE to self_signed or provided" "$policy_block" "$policy_status" "Enable TLS mode or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
           mandatory_failures=$((mandatory_failures + 1))
         else
@@ -1457,10 +1489,10 @@ run_preflight_checks() {
     if [[ "$require_sso" == "true" ]]; then
       if [[ "$sso_enabled" == "true" ]]; then
         append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires SSO enabled." "config.<env>.security.sso_enabled" "set security.sso_enabled=true" "$policy_block" "pass" "none"
+          "Secure policy requires SSO enabled." "SECURITY_SSO_ENABLED in config/<environment>.env" "set SECURITY_SSO_ENABLED=true" "$policy_block" "pass" "none"
       else
         append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires SSO enabled." "config.<env>.security.sso_enabled" "set security.sso_enabled=true" "$policy_block" "$policy_status" "Enable SSO or accept risk in permissive mode."
+          "Secure policy requires SSO enabled." "SECURITY_SSO_ENABLED in config/<environment>.env" "set SECURITY_SSO_ENABLED=true" "$policy_block" "$policy_status" "Enable SSO or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
           mandatory_failures=$((mandatory_failures + 1))
         else
@@ -1485,9 +1517,9 @@ run_preflight_checks() {
     fi
   else
     local copy_cmd
-    copy_cmd="cp config/product.example.yml config/${environment}.yml"
+    copy_cmd="cp config/product.env config/${environment}.env"
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
-      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.yml" "$copy_cmd" "true" "fail" "Create config/${environment}.yml from config/product.example.yml and adjust values."
+      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.env" "$copy_cmd" "true" "fail" "Create config/${environment}.env from config/product.env and adjust values."
     mandatory_failures=$((mandatory_failures + 1))
   fi
 

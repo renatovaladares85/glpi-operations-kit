@@ -2,444 +2,75 @@
 
 ## Purpose
 
-This document defines the single public configuration model for the reusable GLPI deployment product.
+This document defines the public configuration contract for the GLPI Operations Kit after migration to the single `key=value` model.
 
-Primary files:
+Canonical files:
 
-- `config/product.example.yml`
-- `config/<environment>.yml` (created from `product.example.yml`)
+- `config/product.env` (versioned template)
+- `config/<environment>.env` (operator-created copy)
+- `.runtime/<environment>/secrets.yml` (runtime secrets, never versioned)
 
-Secret file:
+`config/product.env` is the canonical field dictionary. Every key in that template already includes purpose, expected format, example, and operational impact.
 
-- `.runtime/<environment>/secrets.yml`
+## Configuration flow
 
-Companion references:
+1. Operator creates `config/<environment>.env` from `config/product.env`.
+2. Scripts load `config/<environment>.env` automatically.
+3. Scripts render `.runtime/<environment>/public.runtime.yml` and `.runtime/<environment>/inventory.runtime.yml`.
+4. Missing secret keys are collected into `.runtime/<environment>/secrets.yml`.
+5. Ansible consumes `public.runtime.yml`, `overrides.runtime.yml`, and `secrets.yml`.
 
-- [Prerequisites Matrix](prerequisites-matrix.md)
-- [Environment Parameters Reference](environment-parameters.md)
-
-## Configuration Flow
-
-1. Public values are defined in `config/<environment>.yml`.
-2. Scripts render runtime files from that public config.
-3. Missing secrets are requested at runtime and stored in `.runtime/<environment>/secrets.yml`.
-4. Ansible consumes:
-   - `.runtime/<environment>/public.runtime.yml`
-   - `.runtime/<environment>/overrides.runtime.yml`
-   - `.runtime/<environment>/secrets.yml`
-5. Inventory generation follows execution contract:
-   - `execution.mode=local`: local inventory (`ansible_connection=local`) for host-scoped execution.
-   - `execution.mode=ssh`: remote inventory with `ansible_user` and `ansible_ssh_private_key_file`.
-
-## Precedence
+## Runtime precedence
 
 Runtime values are merged in this order:
 
-1. public base config rendered to `public.runtime.yml`
-2. mutable runtime overrides from `overrides.runtime.yml`
-3. runtime secrets from `secrets.yml`
+1. `public.runtime.yml`
+2. `overrides.runtime.yml`
+3. `secrets.yml`
 
-Operational rule:
+Operationally:
 
-- public defaults and customer values must remain in `config/<environment>.yml`
-- mutable operator changes (for example TLS mode transitions) must be written in `overrides.runtime.yml`
-- secrets must remain only in `secrets.yml`
+- public defaults and customer values stay in `config/<environment>.env`
+- mutable runtime adjustments stay in `.runtime/<environment>/overrides.runtime.yml`
+- secrets stay only in `.runtime/<environment>/secrets.yml`
 
-## Sections
+## Contract groups
 
-### `product`
+The configuration keys are grouped by operational domain:
 
-- `product.name`
-  - Purpose: product display name.
-  - Used by: documentation and runtime metadata.
-  - Example: `GLPI Operations Kit`
-  - Type: public.
-- `product.slug`
-  - Purpose: stable product identifier.
-  - Used by: labels, automation, packaging.
-  - Example: `glpi-operations-kit`
-  - Type: public.
-- `product.deployment_label`
-  - Purpose: deployment-level label for this customer/environment set.
-  - Used by: metadata and product packaging.
-  - Example: `staging-reference`
-  - Type: public.
+- `PRODUCT_*`, `CUSTOMER_*`, `ENVIRONMENT_*`: product/customer metadata
+- `EXECUTION_*`, `TOPOLOGY_*`: orchestration model and host scope
+- `NETWORK_*`: SSH and DB source restrictions
+- `GLPI_*`, `PHP_FPM_*`, `NGINX_*`: application stack settings
+- `DATABASE_*`: database baseline and packages
+- `TLS_*`: TLS mode and certificate paths
+- `BACKUP_*`: backup base directory and retention
+- `MONITORING_*`, `ALERTING_*`: exporter toggles, labels, thresholds, routes
+- `SECURITY_*`: policy flags and controls
+- `PATH_*`: secure filesystem layout
+- `OPERATIONS_*`: timezone, cron, ops group, security mode default
+- `RESOURCE_PROFILE_*`: size profile selection and tuning for `small|medium|large`
 
-### `customer`
+## High-impact keys
 
-- `customer.display_name`
-  - Purpose: customer-facing display name.
-  - Used by: monitoring labels and customer-facing docs.
-  - Example: `Example Customer`
-  - Type: public.
-- `customer.short_name`
-  - Purpose: compact customer identifier.
-  - Used by: labels and conventions.
-  - Example: `example-customer`
-  - Type: public.
+| Key | Why it matters | Typical values |
+|---|---|---|
+| `EXECUTION_MODE` | Defines whether orchestration runs locally on each host or remotely by SSH. | `local`, `ssh` |
+| `EXECUTION_HOST_ROLE_DEFAULT` | Prevents wrong mutable actions on wrong hosts in local mode. | `app`, `db`, `all` |
+| `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
+| `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
+| `SECURITY_REQUIRE_*` | Enables policy checks for TLS, HTTPS, SSO, promotion gate, and ordered execution. | `true`, `false` |
+| `OPERATIONS_SECURITY_MODE_DEFAULT` | Defines default enforcement mode when `SECURITY_MODE` is not passed. | `secure`, `permissive` |
+| `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile used by runtime rendering. | `small`, `medium`, `large` |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Restricts DB access surface. | CSV host list |
+| `MONITORING_*_JSON` | Centralizes labels, thresholds, scrape profiles, alert routes. | one-line JSON objects |
 
-### `environment`
+## Secret keys (runtime only)
 
-- `environment.name`
-  - Purpose: exact environment selector.
-  - Used by: scripts and runtime metadata.
-  - Example: `staging`
-  - Type: public.
-- `environment.stage`
-  - Purpose: descriptive lifecycle stage.
-  - Used by: docs, labels, dashboards.
-  - Example: `production`
-  - Type: public.
-
-### `execution`
-
-- `execution.mode`
-  - Purpose: selects the orchestration model (`local` or `ssh`).
-  - Used by: precheck, runtime inventory renderer, deploy safety checks.
-  - Example: `local`
-  - Type: public.
-- `execution.host_role_default`
-  - Purpose: default role for mutable local execution (`app`, `db`, or `all`).
-  - Used by: role-target consistency checks in local mode.
-  - Example: `app`
-  - Type: public.
-
-### `topology`
-
-- `topology.mode`
-  - Purpose: target topology shape.
-  - Used by: operator guidance and validation.
-  - Example: `dual-server`
-  - Type: public.
-- `topology.app.alias`
-  - Purpose: inventory alias for the app host.
-  - Used by: generated inventory.
-  - Example: `stg-app`
-  - Type: public.
-- `topology.app.host`
-  - Purpose: real app host IP or FQDN.
-  - Used by: generated inventory.
-  - Example: `192.0.2.10`
-  - Type: public.
-- `topology.db.alias`
-  - Purpose: inventory alias for the db host.
-  - Used by: generated inventory.
-  - Example: `stg-db`
-  - Type: public.
-- `topology.db.host`
-  - Purpose: real db host IP or FQDN.
-  - Used by: generated inventory.
-  - Example: `192.0.2.20`
-  - Type: public.
-
-### `network`
-
-- `network.ssh.user`
-  - Purpose: SSH user for Ansible.
-  - Used by: generated inventory in `execution.mode=ssh`.
-  - Example: `ubuntu`
-  - Type: public, conditional-mandatory.
-- `network.ssh.private_key_path`
-  - Purpose: path to SSH private key on the execution host.
-  - Used by: generated inventory and prechecks in `execution.mode=ssh`.
-  - Example: `~/.ssh/glpi_staging_ed25519`
-  - Type: public-sensitive path, conditional-mandatory.
-- `network.database.app_access_host`
-  - Purpose: app-side host allowed to connect to MariaDB.
-  - Used by: db role grants and firewall.
-  - Example: `192.0.2.10`
-  - Type: public.
-- `network.database.allowed_source_hosts`
-  - Purpose: explicit firewall allowlist for MariaDB.
-  - Used by: db role UFW rules.
-  - Example: `["192.0.2.10"]`
-  - Type: public.
-
-### `glpi`
-
-- `glpi.version`
-  - Purpose: exact GLPI version.
-  - Used by: app role and download URL rendering.
-  - Example: `11.0.0`
-  - Type: public.
-- `glpi.domain`
-  - Purpose: public GLPI endpoint.
-  - Used by: Nginx config and smoke tests.
-  - Example: `glpi.example.internal`
-  - Type: public.
-- `glpi.upload_max_filesize`
-  - Purpose: upload size limit.
-  - Used by: PHP config template.
-  - Example: `32M`
-  - Type: public.
-- `glpi.post_max_size`
-  - Purpose: POST size limit.
-  - Used by: PHP config template.
-  - Example: `32M`
-  - Type: public.
-- `glpi.memory_limit`
-  - Purpose: PHP memory limit.
-  - Used by: PHP config template.
-  - Example: `512M`
-  - Type: public.
-- `glpi.max_execution_time`
-  - Purpose: PHP execution timeout.
-  - Used by: PHP config template.
-  - Example: `120`
-  - Type: public.
-- `glpi.opcache_memory_consumption`
-  - Purpose: OPcache memory allocation.
-  - Used by: PHP config template.
-  - Example: `192`
-  - Type: public.
-- `glpi.filesystem.owner`
-  - Purpose: owner for writable GLPI paths.
-  - Used by: app role permissions.
-  - Example: `www-data`
-  - Type: public.
-- `glpi.filesystem.group`
-  - Purpose: group for writable GLPI paths.
-  - Used by: app role permissions.
-  - Example: `www-data`
-  - Type: public.
-
-### `database`
-
-- `database.name`
-  - Purpose: GLPI schema name.
-  - Used by: db role.
-  - Example: `glpi_operational`
-  - Type: public.
-- `database.user`
-  - Purpose: GLPI DB username.
-  - Used by: db role and app connectivity.
-  - Example: `nehemiah_glpi`
-  - Type: public.
-- `database.port`
-  - Purpose: MariaDB TCP port.
-  - Used by: db role.
-  - Example: `3306`
-  - Type: public.
-- `database.bind_address`
-  - Purpose: MariaDB bind address.
-  - Used by: db tuning template.
-  - Example: `0.0.0.0`
-  - Type: public.
-
-### `php_fpm`
-
-- `php_fpm.service_name`
-  - Purpose: PHP-FPM service name.
-  - Used by: handlers and templates.
-  - Example: `php8.3-fpm`
-  - Type: public.
-- `php_fpm.socket`
-  - Purpose: PHP-FPM socket path.
-  - Used by: Nginx and pool config.
-  - Example: `/run/php/php8.3-fpm.sock`
-  - Type: public.
-- `php_fpm.pm`
-  - Purpose: PHP-FPM process manager mode.
-  - Used by: pool template.
-  - Example: `dynamic`
-  - Type: public.
-
-### `tls`
-
-- `tls.mode`
-  - Purpose: TLS mode selection.
-  - Used by: app role and TLS operations.
-  - Allowed: `none`, `self_signed`, `provided`
-  - Type: public.
-- `tls.common_name`
-  - Purpose: TLS common name.
-  - Used by: self-signed generation and validation.
-  - Example: `glpi.example.internal`
-  - Type: public.
-- `tls.certificate_path`
-  - Purpose: installed certificate path on target host.
-  - Used by: Nginx template and checks.
-  - Example: `/etc/ssl/certs/glpi-production.crt`
-  - Type: public.
-- `tls.private_key_path`
-  - Purpose: installed private key path on target host.
-  - Used by: Nginx template and checks.
-  - Example: `/etc/ssl/private/glpi-production.key`
-  - Type: public-sensitive path.
-- `tls.provided_local_cert_path`
-  - Purpose: local operator-side cert path for provided mode.
-  - Used by: TLS management flow.
-  - Type: public-sensitive path.
-- `tls.provided_local_key_path`
-  - Purpose: local operator-side private key path for provided mode.
-  - Used by: TLS management flow.
-  - Type: public-sensitive path.
-
-### `backup`
-
-- `backup.base_dir`
-  - Purpose: target backup directory.
-  - Used by: backup role.
-  - Example: `/var/backups/glpi`
-  - Type: public.
-- `backup.retention_days`
-  - Purpose: retention period.
-  - Used by: backup scripts and cleanup jobs.
-  - Example: `30`
-  - Type: public.
-
-### `monitoring`
-
-- `monitoring.exporters.node.enabled`
-  - Purpose: enable node exporter.
-  - Used by: monitoring role.
-  - Type: public.
-- `monitoring.exporters.mysqld.enabled`
-  - Purpose: enable mysqld exporter.
-  - Used by: monitoring role.
-  - Type: public.
-- `monitoring.exporters.mysqld.user`
-  - Purpose: exporter username.
-  - Used by: monitoring role.
-  - Example: `issachar_monitor`
-  - Type: public.
-- `monitoring.labels`
-  - Purpose: standard labels for future monitoring stack integration.
-  - Used by: blueprint and future dashboards/alerts.
-  - Type: public.
-- `monitoring.thresholds`
-  - Purpose: warning/critical thresholds.
-  - Used by: monitoring blueprint.
-  - Type: public.
-- `monitoring.scrape_profiles`
-  - Purpose: Prometheus scrape defaults.
-  - Used by: monitoring blueprint.
-  - Type: public.
-- `monitoring.dashboard_profile`
-  - Purpose: dashboard selection profile.
-  - Used by: monitoring blueprint.
-  - Type: public.
-- `monitoring.alert_routes`
-  - Purpose: alert route metadata.
-  - Used by: future Alertmanager integration.
-  - Type: public.
-
-### `alerting`
-
-- `alerting.tls_expiry_warning_days`
-  - Purpose: days-to-expiry warning threshold.
-  - Used by: certificate operations and future alerts.
-  - Type: public.
-- `alerting.backup_failure_enabled`
-  - Purpose: enable backup failure alerting.
-  - Used by: monitoring blueprint.
-  - Type: public.
-- `alerting.service_down_enabled`
-  - Purpose: enable service-down alerts.
-  - Used by: monitoring blueprint.
-  - Type: public.
-
-### `security`
-
-- `security.sso_enabled`
-  - Purpose: indicates whether SSO policy is enabled for the environment.
-  - Used by: policy checks when `security.require_sso=true`.
-  - Example: `true`.
-  - Type: public policy flag.
-  - Requirement: conditional-mandatory based on policy.
-- `security.allow_insecure_non_production`
-  - Purpose: allows `none` or `self_signed` TLS modes outside production.
-  - Used by: operator policy and precheck guidance.
-  - Type: public policy flag.
-- `security.require_tls`
-  - Purpose: forces secure TLS mode (`tls.mode=provided`) in secure policy mode.
-  - Used by: deploy gate.
-  - Type: public policy flag.
-  - Requirement: when `true`, secure mode blocks unless `tls.mode=provided`.
-- `security.require_https`
-  - Purpose: forces HTTPS behavior in secure policy mode.
-  - Used by: deploy gate.
-  - Type: public policy flag.
-  - Requirement: when `true`, secure mode blocks unless TLS mode is not `none`.
-- `security.require_sso`
-  - Purpose: forces SSO policy gate in secure policy mode.
-  - Used by: deploy gate.
-  - Type: public policy flag.
-  - Requirement: when `true`, secure mode blocks unless `security.sso_enabled=true`.
-- `security.require_promotion_gate`
-  - Purpose: enforces staging certification gate usage.
-  - Used by: mutable deploy/promote policy checks.
-  - Type: public policy flag.
-  - Requirement: when `true`, secure mode blocks without `.runtime/promotion/staging-certified.yml`.
-- `security.require_ordered_execution`
-  - Purpose: enforces check -> db -> app -> monitoring/backup deployment sequence.
-  - Used by: deploy apply/post-check flow.
-  - Type: public policy flag.
-  - Requirement: when `true`, secure mode blocks out-of-order runs.
-
-### `paths`
-
-- `paths.glpi_release_root`
-- `paths.glpi_install_dir`
-- `paths.glpi_config_dir`
-- `paths.glpi_var_dir`
-- `paths.glpi_plugin_dir`
-- `paths.glpi_log_dir`
-  - Purpose: filesystem layout.
-  - Used by: app role.
-  - Type: public.
-
-### `operations`
-
-- `operations.timezone`
-  - Purpose: host timezone.
-  - Used by: base role.
-  - Example: `America/Sao_Paulo`
-  - Type: public.
-- `operations.glpi_cron_schedule`
-  - Purpose: GLPI cron cadence.
-  - Used by: app role cron wrapper.
-  - Example: `*/5 * * * *`
-  - Type: public.
-- `operations.required_ops_group`
-  - Purpose: required operator group.
-  - Used by: scripts and docs.
-  - Example: `glpiops`
-  - Type: public.
-- `operations.security_mode_default`
-  - Purpose: default execution policy mode when `SECURITY_MODE` is not set.
-  - Used by: precheck and mutable execution policy gating.
-  - Example: `secure`
-  - Type: public.
-
-### `resource_profiles`
-
-- `resource_profiles.active`
-  - Purpose: selected performance profile.
-  - Used by: rendered public runtime file.
-  - Example: `small`
-  - Type: public.
-- `resource_profiles.profiles.<name>.php_fpm.*`
-  - Purpose: PHP-FPM sizing defaults.
-  - Used by: rendered public runtime file.
-  - Type: public.
-- `resource_profiles.profiles.<name>.mariadb.*`
-  - Purpose: MariaDB sizing defaults.
-  - Used by: rendered public runtime file.
-  - Type: public.
-
-## Runtime Secrets
-
-Stored only in `.runtime/<environment>/secrets.yml`.
-
-Required keys:
+The minimum required secret keys are:
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-Future secret keys:
-
-- SMTP credentials
-- LDAP bind credentials
-- private TLS distribution material if automation is expanded
+Secrets are prompted at runtime when missing and never stored in public config.

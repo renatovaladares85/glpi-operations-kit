@@ -1,188 +1,61 @@
-# Runbook Operacional do GLPI Operations Kit
+# GLPI Operations Kit - Runbook do Operador (PT-BR)
 
-## 1. Finalidade do manual
+Este manual foi escrito para operadores Linux, engenheiros de DevOps e equipes de auditoria que precisam implantar e operar o GLPI com controle, rastreabilidade e repetibilidade. Você não precisa começar lendo o código-fonte inteiro. Seguindo esta sequência, os scripts geram os arquivos de runtime, validam pré-requisitos e mostram remediações claras quando algo estiver ausente.
 
-Este runbook é o guia operacional para implantar, validar e operar o GLPI com este repositório.
+A edição do repositório pode ser feita em uma estação Windows, mas todos os comandos operacionais deste runbook devem ser executados em shell Linux nos servidores de destino.
 
-Público principal:
+A skill esperada é administração prática de Ubuntu com `sudo`, uso de shell e execução básica de Ansible. Se sua empresa exige login interativo com usuário, senha e 2FA em cada host, o fluxo local por host já cobre esse cenário sem depender de SSH entre servidores.
 
-- operadores Linux
-- engenheiros de DevOps/infraestrutura
-- responsáveis por mudanças e auditoria
-- agentes de IA que seguem `AGENTS.md`
+## Comece por aqui
 
-Skill mínima do operador:
+A primeira ação é preparar a configuração e, em seguida, ajustar permissões. Copie o template do produto e crie o arquivo do ambiente:
 
-- administração de servidores Ubuntu
-- uso de `sudo`
-- execução e troubleshooting em shell
-- execução de Ansible (`ansible-playbook`, `ansible-inventory`)
-- noções de segurança/compliance (LGPD, menor privilégio)
+```bash
+cp config/product.env config/staging.env
+```
 
-## 2. Modelo de execução
+Abra `config/staging.env` e ajuste os valores para seu ambiente. Não coloque segredos nesse arquivo. Senhas e dados sensíveis ficam somente em `.runtime/<environment>/secrets.yml`, que é criado e mantido em runtime.
 
-O projeto suporta dois modos de execução:
+Depois de ajustar o arquivo, execute:
 
-- `local` (padrão, recomendado para ambientes corporativos com 2FA)
-- `ssh` (opcional, quando automação SSH remota é permitida)
+```bash
+bash scripts/bootstrap-permissions.sh
+./scripts/glpictl.sh staging deploy check all
+```
 
-Contrato de execução compartilhado por todos os scripts:
+Você não precisa executar `export` manual para as variáveis de execução no fluxo normal. O `glpictl` carrega automaticamente `config/<environment>.env` e aplica esta precedência:
 
-- `GLPI_ENVIRONMENT`: nome do ambiente (ex.: `staging`, `production`)
-- `GLPI_EXECUTION_MODE=local|ssh`
-- `GLPI_HOST_ROLE=app|db|all`
-- `SECURITY_MODE=secure|permissive`
+1. argumentos da CLI (por exemplo `staging deploy apply db`)
+2. variáveis já existentes no processo (sobrescritas pontuais opcionais)
+3. `config/<environment>.env`
+4. defaults internos
 
-CLI oficial:
+## Como a execução funciona
+
+O comando canônico é:
 
 ```bash
 ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]
 ```
 
-Os wrappers (`deploy-*.sh`, `manage-tls.sh`, `ops-maintenance.sh`) usam o mesmo contrato da CLI.
+O `domain` define a área operacional (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`) e `action/target` definem exatamente o que será alterado. O formato do comando é igual para qualquer ambiente; o que muda é apenas o conteúdo de `<environment>.env` e os segredos de runtime.
 
-## 3. Topologias e onde executar
+Quando faltar ferramenta obrigatória, como `ansible-playbook` ou `ansible-inventory`, os scripts oferecem instalação guiada no Ubuntu. Se a instalação falhar ou for recusada, a execução é bloqueada com comando de correção explícito, para você retomar do mesmo ponto.
 
-Topologias suportadas:
+## Execução em single-server e dual-server
 
-- `single-server`: app e db no mesmo host
-- `dual-server`: host app + host db
+No modelo single-server, defina `TOPOLOGY_MODE=single-server` e mantenha `EXECUTION_HOST_ROLE_DEFAULT=all` no arquivo de ambiente. Depois execute as etapas na ordem, no mesmo host.
 
-### 3.1 Dual-server sem SSH entre servidores (modelo corporativo com 2FA)
+No modelo dual-server, `TOPOLOGY_MODE=dual-server` é o padrão recomendado. Se a empresa não permite SSH direto entre servidores, mantenha `EXECUTION_MODE=local`. Nesse modo, cada host é configurado localmente após autenticação interativa, incluindo 2FA quando exigido:
 
-Se sua empresa não permite SSH direto entre servidores, use `GLPI_EXECUTION_MODE=local` e execute localmente em cada host após login interativo (usuário/senha/2FA).
+1. No host DB: rode `deploy check all` e depois `deploy apply db`.
+2. No host APP: rode `deploy check all`, depois `deploy apply app`, `deploy apply monitoring`, `deploy apply backup` e `deploy post-check all`.
 
-Fluxo no host DB:
+Se automação remota for permitida, defina `EXECUTION_MODE=ssh`, preencha `NETWORK_SSH_USER` e `NETWORK_SSH_PRIVATE_KEY_PATH`, e mantenha a chave privada com modo `0600`.
 
-```bash
-export GLPI_ENVIRONMENT=staging
-export GLPI_EXECUTION_MODE=local
-export GLPI_HOST_ROLE=db
-bash scripts/bootstrap-permissions.sh
-./scripts/glpictl.sh staging deploy check all
-./scripts/glpictl.sh staging deploy apply db
-```
+## Ordem obrigatória de execução
 
-Fluxo no host APP:
-
-```bash
-export GLPI_ENVIRONMENT=staging
-export GLPI_EXECUTION_MODE=local
-export GLPI_HOST_ROLE=app
-bash scripts/bootstrap-permissions.sh
-./scripts/glpictl.sh staging deploy check all
-./scripts/glpictl.sh staging deploy apply app
-./scripts/glpictl.sh staging deploy apply monitoring
-./scripts/glpictl.sh staging deploy apply backup
-./scripts/glpictl.sh staging deploy post-check all
-```
-
-Importante:
-
-- Em dual-server local, `deploy apply db` só é válido com `GLPI_HOST_ROLE=db|all`.
-- Em dual-server local, `deploy apply app|monitoring|backup` só é válido com `GLPI_HOST_ROLE=app|all`.
-- Em dual-server local, `deploy apply all` com `GLPI_HOST_ROLE=app` ou `db` é bloqueado.
-
-### 3.2 Single-server
-
-```bash
-export GLPI_ENVIRONMENT=staging
-export GLPI_EXECUTION_MODE=local
-export GLPI_HOST_ROLE=all
-bash scripts/bootstrap-permissions.sh
-./scripts/glpictl.sh staging deploy check all
-./scripts/glpictl.sh staging deploy apply db
-./scripts/glpictl.sh staging deploy apply app
-./scripts/glpictl.sh staging deploy apply monitoring
-./scripts/glpictl.sh staging deploy apply backup
-./scripts/glpictl.sh staging deploy post-check all
-```
-
-### 3.3 Modo SSH opcional
-
-Use somente quando permitido por política:
-
-- `GLPI_EXECUTION_MODE=ssh`
-- par de chaves SSH por ambiente
-- chave privada com modo `0600`
-- conectividade remota com app/db
-
-## 4. Pré-requisitos (obrigatório, opcional, condicional)
-
-Obrigatórios em todos os ambientes:
-
-- Ubuntu 24.04
-- `bash`, `git`, `python3`, `ansible-playbook`, `ansible-inventory`
-- `sudo` funcional (ou root)
-- operador no grupo `glpiops`
-- permissões seguras em `.runtime`
-
-Condicionais obrigatórios:
-
-- material SSH e conectividade apenas quando `GLPI_EXECUTION_MODE=ssh`
-- arquivos locais de certificado/chave quando `tls.mode=provided`
-
-Opcionais:
-
-- cliente `ssh` para diagnóstico no modo local puro
-
-Fonte canônica: [Matriz de Pré-requisitos](../../product/prerequisites-matrix.md)
-
-Comportamento do precheck:
-
-- quando faltar ferramenta obrigatória (por exemplo `ansible-playbook`), o script pergunta se pode instalar automaticamente no Ubuntu;
-- se a instalação for negada ou falhar, execuções mutáveis ficam bloqueadas com comandos de correção manual.
-
-## 5. Passo 0 (obrigatório): bootstrap de permissões
-
-Execute antes de qualquer deploy:
-
-```bash
-bash scripts/bootstrap-permissions.sh
-```
-
-O que faz:
-
-- garante permissão de execução em `scripts/*.sh`
-- valida `sudo`
-- valida grupo `glpiops`
-- garante `.runtime/` com modo seguro
-- grava marcador de bootstrap
-
-Se aparecer `permission denied` ao chamar `./scripts/...`, rode o bootstrap novamente e repita o comando.
-
-## 6. Modelo de configuração
-
-Arquivos públicos:
-
-- `config/product.example.yml`
-- `config/<environment>.yml` (criado pelo operador a partir de `product.example.yml`)
-
-Crie o arquivo do ambiente antes do deploy:
-
-```bash
-cp config/product.example.yml config/staging.yml
-cp config/product.example.yml config/production.yml
-```
-
-Arquivo de segredo runtime:
-
-- `.runtime/<environment>/secrets.yml`
-
-Precedência runtime:
-
-1. `public.runtime.yml`
-2. `overrides.runtime.yml`
-3. `secrets.yml`
-
-Referências detalhadas:
-
-- [Configuration Reference](../../product/configuration-reference.md)
-- [Environment Parameters](../../product/environment-parameters.md)
-
-## 7. Ordem de execução e comportamento
-
-Ordem recomendada:
+A ordem segura é:
 
 1. `deploy check all`
 2. `deploy apply db`
@@ -191,64 +64,44 @@ Ordem recomendada:
 5. `deploy apply backup`
 6. `deploy post-check all`
 
-Comportamento:
+Quando `SECURITY_REQUIRE_ORDERED_EXECUTION=true` e o `SECURITY_MODE` efetivo é `secure`, chamadas mutáveis fora de ordem são bloqueadas. Em `permissive`, a execução continua com warning, mas com evidência obrigatória de aceite de risco.
 
-- se `security.require_ordered_execution=true` e `SECURITY_MODE=secure`, chamadas mutáveis fora de ordem são bloqueadas;
-- em `SECURITY_MODE=permissive`, violações de política viram warning e ficam registradas como evidência.
+## O que os comandos principais fazem
 
-## 8. O que cada comando principal faz
+| Comando | Onde executar | Finalidade operacional |
+|---|---|---|
+| `./scripts/glpictl.sh staging deploy check all` | host atual | Roda precheck, valida permissões, confirma carregamento de config, materializa runtime, valida inventário e contrato de política antes de qualquer alteração mutável. |
+| `./scripts/glpictl.sh staging deploy apply db` | host DB em dual-server local, ou host orquestrador em modo ssh | Instala e aplica hardening no MariaDB, configura parâmetros de banco, provisiona base/usuário/grants do GLPI e reforça restrições de origem de acesso da app. |
+| `./scripts/glpictl.sh staging deploy apply app` | host APP em dual-server local, ou host orquestrador em modo ssh | Instala pacotes da aplicação, publica layout do GLPI fora da web root, configura Nginx + PHP-FPM, aplica template de TLS e configura conectividade da aplicação com o banco. |
+| `./scripts/glpictl.sh staging deploy apply monitoring` | host APP (e DB conforme escopo) | Instala e configura exporters e baseline de observabilidade a partir dos valores de runtime. |
+| `./scripts/glpictl.sh staging deploy apply backup` | host APP (e DB conforme escopo) | Aplica baseline de backup, política de retenção e artefatos operacionais usados em validação e restore. |
+| `./scripts/glpictl.sh staging deploy post-check all` | host atual | Executa validações pós-implantação e checagens de serviço após as etapas mutáveis. |
+| `./scripts/glpictl.sh staging tls self-signed` | host APP | Troca o modo TLS para certificado autoassinado, atualiza override de runtime, reaplica caminho da app e valida Nginx antes de recarregar serviço. |
+| `./scripts/glpictl.sh staging tls install-provided` | host APP | Valida caminhos de certificado/chave fornecidos, atualiza override e caminhos de destino, reaplica app e recarrega serviço somente após validação de configuração. |
+| `./scripts/glpictl.sh staging ops cert check` | host APP | Lê o certificado ativo e alerta quando estiver próximo do vencimento configurado. |
+| `./scripts/glpictl.sh staging audit check` | host onde a auditoria operacional será feita | Consolida checagens de permissão, política, runtime e saúde operacional para validação contínua. |
+| `bash scripts/release-readiness.sh staging` | host executor com acesso ao repositório | Gera evidências de prontidão e falha apenas quando houver problema técnico crítico de readiness. |
 
-| Comando | Onde executar | O que altera | Quando executar |
-|---|---|---|---|
-| `deploy check all` | host atual | roda precheck, renderização de config, valida inventário e políticas | antes de qualquer ação mutável |
-| `deploy apply db` | host DB (`GLPI_HOST_ROLE=db`) | instalação/hardening MariaDB, schema/usuário/grants do GLPI, baseline de banco | primeira etapa mutável |
-| `deploy apply app` | host APP (`GLPI_HOST_ROLE=app`) | Nginx/PHP-FPM/layout GLPI, config runtime da app, template TLS | após DB pronto |
-| `deploy apply monitoring` | host APP (e/ou DB conforme desenho) | baseline de exporters e configuração de monitoração | após DB + APP |
-| `deploy apply backup` | host APP (e/ou DB conforme desenho) | baseline de backup e retenção | após DB + APP |
-| `deploy post-check all` | host atual | validação pós-implantação e checks de serviço | após etapas de apply |
+## Decisões de TLS e modo de segurança
 
-Notas:
+O fluxo TLS foi desenhado para três caminhos explícitos: `none`, `self_signed` e `provided`. Você pode começar com `none` em desenvolvimento ou homologação controlada, evoluir para `self_signed` em testes criptografados internos e, depois, mudar para `provided` quando tiver certificado válido. A troca é feita por script, sem edição manual de template Nginx.
 
-- Em dual-server local, execute comandos por papel em cada host.
-- Em modo SSH, a automação pode atingir hosts remotos a partir do host executor.
+A política de segurança é escolhida por execução. `SECURITY_MODE=secure` aplica bloqueios de política. `SECURITY_MODE=permissive` permite continuidade com warning, mas sempre grava quem aceitou o risco, quando e quais políticas foram violadas.
 
-## 9. TLS e certificados
+## Arquivos de runtime e significado
 
-Ações suportadas:
+Após `deploy check`, os arquivos aparecem em `.runtime/<environment>/`. O `public.runtime.yml` é o baseline não sensível renderizado a partir de `config/<environment>.env`. O `overrides.runtime.yml` guarda alterações operacionais mutáveis, como mudanças de TLS, sem alterar seu baseline público. O `secrets.yml` guarda valores sensíveis coletados em runtime e deve permanecer restrito. O `inventory.runtime.yml` é o contrato efetivo de inventário consumido pelo Ansible em modo local ou ssh. As pastas `state/` e `evidence/` guardam checkpoints e trilhas de auditoria para certificação, troubleshooting e investigação.
 
-```bash
-./scripts/glpictl.sh staging tls disable
-./scripts/glpictl.sh staging tls self-signed
-./scripts/glpictl.sh staging tls install-provided
-./scripts/glpictl.sh staging tls reload
-```
+Para referência comando a comando, consulte [Referência de Comandos](appendices/command-reference.md). Para detalhes de parâmetros de configuração, consulte [Environment Parameters](../../product/environment-parameters.md) e [Configuration Reference](../../product/configuration-reference.md).
 
-Quando usar:
+## Validação e troubleshooting
 
-- `disable`: fluxo HTTP (somente quando política permitir)
-- `self-signed`: criptografia de teste sem cadeia pública
-- `install-provided`: instalar certificado/chave reais
+A validação mínima pós-implantação é: página do GLPI acessível, conectividade com DB funcionando, `nginx -t` válido, teste de configuração do PHP-FPM válido e evidências de runtime geradas. Se algo falhar, siga a trilha segura do [Troubleshooting Matrix](appendices/troubleshooting-matrix.md), que cobre dependências ausentes, host role incorreto, material SSH ausente em modo ssh, caminhos TLS inválidos e comportamento por modo de política.
 
-## 10. Validação e evidências
-
-Prontidão e certificação:
-
-```bash
-./scripts/glpictl.sh staging certify run
-bash scripts/release-readiness.sh staging
-```
-
-Locais de evidência:
-
-- `.runtime/<env>/state/precheck-report-latest.yml`
-- `.runtime/<env>/evidence/precheck-report-latest.md`
-- `.runtime/<env>/evidence/readiness-report.md`
-- `.runtime/<env>/evidence/readiness-report.json`
-- `.runtime/<env>/logs/`
-
-## 11. Apêndices relacionados
+## Apêndices relacionados
 
 - [Referência de Comandos](appendices/command-reference.md)
-- [Referência de Inputs Runtime](appendices/runtime-input-reference.md)
+- [Entradas e Arquivos de Runtime](appendices/runtime-input-reference.md)
 - [Modos TLS](appendices/tls-modes.md)
+- [Checagens Operacionais](appendices/operational-checks.md)
 - [Matriz de Troubleshooting](appendices/troubleshooting-matrix.md)

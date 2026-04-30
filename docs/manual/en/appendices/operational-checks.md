@@ -26,8 +26,8 @@ Recommended order:
 
 Policy behavior:
 
-- when `security.require_ordered_execution=true` and `SECURITY_MODE=secure`, out-of-order calls are blocked;
-- when `security.require_ordered_execution=true` and `SECURITY_MODE=permissive`, out-of-order calls continue with warning + evidence.
+- when `SECURITY_REQUIRE_ORDERED_EXECUTION=true` and `SECURITY_MODE=secure`, out-of-order calls are blocked;
+- when `SECURITY_REQUIRE_ORDERED_EXECUTION=true` and `SECURITY_MODE=permissive`, out-of-order calls continue with warning + evidence.
 
 ## 3. Service checks after apply
 

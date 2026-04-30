@@ -1,4 +1,4 @@
-# Apêndice: Funcionalidades Postergadas
+# Apêndice - Funcionalidades Postergadas (PT-BR)
 
 Não implementado:
 
@@ -14,7 +14,7 @@ Parcialmente implementado:
 
 Implementado no modelo atual:
 
-- relatório de precheck com classificação obrigatório/opcional/condicional
+- relatório de precheck com classificação obrigatória/opcional/condicional
 - modo de política por execução (`SECURITY_MODE=secure|permissive`)
-- enforcement de ordem de deploy por política (`security.require_ordered_execution`)
-- enforcement de gate de promoção por política (`security.require_promotion_gate`)
+- enforcement de ordem de deploy por política (`SECURITY_REQUIRE_ORDERED_EXECUTION`)
+- enforcement de gate de promoção por política (`SECURITY_REQUIRE_PROMOTION_GATE`)

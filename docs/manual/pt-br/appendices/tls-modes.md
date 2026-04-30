@@ -1,14 +1,14 @@
-# Apêndice: Modos TLS e Operações de Certificado
+# Apêndice - Modos TLS e Operações de Certificado (PT-BR)
 
-## 1. Modos TLS
+## Modos TLS
 
 | Modo | Permitido em `secure` | Permitido em `permissive` | Comportamento |
 |---|---|---|---|
-| `none` | somente quando `security.require_https=false` e `security.require_tls=false` | sim (com warning/evidência se política exigir TLS/HTTPS) | HTTP na porta 80 |
-| `self_signed` | permitido quando `security.require_tls=false` | sim | HTTPS com certificado autoassinado |
+| `none` | somente quando `SECURITY_REQUIRE_HTTPS=false` e `SECURITY_REQUIRE_TLS=false` | sim (com warning/evidência quando política exigir TLS/HTTPS) | HTTP na porta 80 |
+| `self_signed` | permitido quando `SECURITY_REQUIRE_TLS=false` | sim | HTTPS com certificado autoassinado |
 | `provided` | sim | sim | HTTPS com certificado fornecido pelo operador |
 
-## 2. Comandos
+## Comandos
 
 ```bash
 ./scripts/glpictl.sh staging tls disable
@@ -17,7 +17,7 @@
 ./scripts/glpictl.sh staging tls reload
 ```
 
-## 3. Fluxo autoassinado
+## Fluxo autoassinado
 
 ```bash
 ./scripts/glpictl.sh staging tls self-signed
@@ -25,11 +25,11 @@
 
 Resultado esperado:
 
-- geração de certificado/chave no host da aplicação
-- reaplicação da role da aplicação
-- validação de configuração do Nginx
+- gera certificado/chave no host da aplicação
+- reaplica a role da aplicação
+- valida a configuração do Nginx antes do reload
 
-## 4. Fluxo com certificado fornecido
+## Fluxo com certificado fornecido
 
 Pré-validação local:
 
@@ -52,7 +52,7 @@ sudo systemctl reload nginx
 curl -I https://GLPI_DOMAIN
 ```
 
-## 5. Renovação
+## Renovação
 
 ```bash
 ./scripts/glpictl.sh production ops cert check
@@ -63,4 +63,4 @@ Política padrão:
 
 - alerta com 30 dias para expiração
 - troca antes do vencimento
-- modo `secure` pode exigir `tls.mode=provided` conforme `security.require_tls`
+- modo `secure` pode exigir `TLS_MODE=provided`, conforme `SECURITY_REQUIRE_TLS`

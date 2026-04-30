@@ -1,202 +1,158 @@
 # Environment Parameters Reference
 
-## Purpose
+This reference explains how to fill `config/<environment>.env`. The template `config/product.env` is the canonical source and includes inline comments for every key.
 
-This document explains each environment parameter used by scripts and Ansible, including:
+## How to use this file
 
-- purpose
-- consumer
-- expected format
-- example
-- classification (`public`, `secret`, `mandatory`, `optional`, `conditional`)
-- environment impact
+Create your environment file:
 
-## Public baseline files
+```bash
+cp config/product.env config/staging.env
+```
 
-- `config/product.example.yml`
-- `config/<environment>.yml` (created from `product.example.yml`)
+Edit key values and keep secrets out of this file. Runtime secrets stay in `.runtime/<environment>/secrets.yml`.
 
-## Secret file
+## Metadata and environment identity
 
-- `.runtime/<env>/secrets.yml`
-
-## Key Groups
-
-### `product.*`
-
-- Purpose: product metadata and reusable kit identity.
-- Consumer: documentation labels and runtime metadata.
-- Classification: public, mandatory.
-
-### `customer.*`
-
-- Purpose: customer-facing labels without hardcoding real client names.
-- Consumer: labels and reports.
-- Classification: public, mandatory.
-
-### `environment.*`
-
-- Purpose: explicit environment selection (`staging`, `production`, or another configured environment).
-- Consumer: runtime renderer, policy checks.
-- Classification: public, mandatory.
-
-### `execution.*`
-
-- Purpose: defines whether execution is local per host or SSH remote.
-- Consumer: scripts, precheck, runtime inventory renderer.
-- Keys:
-  - `execution.mode`: `local` or `ssh`
-  - `execution.host_role_default`: `app`, `db`, or `all`
-- Classification: public, mandatory.
-- Override:
-  - `GLPI_EXECUTION_MODE` and `GLPI_HOST_ROLE` can override config values per execution.
-
-### `topology.*`
-
-- Purpose: host model and targeting.
-- Consumer: generated inventory (`glpi_app`, `glpi_db`).
-- Classification:
-  - `mode`: public, mandatory
-  - hosts/aliases: public, mandatory
-- Impact:
-  - `dual-server` in `execution.mode=local` requires role-based per-host execution.
-  - `dual-server` in `execution.mode=ssh` requires remote SSH connectivity checks.
-
-### `network.ssh.*`
-
-- Purpose: SSH execution path for Ansible.
-- Consumer: generated inventory and precheck.
-- Format:
-  - `user`: Linux username
-  - `private_key_path`: path to environment key
-- Classification:
-  - public, conditional-mandatory when `execution.mode=ssh`
-- Impact:
-  - in `ssh` mode, private key must be mode `0600`.
-
-### `glpi.*`
-
-- Purpose: GLPI version/domain/runtime limits.
-- Consumer: app role templates and validation.
-- Classification: public, mandatory.
-
-### `database.*`
-
-- Purpose: database schema/user/network values.
-- Consumer: db role and app connectivity.
-- Classification:
-  - `name`, `user`, `port`: public, mandatory
-  - tuning values: public, mandatory (with profile defaults)
-
-### `tls.*`
-
-- Purpose: TLS operating mode and certificate locations.
-- Consumer: app role + TLS operations.
-- Classification:
-  - `mode`: public, mandatory
-  - `provided_local_*`: conditional-mandatory when `mode=provided`
-- Environment impact:
-  - `security.require_tls=true` requires `mode=provided` in `secure` mode.
-
-### `security.*`
-
-- Purpose: environment security policy gates.
-- Consumer: precheck + deploy policy enforcement.
-- Keys:
-  - `sso_enabled` (mandatory when `security.require_sso=true`)
-  - `allow_insecure_non_production` (public policy flag)
-  - `require_tls` (public policy flag)
-  - `require_https` (public policy flag)
-  - `require_sso` (public policy flag)
-  - `require_promotion_gate` (public policy flag)
-  - `require_ordered_execution` (public policy flag)
-- Execution impact:
-  - in `SECURITY_MODE=secure`, required policy violations block;
-  - in `SECURITY_MODE=permissive`, required policy violations are warnings with evidence.
-
-### `monitoring.*` and `alerting.*`
-
-- Purpose: exporter defaults, thresholds, alert policy.
-- Consumer: monitoring role and operational blueprint.
-- Classification: public, mandatory for product baseline.
-
-### `paths.*`
-
-- Purpose: secure filesystem layout.
-- Consumer: app role.
-- Classification: public, mandatory.
-
-### `operations.*`
-
-- Purpose: timezone, cron schedule, ops group policy, and security mode default.
-- Consumer: base/app role and scripts.
-- Classification: public, mandatory.
-
-### `resource_profiles.*`
-
-- Purpose: capacity and tuning profile per environment.
-- Consumer: renderer and runtime vars.
-- Classification: public, mandatory.
-
-## Detailed Key Table (Implementation-critical)
-
-| Key | Purpose | Consumer | Example | Classification | Environment impact |
-|---|---|---|---|---|---|
-| `product.name` | product display name | docs/runtime metadata | `GLPI Operations Kit` | public, mandatory | all |
-| `customer.display_name` | customer label | docs/monitoring labels | `Example Customer` | public, mandatory | all |
-| `environment.name` | runtime selector | scripts/renderer | `staging` | public, mandatory | all |
-| `execution.mode` | execution model selector | scripts/renderer/precheck | `local` | public, mandatory | local vs ssh orchestration |
-| `execution.host_role_default` | default host role selector | scripts/precheck | `app` | public, mandatory | local action scoping |
-| `topology.mode` | topology behavior | precheck/deploy | `dual-server` | public, mandatory | drives SSH checks |
-| `topology.app.host` | app endpoint | inventory | `192.0.2.10` | public, mandatory | host targeting |
-| `topology.db.host` | db endpoint | inventory | `192.0.2.20` | public, mandatory | host targeting |
-| `network.ssh.user` | SSH login user | inventory | `ubuntu` | public, conditional-mandatory | remote execution (`execution.mode=ssh`) |
-| `network.ssh.private_key_path` | SSH private key path | inventory/precheck | `~/.ssh/glpi_staging_ed25519` | public, conditional-mandatory | key policy (`0600`) in `ssh` mode |
-| `network.database.app_access_host` | DB grant source | db role | `192.0.2.10` | public, mandatory | connectivity restriction |
-| `glpi.version` | GLPI version | app role | `11.0.0` | public, mandatory | release and package flow |
-| `glpi.domain` | app domain | nginx/smoke tests | `glpi.example.internal` | public, mandatory | endpoint behavior |
-| `database.name` | schema name | db role | `glpi_operational` | public, mandatory | data location |
-| `database.user` | DB login name | db/app roles | `nehemiah_glpi` | public, mandatory | DB auth |
-| `database.port` | DB listener port | db role | `3306` | public, mandatory | network/firewall |
-| `tls.mode` | TLS operation mode | app role/policy gate | `none`/`self_signed`/`provided` | public, mandatory | policy-dependent block/warn |
-| `tls.certificate_path` | cert path on target host | nginx template | `/etc/ssl/certs/glpi-production.crt` | public, conditional | required when TLS enabled |
-| `tls.private_key_path` | key path on target host | nginx template | `/etc/ssl/private/glpi-production.key` | public-sensitive, conditional | required when TLS enabled |
-| `tls.provided_local_cert_path` | local cert source path | TLS install flow | `/home/operator/certs/fullchain.crt` | public-sensitive, conditional | required when `mode=provided` |
-| `tls.provided_local_key_path` | local key source path | TLS install flow | `/home/operator/certs/private.key` | public-sensitive, conditional | required when `mode=provided` |
-| `security.sso_enabled` | SSO gate status | policy check | `true` | public, conditional | required when `security.require_sso=true` |
-| `security.require_tls` | enforce provided TLS mode | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
-| `security.require_https` | enforce HTTPS/TLS | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
-| `security.require_sso` | enforce SSO policy | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
-| `security.require_promotion_gate` | enforce certification gate file | policy check | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
-| `security.require_ordered_execution` | enforce deploy ordering | deploy workflow | `true` | public policy flag | blocks in `secure`, warns in `permissive` |
-| `backup.retention_days` | retention | backup role | `30` | public, mandatory | restore/recovery policy |
-| `monitoring.exporters.node.enabled` | node exporter toggle | monitoring role | `true` | public, mandatory | observability |
-| `monitoring.exporters.mysqld.user` | mysqld exporter user | monitoring role | `issachar_monitor` | public, mandatory | observability |
-| `operations.required_ops_group` | required operator group | scripts/precheck | `glpiops` | public, mandatory | access control |
-| `operations.security_mode_default` | default security mode | scripts/precheck | `secure` | public, mandatory | fallback for policy behavior |
-| `resource_profiles.active` | tuning profile | renderer | `small` | public, mandatory | sizing behavior |
-
-## Secret Key Table
-
-| Secret key | Purpose | Consumer | Classification | Environment impact |
+| Key | Required | Purpose | Format and example | Consumed by |
 |---|---|---|---|---|
-| `glpi_db_password` | GLPI DB user password | db/app roles | secret, mandatory | all |
-| `glpi_db_root_password` | DB admin password for provisioning | db/ops roles | secret, mandatory | all |
-| `mysqld_exporter_password` | mysqld exporter credential | monitoring role | secret, mandatory | all |
+| `PRODUCT_NAME` | yes | Product display name for reports and runtime metadata | string; `GLPI Operations Kit` | scripts, docs metadata |
+| `PRODUCT_SLUG` | optional | Stable identifier for labels and automation | slug; `glpi-operations-kit` | runtime labels |
+| `PRODUCT_DEPLOYMENT_LABEL` | optional | Deployment tag for this package instance | string; `reference-kit` | metadata |
+| `CUSTOMER_DISPLAY_NAME` | yes | Customer-facing label | string; `Example Customer` | dashboards, reports |
+| `CUSTOMER_SHORT_NAME` | optional | Compact customer identifier | slug; `example-customer` | labels |
+| `ENVIRONMENT_NAME` | yes | Effective environment identity | string; `staging` | runtime metadata |
+| `ENVIRONMENT_STAGE` | optional | Lifecycle stage label | string; `staging` | labels, reports |
 
-## Runtime secret keys (mandatory)
+## Execution and topology
 
-- `glpi_db_password`
-- `glpi_db_root_password`
-- `mysqld_exporter_password`
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `EXECUTION_MODE` | yes | Selects local or SSH orchestration | `local` or `ssh` | precheck, inventory renderer |
+| `EXECUTION_HOST_ROLE_DEFAULT` | yes | Default role scope in local mode | `app`, `db`, or `all` | deploy role consistency checks |
+| `TOPOLOGY_MODE` | yes | Defines single or dual host model | `single-server` or `dual-server` | deploy safety checks |
+| `TOPOLOGY_APP_ALIAS` | yes | Inventory alias for app host | short string; `app-node` | generated inventory |
+| `TOPOLOGY_APP_HOST` | yes | App host endpoint | IP or FQDN; `192.0.2.10` | inventory, DB grants |
+| `TOPOLOGY_DB_ALIAS` | yes | Inventory alias for DB host | short string; `db-node` | generated inventory |
+| `TOPOLOGY_DB_HOST` | yes | DB host endpoint | IP or FQDN; `192.0.2.20` | inventory, policy checks |
 
-Classification:
+## Network and SSH
 
-- secret, mandatory, runtime-only
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `NETWORK_SSH_USER` | conditional (`EXECUTION_MODE=ssh`) | SSH login user for remote orchestration | Linux user; `ubuntu` | generated inventory |
+| `NETWORK_SSH_PRIVATE_KEY_PATH` | conditional (`EXECUTION_MODE=ssh`) | SSH private key path | path; `~/.ssh/glpi_staging_ed25519` | generated inventory, precheck |
+| `NETWORK_DATABASE_APP_ACCESS_HOST` | yes | Host granted DB access from app side | IP/FQDN; `192.0.2.10` | DB grants |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | yes | DB source allowlist | CSV; `192.0.2.10,192.0.2.11` | firewall/grants |
 
-## Policy summary by execution mode
+## GLPI application parameters
 
-- `SECURITY_MODE=secure`:
-  - policy violations block mutable operations.
-- `SECURITY_MODE=permissive`:
-  - policy violations become warnings and require persisted justification/evidence.
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `GLPI_VERSION` | yes | GLPI release version | semantic version; `11.0.0` | download and deploy logic |
+| `GLPI_DOMAIN` | yes | GLPI endpoint domain | FQDN; `glpi.example.internal` | Nginx and smoke checks |
+| `GLPI_UPLOAD_MAX_FILESIZE` | optional | Upload limit | PHP size; `32M` | PHP runtime template |
+| `GLPI_POST_MAX_SIZE` | optional | POST body limit | PHP size; `32M` | PHP runtime template |
+| `GLPI_MEMORY_LIMIT` | optional | PHP memory ceiling | PHP size; `512M` | PHP runtime template |
+| `GLPI_MAX_EXECUTION_TIME` | optional | PHP max execution time | integer; `120` | PHP runtime template |
+| `GLPI_OPCACHE_MEMORY_CONSUMPTION` | optional | OPcache memory in MB | integer; `192` | PHP runtime template |
+| `GLPI_CRON_SCHEDULE` | optional | GLPI cron cadence | quoted cron; `"*/5 * * * *"` | app role cron task |
+| `GLPI_FILESYSTEM_OWNER` | optional | Owner for writable paths | Linux user; `www-data` | permissions |
+| `GLPI_FILESYSTEM_GROUP` | optional | Group for writable paths | Linux group; `www-data` | permissions |
+| `GLPI_APP_PACKAGES` | optional | App package baseline | CSV package list | package install tasks |
+
+## Database parameters
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `DATABASE_NAME` | yes | GLPI schema name | SQL identifier; `glpi_operational` | DB/app roles |
+| `DATABASE_USER` | yes | GLPI DB username | SQL identifier; `nehemiah_glpi` | DB/app roles |
+| `DATABASE_PORT` | optional | MariaDB listener port | integer; `3306` | DB role |
+| `DATABASE_BIND_ADDRESS` | optional | MariaDB bind address | IP; `0.0.0.0` | DB role |
+| `DATABASE_PACKAGES` | optional | DB package baseline | CSV; `mariadb-server,mariadb-client,python3-pymysql` | DB install |
+
+## PHP-FPM and Nginx base
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `PHP_FPM_SERVICE_NAME` | optional | Service identifier | string; `php8.3-fpm` | handlers/tests |
+| `PHP_FPM_SOCKET` | optional | PHP-FPM socket path | absolute path | Nginx/PHP templates |
+| `PHP_FPM_PM` | optional | Process manager mode | `dynamic`, `static`, `ondemand` | PHP-FPM pool |
+| `NGINX_HTTP_PORT` | optional | HTTP port | integer; `80` | Nginx template |
+| `NGINX_HTTPS_PORT` | optional | HTTPS port | integer; `443` | Nginx template |
+
+## TLS parameters
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `TLS_MODE` | yes | TLS behavior selector | `none`, `self_signed`, `provided` | app role, policy checks |
+| `TLS_COMMON_NAME` | optional | Certificate common name | FQDN; `glpi.example.internal` | certificate workflows |
+| `TLS_CERTIFICATE_PATH` | conditional when TLS enabled | Target cert path on host | absolute path | Nginx template |
+| `TLS_PRIVATE_KEY_PATH` | conditional when TLS enabled | Target key path on host | absolute path | Nginx template |
+| `TLS_PROVIDED_LOCAL_CERT_PATH` | conditional (`TLS_MODE=provided`) | Local cert source path | path | tls install-provided flow |
+| `TLS_PROVIDED_LOCAL_KEY_PATH` | conditional (`TLS_MODE=provided`) | Local key source path | path | tls install-provided flow |
+
+## Backup and monitoring
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `BACKUP_BASE_DIR` | optional | Backup root path | absolute path | backup role |
+| `BACKUP_RETENTION_DAYS` | optional | Retention period | integer; `14` | backup role |
+| `MONITORING_NODE_EXPORTER_ENABLED` | optional | Node exporter toggle | boolean | monitoring role |
+| `MONITORING_MYSQLD_EXPORTER_ENABLED` | optional | mysqld exporter toggle | boolean | monitoring role |
+| `MONITORING_MYSQLD_EXPORTER_USER` | yes | mysqld exporter user | SQL identifier | monitoring role |
+| `MONITORING_LABELS_JSON` | optional | Label map | JSON object | runtime labels |
+| `MONITORING_THRESHOLDS_JSON` | optional | Threshold map | JSON object | alert baselines |
+| `MONITORING_SCRAPE_PROFILES_JSON` | optional | Scrape profile map | JSON object | monitoring blueprint |
+| `MONITORING_DASHBOARD_PROFILE` | optional | Dashboard profile label | string | monitoring metadata |
+| `MONITORING_ALERT_ROUTES_JSON` | optional | Alert routing map | JSON object | monitoring metadata |
+| `ALERTING_TLS_EXPIRY_WARNING_DAYS` | optional | TLS warning threshold | integer; `30` | cert checks |
+| `ALERTING_BACKUP_FAILURE_ENABLED` | optional | Backup failure alert toggle | boolean | alerting policy |
+| `ALERTING_SERVICE_DOWN_ENABLED` | optional | Service down alert toggle | boolean | alerting policy |
+
+## Security policy parameters
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `SECURITY_SSO_ENABLED` | yes | Current SSO state | boolean | policy checks |
+| `SECURITY_ALLOW_INSECURE_NON_PRODUCTION` | optional | Insecure policy exception flag | boolean | policy metadata |
+| `SECURITY_REQUIRE_TLS` | optional | Require provided TLS mode | boolean | precheck and deploy policy |
+| `SECURITY_REQUIRE_HTTPS` | optional | Require TLS enabled | boolean | precheck and deploy policy |
+| `SECURITY_REQUIRE_SSO` | optional | Require SSO enabled | boolean | precheck and deploy policy |
+| `SECURITY_REQUIRE_PROMOTION_GATE` | optional | Require staging gate artifact | boolean | precheck and deploy policy |
+| `SECURITY_REQUIRE_ORDERED_EXECUTION` | optional | Require ordered deployment sequence | boolean | precheck and deploy policy |
+
+## Filesystem and operations
+
+| Key | Required | Purpose | Format and example | Consumed by |
+|---|---|---|---|---|
+| `PATH_GLPI_RELEASE_ROOT` | optional | release extraction root | absolute path | app role |
+| `PATH_GLPI_INSTALL_DIR` | optional | GLPI install directory | absolute path | app role |
+| `PATH_GLPI_CONFIG_DIR` | optional | GLPI config directory | absolute path | app role |
+| `PATH_GLPI_VAR_DIR` | optional | GLPI data directory | absolute path | app role |
+| `PATH_GLPI_PLUGIN_DIR` | optional | GLPI plugin directory | absolute path | app role |
+| `PATH_GLPI_LOG_DIR` | optional | GLPI log directory | absolute path | app role |
+| `OPERATIONS_TIMEZONE` | yes | Host timezone | tz name; `America/Sao_Paulo` | base role |
+| `OPERATIONS_GLPI_CRON_SCHEDULE` | optional | GLPI cron cadence | quoted cron | app role |
+| `OPERATIONS_REQUIRED_OPS_GROUP` | optional | Required operator group | string; `glpiops` | precheck |
+| `OPERATIONS_SECURITY_MODE_DEFAULT` | yes | Default policy behavior | `secure` or `permissive` | precheck and deploy policy |
+
+## Size profiles
+
+`RESOURCE_PROFILE_ACTIVE` selects one of three predefined profile families: `small`, `medium`, `large`.
+
+Each family has these tunables:
+
+- `RESOURCE_PROFILE_<SIZE>_PHP_MAX_CHILDREN`
+- `RESOURCE_PROFILE_<SIZE>_PHP_START_SERVERS`
+- `RESOURCE_PROFILE_<SIZE>_PHP_MIN_SPARE_SERVERS`
+- `RESOURCE_PROFILE_<SIZE>_PHP_MAX_SPARE_SERVERS`
+- `RESOURCE_PROFILE_<SIZE>_PHP_MAX_REQUESTS`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_INNODB_BUFFER_POOL_SIZE`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_MAX_CONNECTIONS`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_TMP_TABLE_SIZE`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_MAX_HEAP_TABLE_SIZE`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_SLOW_QUERY_LOG`
+- `RESOURCE_PROFILE_<SIZE>_MARIADB_LONG_QUERY_TIME`
+
+These values are rendered into `public.runtime.yml` and applied by Ansible roles.

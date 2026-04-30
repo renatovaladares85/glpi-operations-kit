@@ -69,7 +69,7 @@ Before proposing, analyzing, or executing any change, read in this order:
 - Attempt safe, low-risk environment updates only when they are clearly supported by the current workflow.
 - If a mandatory pre-flight item cannot be fixed, stop and do not continue unless the user explicitly authorizes continuation.
 - Never version secrets.
-- Keep public environment values in `config/<environment>.yml`.
+- Keep public environment values in `config/<environment>.env`.
 - Sensitive values must be requested at runtime when applicable.
 - When generating or suggesting usernames, service accounts, aliases, host labels, or similar identifiers, prefer biblical-context naming.
 - Never use common, obvious, or easily guessable usernames, passwords, or identifiers.

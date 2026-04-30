@@ -31,6 +31,6 @@
 
 ## Product blueprint requirements
 
-- Monitoring defaults must be represented in `config/<environment>.yml`.
+- Monitoring defaults must be represented in `config/<environment>.env`.
 - Exporter toggles, labels, thresholds, and scrape profiles must be configurable from the product config.
 - Future Prometheus/Grafana/Alertmanager integration must consume the same product model.

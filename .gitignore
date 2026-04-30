@@ -3,3 +3,5 @@
 .vault/
 *.retry
 *.tmp
+config/*.env
+!config/product.env

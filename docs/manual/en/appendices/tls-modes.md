@@ -4,8 +4,8 @@
 
 | Mode | Allowed in secure mode | Allowed in permissive mode | Behavior |
 |---|---|---|---|
-| `none` | Only when `security.require_https=false` and `security.require_tls=false` | Yes (with warning/evidence if policy requires TLS/HTTPS) | HTTP only on port 80 |
-| `self_signed` | Allowed when `security.require_tls=false` | Yes | HTTPS with self-signed certificate |
+| `none` | Only when `SECURITY_REQUIRE_HTTPS=false` and `SECURITY_REQUIRE_TLS=false` | Yes (with warning/evidence if policy requires TLS/HTTPS) | HTTP only on port 80 |
+| `self_signed` | Allowed when `SECURITY_REQUIRE_TLS=false` | Yes | HTTPS with self-signed certificate |
 | `provided` | Yes | Yes | HTTPS with operator-provided valid certificate |
 
 ## 2. Mode commands
@@ -65,4 +65,4 @@ Policy:
 
 - warning threshold defaults to 30 days
 - replace cert before expiration
-- secure mode may require provided certificates based on `security.require_tls`.
+- secure mode may require provided certificates based on `SECURITY_REQUIRE_TLS`.

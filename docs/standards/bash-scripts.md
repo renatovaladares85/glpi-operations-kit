@@ -38,7 +38,7 @@ Standardize guided scripts for `Ubuntu/Linux` operations.
 
 ## Public configuration
 
-- Use `config/<environment>.yml` as the single public configuration source.
+- Use `config/<environment>.env` as the single public configuration source.
 - Render `.runtime/<environment>/public.runtime.yml` and `inventory.runtime.yml` from that file.
 - Keep mutable operational overrides in `.runtime/<environment>/overrides.runtime.yml`.
 - Merge precedence must stay explicit: `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`.

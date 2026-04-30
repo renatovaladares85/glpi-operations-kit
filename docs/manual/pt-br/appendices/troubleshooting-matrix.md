@@ -1,58 +1,63 @@
-# Apêndice: Matriz de Troubleshooting
+# Apêndice - Matriz de Troubleshooting (PT-BR)
 
 ## Falta `ansible-playbook` ou `ansible-inventory`
 
-- Sintoma: precheck falha em ferramenta obrigatória.
+- Sintoma: `deploy check` falha em ferramentas obrigatórias.
 - Validação: `command -v ansible-playbook && command -v ansible-inventory`
-- Correção: aceitar instalação automática ou executar `sudo apt-get install -y ansible`
-- Retomada segura: `./scripts/glpictl.sh <env> deploy check all`
+- Correção: aceitar instalação automática no prompt ou executar `sudo apt-get install -y ansible`
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all`
 
 ## `permission denied` ao executar script
 
-- Sintoma: `./scripts/<script>.sh` falha por permissão.
+- Sintoma: `./scripts/*.sh` falha por permissão.
 - Validação: `ls -l scripts/*.sh`
-- Correção: `bash scripts/bootstrap-permissions.sh`
-- Retomada segura: repetir o comando original
+- Correção: executar `bash scripts/bootstrap-permissions.sh`
+- Retomada segura: repetir o comando que falhou.
 
-## Inconsistência entre `GLPI_HOST_ROLE` e comando no modo local
+## Host role incorreto no fluxo local dual-server
 
-- Sintoma: `deploy apply db` ou `deploy apply app` bloqueado por role.
-- Validação: `echo "$GLPI_EXECUTION_MODE" && echo "$GLPI_HOST_ROLE"`
-- Correção:
-  - para `apply db`: usar `GLPI_HOST_ROLE=db|all`
-  - para `apply app|monitoring|backup`: usar `GLPI_HOST_ROLE=app|all`
-- Retomada segura: rodar comando no host correto
+- Sintoma: `deploy apply db` ou `deploy apply app` bloqueado por política de role.
+- Validação: conferir `EXECUTION_HOST_ROLE_DEFAULT` em `config/<env>.env` e o modo efetivo no relatório de precheck.
+- Correção: usar role `db` no host DB e role `app` no host APP quando a execução for local.
+- Retomada segura: repetir no host correto com role corrigido.
 
-## Caminho de chave SSH inválido (modo `ssh`)
+## Caminho de chave SSH inválido em `EXECUTION_MODE=ssh`
 
-- Sintoma: precheck falha na política de SSH.
+- Sintoma: precheck falha na política de chave SSH.
 - Validação: `ls -l ~/.ssh/glpi_<env>_ed25519 ~/.ssh/glpi_<env>_ed25519.pub`
-- Correção: gerar par de chaves e ajustar `network.ssh.private_key_path`
-- Retomada segura: executar `deploy check all`
+- Correção: gerar par de chaves e ajustar `NETWORK_SSH_PRIVATE_KEY_PATH`.
+- Retomada segura: repetir `deploy check`.
 
-## Modo da chave SSH inseguro (modo `ssh`)
+## Modo da chave SSH inseguro
 
-- Sintoma: chave privada sem `0600`.
+- Sintoma: validação de permissão da chave privada falha.
 - Validação: `stat -c '%a' ~/.ssh/glpi_<env>_ed25519`
 - Correção: `chmod 600 ~/.ssh/glpi_<env>_ed25519`
-- Retomada segura: executar `deploy check all`
+- Retomada segura: repetir `deploy check`.
 
 ## Bloqueio por política em modo `secure`
 
-- Sintoma: comando mutável falha por política (TLS/HTTPS/SSO/gate/ordem).
+- Sintoma: comando mutável encerra por violação de política.
 - Validação:
-  - `echo "$SECURITY_MODE"`
-  - revisar flags em `config/<env>.yml`
-- Correção:
-  - cumprir requisitos de política
-  - ou usar `SECURITY_MODE=permissive` com justificativa
+  - modo efetivo (`SECURITY_MODE` ou `OPERATIONS_SECURITY_MODE_DEFAULT`)
+  - flags de política em `config/<env>.env` (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`)
+- Correção: cumprir requisitos de política ou executar em modo permissivo com justificativa explícita.
 - Retomada segura:
-  - caminho recomendado: corrigir política e repetir
-  - caminho permissivo: registrar justificativa e executar novamente
+  - caminho seguro: corrigir configuração e repetir;
+  - caminho permissivo: repetir com `SECURITY_MODE=permissive SECURITY_JUSTIFICATION="<motivo>"`.
+
+## Bloqueio por ordem de execução
+
+- Sintoma: `apply app` bloqueado antes de `apply db`.
+- Validação: `.runtime/<env>/state/deploy-sequence.yml`
+- Correção:
+  - modo seguro: seguir `check -> apply db -> apply app -> monitoring -> backup -> post-check`
+  - modo permissivo: continuar com warning e evidência
+- Retomada segura: executar somente a próxima etapa necessária.
 
 ## Falha em `tls install-provided`
 
-- Sintoma: comando TLS falha.
-- Validação: existência dos caminhos locais de cert/key
-- Correção: informar caminhos válidos e repetir a ação
-- Retomada segura: `./scripts/glpictl.sh <env> tls install-provided`
+- Sintoma: ação TLS falha.
+- Validação: existência dos arquivos em `TLS_PROVIDED_LOCAL_CERT_PATH` e `TLS_PROVIDED_LOCAL_KEY_PATH`.
+- Correção: ajustar caminhos válidos e repetir ação TLS.
+- Retomada segura: `./scripts/glpictl.sh <env> tls install-provided`.

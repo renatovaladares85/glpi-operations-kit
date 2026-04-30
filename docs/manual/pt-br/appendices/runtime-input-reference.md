@@ -1,83 +1,52 @@
-# Apêndice: Referência de Inputs Runtime e Arquivos Runtime
+# Apêndice - Entradas e Arquivos de Runtime (PT-BR)
 
-## 1. Fonte pública de configuração
+Este apêndice explica como os dados de configuração e runtime circulam no projeto, para que você entenda rapidamente de onde vem cada valor e onde cada arquivo gerado é consumido.
 
-Arquivos principais:
+## Entrada pública versus segredo
 
-- `config/product.example.yml`
-- `config/<environment>.yml` (criado a partir de `product.example.yml`)
+Todo valor não sensível fica em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Valores sensíveis nunca ficam nesse arquivo e permanecem apenas em `.runtime/<environment>/secrets.yml`.
 
-Todos os valores não sensíveis devem sair desses arquivos.
+Na prática, você ajusta os valores públicos em `config/<environment>.env`, executa `deploy check`, e deixa os scripts renderizarem os arquivos runtime usados pelo Ansible.
 
-## 2. Chaves públicas do contrato de execução
+## Mapa de arquivos runtime
 
-Essas chaves controlam como os scripts executam:
+| Arquivo | Quem cria | Por que existe | Quem consome |
+|---|---|---|---|
+| `.runtime/<env>/inventory.runtime.yml` | renderizador de config via `glpictl` | Codifica o modelo efetivo de alvo (`local` ou `ssh`) para a execução | `ansible-inventory`, `ansible-playbook` |
+| `.runtime/<env>/public.runtime.yml` | renderizador de config via `glpictl` | Converte o `key=value` público em variáveis prontas para roles | `ansible-playbook` |
+| `.runtime/<env>/overrides.runtime.yml` | scripts e ações do operador | Guarda sobrescritas mutáveis (por exemplo troca de TLS) sem alterar baseline | `ansible-playbook` |
+| `.runtime/<env>/secrets.yml` | prompts interativos de segredo | Guarda segredos fora do Git com permissão restrita | `ansible-playbook` |
+| `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Status de pré-requisitos e política em formato máquina | operadores, auditoria |
+| `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Resumo legível do precheck | operadores, auditoria |
+| `.runtime/<env>/state/deploy-sequence.yml` | fluxo de deploy | Rastreia estado de execução ordenada | `glpictl` |
+| `.runtime/<env>/state/security-mode-last.yml` | controle de política em permissive | Registra contexto do último aceite de risco | operadores, auditoria |
+| `.runtime/<env>/evidence/security-mode-*.yml` | controle de política em permissive | Histórico de exceções e justificativas | operadores, auditoria |
+| `.runtime/<env>/logs/*.log` e `*.summary.yml` | scripts operacionais | Trilha de execução e sumário compacto por execução | operadores, troubleshooting, auditoria |
 
-- `execution.mode`: `local` ou `ssh`
-- `execution.host_role_default`: `app`, `db` ou `all`
+## Precedência de merge em execução
 
-Overrides por variável de ambiente:
-
-- `GLPI_EXECUTION_MODE`
-- `GLPI_HOST_ROLE`
-- `GLPI_ENVIRONMENT`
-
-## 3. Mapa de artefatos runtime
-
-| Arquivo | Tipo | Produtor | Consumidor | Sensibilidade | Finalidade operacional |
-|---|---|---|---|---|---|
-| `.runtime/<env>/inventory.runtime.yml` | gerado | render via `glpictl` | inventário Ansible | restrito | define alvos e modelo de conexão (`local` ou `ssh`) |
-| `.runtime/<env>/public.runtime.yml` | gerado | render via `glpictl` | variáveis Ansible | restrito | converte dados públicos para variáveis das roles |
-| `.runtime/<env>/overrides.runtime.yml` | runtime mutável | `glpictl` / operador | variáveis Ansible | restrito | sobrescritas sem editar `config/<env>.yml` |
-| `.runtime/<env>/secrets.yml` | segredo runtime | prompts do operador | variáveis Ansible | secreto | credenciais e valores sensíveis fora do Git |
-| `.runtime/<env>/state/precheck-report-latest.yml` | estado gerado | precheck | operação/auditoria | restrito | status estruturado de pré-requisitos e políticas |
-| `.runtime/<env>/evidence/precheck-report-latest.md` | evidência gerada | precheck | operação/auditoria | restrito | relatório legível de pré-requisitos |
-| `.runtime/<env>/state/deploy-sequence.yml` | estado gerado | `glpictl` | `glpictl` | restrito | rastreia a ordem de execução |
-| `.runtime/<env>/state/security-mode-last.yml` | estado gerado | `glpictl` | operação/auditoria | restrito | último contexto de risco aceito em modo permissivo |
-| `.runtime/<env>/evidence/security-mode-*.yml` | evidência gerada | `glpictl` | operação/auditoria | restrito | histórico de exceções de política em modo permissivo |
-| `.runtime/<env>/logs/*.log` e `*.summary.yml` | log gerado | scripts operacionais | operação/auditoria | restrito | trilha de execução e resumo de operação |
-
-## 4. Precedência de merge runtime
-
-Ordem de merge:
+Quando o Ansible roda, a precedência é explícita:
 
 1. `public.runtime.yml`
 2. `overrides.runtime.yml`
 3. `secrets.yml`
 
-Significado prático:
+Operacionalmente, isso significa: baseline vem de `config/<environment>.env`, ajustes mutáveis entram por overrides, e segredos entram por último via arquivo secreto.
 
-- baseline vem de `config/<env>.yml`
-- operações mutáveis (ex.: troca de TLS) escrevem em overrides
-- segredos sempre ficam no arquivo de segredos runtime
+## Valores do contrato de execução
 
-## 5. Segredos obrigatórios
+`GLPI_EXECUTION_MODE`, `GLPI_HOST_ROLE` e `SECURITY_MODE` podem ser passados como override temporário, mas o comportamento padrão vem das chaves `EXECUTION_MODE`, `EXECUTION_HOST_ROLE_DEFAULT` e `OPERATIONS_SECURITY_MODE_DEFAULT` no arquivo de ambiente.
+
+## Chaves secretas obrigatórias
+
+As chaves mínimas obrigatórias em segredos são:
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-Comportamento quando faltar:
+Se alguma estiver ausente, os scripts solicitam o valor e bloqueiam operações mutáveis até o arquivo secreto ficar conforme.
 
-- scripts solicitam de forma interativa
-- execução mutável fica bloqueada até preencher
+## Regras condicionais de runtime
 
-## 6. Requisitos condicionais
-
-- Se `execution.mode=local`:
-  - não existe validação obrigatória de conectividade SSH remota.
-  - em dual-server, execute ações DB e APP nos respectivos hosts.
-- Se `execution.mode=ssh`:
-  - chave SSH por ambiente e conectividade remota são obrigatórias.
-- Se `tls.mode=provided`:
-  - `tls.provided_local_cert_path` e `tls.provided_local_key_path` devem apontar para arquivos locais existentes.
-- Se flags de segurança estiverem habilitadas:
-  - `security.require_tls=true` exige `tls.mode=provided`.
-  - `security.require_https=true` exige TLS ativo (`self_signed` ou `provided`).
-  - `security.require_sso=true` exige `security.sso_enabled=true`.
-  - `security.require_promotion_gate=true` exige `.runtime/promotion/staging-certified.yml`.
-
-## 7. Tratamento da política por modo de segurança
-
-- `SECURITY_MODE=secure`: violações de política bloqueiam operações mutáveis.
-- `SECURITY_MODE=permissive`: violações viram warning e são registradas com justificativa.
+Quando o modo é `local`, não há exigência de conectividade SSH remota, e comandos por papel devem ser executados no host correto em topologia dual-server. Quando o modo é `ssh`, chave e conectividade remota tornam-se obrigatórias. Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem existir de fato. As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas, e o efeito de bloqueio depende do `SECURITY_MODE` efetivo.

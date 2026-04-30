@@ -9,7 +9,7 @@ These rules must not be broken by agents.
 - Run environment pre-flight checks before starting implementation.
 - Run `bash scripts/bootstrap-permissions.sh` before any deploy script in a fresh operator session.
 - Run `bash scripts/release-readiness.sh <environment>` before declaring an environment complete.
-- Keep public environment values in `config/<environment>.yml`.
+- Keep public environment values in `config/<environment>.env`.
 - Keep mutable runtime overrides in `.runtime/<environment>/overrides.runtime.yml`.
 - Keep secrets only in `.runtime/<environment>/secrets.yml`.
 - Maintain one SSH key pair per environment for remote execution contexts.

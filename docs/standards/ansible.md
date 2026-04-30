@@ -2,7 +2,7 @@
 
 ## Main structure
 
-- `config/<environment>.yml`
+- `config/<environment>.env`
 - `ansible/inventories/<environment>/hosts.yml`
 - `ansible/inventories/<environment>/group_vars/all.yml`
 - `ansible/roles/<role>/tasks/main.yml`
@@ -12,7 +12,7 @@
 ## Rules
 
 - Prefer small, focused roles.
-- Use `config/<environment>.yml` as the primary public configuration source.
+- Use `config/<environment>.env` as the primary public configuration source.
 - Keep `group_vars` generic and safe as fallback defaults only.
 - Never version secrets in inventories or vars.
 - Use templates for variable configurations.
@@ -27,7 +27,7 @@
 
 - Secrets must enter at runtime through a guided script.
 - Secrets must be stored only under `.runtime/<environment>/secrets.yml`.
-- The rendered public runtime file must be generated from `config/<environment>.yml`.
+- The rendered public runtime file must be generated from `config/<environment>.env`.
 - Mutable runtime overrides must be stored in `.runtime/<environment>/overrides.runtime.yml`.
 - Extra vars precedence must follow `public.runtime.yml -> overrides.runtime.yml -> secrets.yml`.
 - The playbook must fail with a clear message when a critical secret is missing.

@@ -40,7 +40,7 @@ The current implementation targets:
 
 - All declarative state lives in Git.
 - Secrets do not live in Git.
-- Public configuration lives under `config/<environment>.yml`.
+- Public configuration lives under `config/<environment>.env` (created from `config/product.env`).
 - Guided Bash scripts collect only missing secret values at runtime.
 - Central execution CLI: `scripts/glpictl.sh <environment> <domain> <action> [target] [scope]`.
 - Specific scripts are supported as wrappers and follow the same central execution path.
@@ -116,7 +116,7 @@ docs/
   - generate timestamped evidence package;
   - mark gate as approved only when all mandatory checks pass.
 - `Phase 2 - Production rollout`
-  - policy gate enforcement is controlled by `security.require_promotion_gate`;
+- policy gate enforcement is controlled by `SECURITY_REQUIRE_PROMOTION_GATE`;
   - run production deployment with runtime values only;
   - execute post-check and collect evidence.
 
@@ -133,7 +133,7 @@ Gate artifacts:
 - Firewall is enabled locally.
 - PHP session cookies are hardened.
 - Database access is intended only from application hosts.
-- TLS mode enforcement is controlled by policy flags (`security.require_tls`, `security.require_https`) and execution mode.
+- TLS mode enforcement is controlled by policy flags (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`) and execution mode.
 - Valid certificate replacement must be handled by a script-driven workflow.
 
 ## Operational gaps that still need real environment data

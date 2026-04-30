@@ -1,83 +1,52 @@
-# Appendix: Runtime Input and Runtime Files Reference
+# Appendix - Runtime Input and Runtime Files (EN)
 
-## 1. Public configuration source
+This appendix explains how configuration and runtime data flow through the project, so you can quickly understand where each value comes from and where each generated file is used.
 
-Primary files:
+## Public vs secret input
 
-- `config/product.example.yml`
-- `config/<environment>.yml` (created from `product.example.yml`)
+All non-sensitive values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Sensitive values are never stored there and remain in `.runtime/<environment>/secrets.yml`.
 
-All non-secret operational values are read from these files.
+In practice, you edit public values once in `config/<environment>.env`, run `deploy check`, and let the scripts render the runtime files used by Ansible.
 
-## 2. Execution contract keys (public)
+## Runtime file map
 
-These keys control how scripts run:
+| File | Who creates it | Why it exists | Who consumes it |
+|---|---|---|---|
+| `.runtime/<env>/inventory.runtime.yml` | config renderer via `glpictl` | Encodes the effective host targeting model (`local` or `ssh`) for this execution | `ansible-inventory`, `ansible-playbook` |
+| `.runtime/<env>/public.runtime.yml` | config renderer via `glpictl` | Converts public `key=value` settings into role-ready variables | `ansible-playbook` |
+| `.runtime/<env>/overrides.runtime.yml` | scripts and operator actions | Stores mutable runtime overrides (for example TLS changes) without editing baseline config | `ansible-playbook` |
+| `.runtime/<env>/secrets.yml` | interactive secret prompts | Stores secret values outside Git with restricted permissions | `ansible-playbook` |
+| `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Machine-readable precheck and policy status | operators, audit flow |
+| `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Human-readable precheck summary | operators, audit flow |
+| `.runtime/<env>/state/deploy-sequence.yml` | deploy workflow | Tracks ordered execution state for gated stages | `glpictl` |
+| `.runtime/<env>/state/security-mode-last.yml` | permissive-mode policy handler | Records latest risk acceptance context | operators, audit flow |
+| `.runtime/<env>/evidence/security-mode-*.yml` | permissive-mode policy handler | Keeps historical policy exceptions and justifications | operators, audit flow |
+| `.runtime/<env>/logs/*.log` and `*.summary.yml` | operational scripts | Maintains execution trace and compact run summaries | operators, troubleshooting, audit |
 
-- `execution.mode`: `local` or `ssh`
-- `execution.host_role_default`: `app`, `db`, or `all`
+## Merge precedence at execution time
 
-Environment variable overrides:
-
-- `GLPI_EXECUTION_MODE`
-- `GLPI_HOST_ROLE`
-- `GLPI_ENVIRONMENT`
-
-## 3. Runtime artifact map
-
-| File | Type | Producer | Consumer | Sensitivity | Operational purpose |
-|---|---|---|---|---|---|
-| `.runtime/<env>/inventory.runtime.yml` | generated | renderer via `glpictl` | Ansible inventory | restricted | host targeting and connection model (`local` or `ssh`) |
-| `.runtime/<env>/public.runtime.yml` | generated | renderer via `glpictl` | Ansible vars | restricted | public operational data converted to role variables |
-| `.runtime/<env>/overrides.runtime.yml` | mutable runtime | `glpictl` / operator | Ansible vars | restricted | mutable overrides without editing `config/<env>.yml` |
-| `.runtime/<env>/secrets.yml` | runtime secret | operator prompts | Ansible vars | secret | non-versioned credentials and secret values |
-| `.runtime/<env>/state/precheck-report-latest.yml` | generated state | precheck | operators/audit | restricted | machine-readable prerequisite and policy status |
-| `.runtime/<env>/evidence/precheck-report-latest.md` | generated evidence | precheck | operators/audit | restricted | human-readable prerequisite report |
-| `.runtime/<env>/state/deploy-sequence.yml` | generated state | `glpictl` | `glpictl` | restricted | ordered deployment state tracking |
-| `.runtime/<env>/state/security-mode-last.yml` | generated state | `glpictl` | operators/audit | restricted | last accepted permissive-mode risk context |
-| `.runtime/<env>/evidence/security-mode-*.yml` | generated evidence | `glpictl` | operators/audit | restricted | historical permissive-mode policy exceptions |
-| `.runtime/<env>/logs/*.log` and `*.summary.yml` | generated log | operational scripts | operators/audit | restricted | execution trace and compact operation summary |
-
-## 4. Runtime merge precedence
-
-Values are merged in this order:
+When Ansible runs, variable precedence is explicit:
 
 1. `public.runtime.yml`
 2. `overrides.runtime.yml`
 3. `secrets.yml`
 
-Practical meaning:
+The operational meaning is straightforward: baseline settings come from `config/<environment>.env`, mutable operational changes are layered in overrides, and sensitive values are injected last from secrets.
 
-- baseline comes from `config/<env>.yml`
-- mutable operations (for example TLS switching) are written to overrides
-- secrets always come from secret runtime file
+## Execution contract values
 
-## 5. Mandatory secret keys
+`GLPI_EXECUTION_MODE`, `GLPI_HOST_ROLE`, and `SECURITY_MODE` can be passed as temporary overrides, but default behavior comes from the environment file keys `EXECUTION_MODE`, `EXECUTION_HOST_ROLE_DEFAULT`, and `OPERATIONS_SECURITY_MODE_DEFAULT`.
+
+## Mandatory secret keys
+
+The minimum required secret keys are:
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-Behavior when missing:
+If any of them are missing, scripts prompt for values and block mutable operations until the secret file is compliant.
 
-- scripts prompt interactively
-- mutable execution remains blocked until values are provided
+## Conditional runtime rules
 
-## 6. Conditional requirements
-
-- If `execution.mode=local`:
-  - no remote SSH connectivity validation is required.
-  - in dual-server topology, run DB and APP actions on their respective hosts.
-- If `execution.mode=ssh`:
-  - SSH key pair and remote connectivity checks are mandatory.
-- If `tls.mode=provided`:
-  - `tls.provided_local_cert_path` and `tls.provided_local_key_path` must point to existing local files.
-- If security flags are enabled:
-  - `security.require_tls=true` requires `tls.mode=provided`.
-  - `security.require_https=true` requires TLS enabled (`self_signed` or `provided`).
-  - `security.require_sso=true` requires `security.sso_enabled=true`.
-  - `security.require_promotion_gate=true` requires `.runtime/promotion/staging-certified.yml`.
-
-## 7. Security mode policy handling
-
-- `SECURITY_MODE=secure`: policy violations block mutable operations.
-- `SECURITY_MODE=permissive`: policy violations become warnings and are persisted with justification.
+When execution mode is `local`, SSH reachability checks are not required, and role-scoped commands must run on the correct host in dual-server topology. When execution mode is `ssh`, key material and remote reachability become mandatory checks. When `TLS_MODE=provided`, local certificate and key paths must point to real files. Security policy flags (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) are always evaluated, and their blocking behavior depends on effective `SECURITY_MODE`.
