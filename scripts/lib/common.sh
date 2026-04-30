@@ -419,16 +419,27 @@ read_required_value() {
   local target_path="$3"
   local secret="${4:-false}"
   local value=""
+  local input_device="/dev/stdin"
+
+  if [[ -r /dev/tty ]]; then
+    input_device="/dev/tty"
+  fi
 
   while true; do
     echo "$prompt"
     echo "  Required because: $reason"
     echo "  Will be written to: $target_path"
     if [[ "$secret" == "true" ]]; then
-      read -r -s value
+      if [[ "$input_device" != "/dev/tty" ]]; then
+        echo "Interactive terminal is required to capture secret input securely." >&2
+        echo "Run this command in an interactive shell and retry." >&2
+        return 1
+      fi
+      echo "  Waiting for secure input (hidden)..."
+      read -r -s value <"$input_device"
       printf '\n'
     else
-      read -r value
+      read -r value <"$input_device"
     fi
 
     if [[ -z "${value// }" ]]; then
