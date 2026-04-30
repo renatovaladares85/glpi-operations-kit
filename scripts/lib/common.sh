@@ -687,7 +687,32 @@ ensure_runtime_override_file() {
 {}
 EOF
   fi
+  if ! yaml_file_is_dictionary "$override_path"; then
+    echo "Invalid override runtime YAML detected at '$override_path'. Rewriting as empty map '{}'."
+    cat >"$override_path" <<'EOF'
+{}
+EOF
+  fi
   chmod 600 "$override_path"
+}
+
+yaml_file_is_dictionary() {
+  local file_path="$1"
+  if [[ ! -f "$file_path" ]]; then
+    return 1
+  fi
+  require_python_yaml_support
+  python3 - "$file_path" <<'PY'
+import sys
+import yaml
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding="utf-8"))
+if isinstance(data, dict):
+    sys.exit(0)
+sys.exit(1)
+PY
 }
 
 read_yaml_top_level_value() {
