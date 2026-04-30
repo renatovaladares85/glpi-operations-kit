@@ -14,6 +14,13 @@
 - Fix: run `bash scripts/bootstrap-permissions.sh`
 - Safe resume: rerun the blocked command
 
+## Missing `config/<env>.env` in precheck
+
+- Symptom: precheck fails with a mandatory message indicating missing environment config file.
+- Validate: `ls -l config/<env>.env`
+- Fix: `cp config/product.env config/<env>.env`, then edit the new file with your environment values.
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all`.
+
 ## Wrong host role in local dual-server flow
 
 - Symptom: `deploy apply db` or `deploy apply app` is blocked by role policy.

@@ -1520,6 +1520,7 @@ run_preflight_checks() {
   else
     local copy_cmd
     copy_cmd="cp config/product.env config/${environment}.env"
+    preflight_print_result "mandatory" "fail" "missing required environment file: config/${environment}.env"
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
       "Runtime and policy checks depend on public environment config." "test -f config/<environment>.env" "$copy_cmd" "true" "fail" "Create config/${environment}.env from config/product.env and adjust values."
     mandatory_failures=$((mandatory_failures + 1))

@@ -14,6 +14,13 @@
 - Correção: executar `bash scripts/bootstrap-permissions.sh`
 - Retomada segura: repetir o comando que falhou.
 
+## Ausência de `config/<env>.env` no precheck
+
+- Sintoma: o precheck falha com item obrigatório informando arquivo de configuração do ambiente ausente.
+- Validação: `ls -l config/<env>.env`
+- Correção: `cp config/product.env config/<env>.env` e, em seguida, editar o novo arquivo com os valores do ambiente.
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all`.
+
 ## Host role incorreto no fluxo local dual-server
 
 - Sintoma: `deploy apply db` ou `deploy apply app` bloqueado por política de role.
