@@ -36,14 +36,25 @@
       - glpi_db_root_password is defined
     fail_msg: "Missing critical database runtime secrets. Provide glpi_db_name, glpi_db_user, glpi_db_password and glpi_db_root_password."
 
-- name: Configure MariaDB root password
-  community.mysql.mysql_user:
-    name: root
-    host_all: true
-    password: "{{ glpi_db_root_password }}"
-    login_unix_socket: /run/mysqld/mysqld.sock
-    check_implicit_admin: true
-    state: present
+- name: Configure MariaDB root password (socket bootstrap)
+  block:
+    - name: Configure MariaDB root password using local socket admin
+      community.mysql.mysql_user:
+        name: root
+        host_all: true
+        password: "{{ glpi_db_root_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
+        check_implicit_admin: true
+        state: present
+  rescue:
+    - name: Configure MariaDB root password using existing root password
+      community.mysql.mysql_user:
+        name: root
+        host_all: true
+        password: "{{ glpi_db_root_password }}"
+        login_user: root
+        login_password: "{{ glpi_db_root_password }}"
+        state: present
 
 - name: Remove anonymous MySQL users
   community.mysql.mysql_user:
