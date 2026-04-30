@@ -147,6 +147,12 @@
     mode: "0644"
   notify: Restart php-fpm
 
+- name: Disable default PHP-FPM pool to avoid socket conflicts
+  ansible.builtin.file:
+    path: /etc/php/8.3/fpm/pool.d/www.conf
+    state: absent
+  notify: Restart php-fpm
+
 - name: Deploy Nginx virtual host
   ansible.builtin.template:
     src: nginx-glpi.conf.j2
