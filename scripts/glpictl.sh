@@ -89,10 +89,12 @@ finalize_glpictl_operation() {
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml"
     print_post_execution_checks
+    echo "END OF EXECUTION (SUCCESS)"
   else
     echo "FINAL STATUS: FAILED" >&2
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml" >&2
+    echo "END OF EXECUTION (FAILED)" >&2
   fi
 }
 
