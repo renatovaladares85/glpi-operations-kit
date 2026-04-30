@@ -112,6 +112,7 @@ declare -a POLICY_VIOLATIONS=()
 EXECUTION_MODE_EFFECTIVE=""
 HOST_ROLE_EFFECTIVE=""
 TOPOLOGY_MODE_EFFECTIVE="dual-server"
+ASSUME_DB_APPLIED="false"
 
 normalize_bool() {
   local value="$1"
@@ -176,6 +177,12 @@ resolve_execution_contract() {
   [[ -z "${TOPOLOGY_MODE_EFFECTIVE// }" ]] && TOPOLOGY_MODE_EFFECTIVE="dual-server"
   export GLPI_EXECUTION_MODE="$EXECUTION_MODE_EFFECTIVE"
   export GLPI_HOST_ROLE="$HOST_ROLE_EFFECTIVE"
+}
+
+resolve_execution_overrides() {
+  local assume_db_applied_value=""
+  assume_db_applied_value="$(read_product_config_value "$ENVIRONMENT" "OPERATIONS_ASSUME_DB_APPLIED" || true)"
+  ASSUME_DB_APPLIED="$(normalize_bool "$assume_db_applied_value" "false")"
 }
 
 enforce_local_target_consistency() {
@@ -351,7 +358,14 @@ enforce_apply_sequence() {
   require_deploy_flag "check_passed" "Run deploy check before apply."
   case "$target" in
     db) ;;
-    app) require_deploy_flag "db_applied" "Run apply db before apply app." ;;
+    app)
+      if [[ "$EXECUTION_MODE_EFFECTIVE" == "local" && "$TOPOLOGY_MODE_EFFECTIVE" == "dual-server" && "$HOST_ROLE_EFFECTIVE" == "app" && "$ASSUME_DB_APPLIED" == "true" ]]; then
+        write_step "Ordered execution override enabled by OPERATIONS_ASSUME_DB_APPLIED=true (local dual-server app host)."
+        write_deploy_flag "db_applied" "true"
+      else
+        require_deploy_flag "db_applied" "Run apply db before apply app."
+      fi
+      ;;
     monitoring|backup)
       require_deploy_flag "db_applied" "Run apply db before monitoring/backup."
       require_deploy_flag "app_applied" "Run apply app before monitoring/backup."
@@ -623,6 +637,7 @@ run_promote() {
 
 resolve_security_mode
 resolve_execution_contract
+resolve_execution_overrides
 ensure_runtime_foundation "$ENVIRONMENT"
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
 trap 'finalize_glpictl_operation "$?"' EXIT
