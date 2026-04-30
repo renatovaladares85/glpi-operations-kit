@@ -36,10 +36,9 @@
       - glpi_db_root_password is defined
     fail_msg: "Missing critical database runtime secrets. Provide glpi_db_name, glpi_db_user, glpi_db_password and glpi_db_root_password."
 
-- name: Wait for MariaDB local port
+- name: Wait for MariaDB local socket
   ansible.builtin.wait_for:
-    host: 127.0.0.1
-    port: "{{ mariadb_port }}"
+    path: /run/mysqld/mysqld.sock
     delay: 0
     timeout: 60
 
@@ -57,18 +56,19 @@
         mariadb_admin_login_password: ""
         mariadb_admin_login_unix_socket: /run/mysqld/mysqld.sock
   rescue:
-    - name: Probe MariaDB admin via root password
+    - name: Probe MariaDB admin via root password and unix socket
       community.mysql.mysql_query:
         query: "SELECT 1;"
         login_user: root
         login_password: "{{ glpi_db_root_password }}"
+        login_unix_socket: /run/mysqld/mysqld.sock
       changed_when: false
 
     - name: Use root password admin authentication
       ansible.builtin.set_fact:
         mariadb_admin_login_user: root
         mariadb_admin_login_password: "{{ glpi_db_root_password }}"
-        mariadb_admin_login_unix_socket: ""
+        mariadb_admin_login_unix_socket: /run/mysqld/mysqld.sock
 
 - name: Configure MariaDB root password
   community.mysql.mysql_user:
@@ -85,7 +85,7 @@
   ansible.builtin.set_fact:
     mariadb_admin_login_user: root
     mariadb_admin_login_password: "{{ glpi_db_root_password }}"
-    mariadb_admin_login_unix_socket: ""
+    mariadb_admin_login_unix_socket: /run/mysqld/mysqld.sock
 
 - name: Remove anonymous MySQL users
   community.mysql.mysql_user:
@@ -94,6 +94,7 @@
     state: absent
     login_user: "{{ mariadb_admin_login_user }}"
     login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"
 
 - name: Remove test database
   community.mysql.mysql_db:
@@ -101,6 +102,7 @@
     state: absent
     login_user: "{{ mariadb_admin_login_user }}"
     login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"
 
 - name: Create GLPI database
   community.mysql.mysql_db:
@@ -110,6 +112,7 @@
     state: present
     login_user: "{{ mariadb_admin_login_user }}"
     login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"
 
 - name: Create GLPI database user
   community.mysql.mysql_user:
@@ -120,14 +123,14 @@
     state: present
     login_user: "{{ mariadb_admin_login_user }}"
     login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"
 
-- name: Validate GLPI database user access
+- name: Validate GLPI database user grant is present
   community.mysql.mysql_query:
-    query: "SELECT 1;"
-    login_user: "{{ glpi_db_user }}"
-    login_password: "{{ glpi_db_password }}"
-    login_host: 127.0.0.1
-    login_db: "{{ glpi_db_name }}"
+    query: "SHOW GRANTS FOR '{{ glpi_db_user }}'@'{{ glpi_db_app_access_host | default('%') }}';"
+    login_user: "{{ mariadb_admin_login_user }}"
+    login_password: "{{ mariadb_admin_login_password }}"
+    login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"
   changed_when: false
 
 - name: Check MariaDB configuration file permissions
