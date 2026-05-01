@@ -198,6 +198,13 @@
   when: glpi_web_server_type == 'nginx'
   notify: Reload nginx
 
+- name: Remove default nginx site definition file when present
+  ansible.builtin.file:
+    path: /etc/nginx/sites-available/default
+    state: absent
+  when: glpi_web_server_type == 'nginx'
+  notify: Reload nginx
+
 - name: Deploy Apache virtual host
   ansible.builtin.template:
     src: apache-glpi.conf.j2
@@ -366,3 +373,42 @@
     name: "{{ glpi_php_fpm_service }}"
     state: started
     enabled: true
+
+- name: Flush handlers before web routing checks
+  ansible.builtin.meta: flush_handlers
+
+- name: Check GLPI HTTP response by hostname header
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nginx_http_port }}/"
+    headers:
+      Host: "{{ glpi_domain }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302]
+  register: glpi_http_hostname_check
+  when: glpi_web_server_type == 'nginx'
+
+- name: Check GLPI HTTP response by app IP header
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nginx_http_port }}/"
+    headers:
+      Host: "{{ glpi_app_host }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302]
+  register: glpi_http_ip_check
+  when: glpi_web_server_type == 'nginx'
+
+- name: Assert nginx default page is not served for GLPI hostname
+  ansible.builtin.assert:
+    that:
+      - "'Welcome to nginx!' not in (glpi_http_hostname_check.content | default(''))"
+    fail_msg: "Nginx default page detected for GLPI hostname. GLPI vhost routing is not active."
+  when: glpi_web_server_type == 'nginx'
+
+- name: Assert nginx default page is not served for GLPI app IP
+  ansible.builtin.assert:
+    that:
+      - "'Welcome to nginx!' not in (glpi_http_ip_check.content | default(''))"
+    fail_msg: "Nginx default page detected for GLPI app IP. GLPI vhost routing is not active."
+  when: glpi_web_server_type == 'nginx'
