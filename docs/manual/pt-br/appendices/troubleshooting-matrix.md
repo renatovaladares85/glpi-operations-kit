@@ -68,3 +68,15 @@
 - Validação: existência dos arquivos em `TLS_PROVIDED_LOCAL_CERT_PATH` e `TLS_PROVIDED_LOCAL_KEY_PATH`.
 - Correção: ajustar caminhos válidos e repetir ação TLS.
 - Retomada segura: `./scripts/glpictl.sh <env> tls install-provided`.
+
+## `render_product_config.py` com NameError (`values` ou `web_server_type`)
+
+- Sintoma: `deploy check` falha com erros como `NameError: name 'values' is not defined` ou `NameError: name 'web_server_type' is not defined`.
+- Validação:
+  - `python3 scripts/lib/render_product_config.py --config config/<env>.env --mode public-runtime`
+  - `python3 scripts/lib/render_product_config.py --config config/<env>.env --mode inventory`
+- Correção:
+  - atualizar o repositório local para o commit mais recente (`git pull`) com o ajuste de escopo do renderer;
+  - garantir que `WEB_SERVER_TYPE` exista em `config/<env>.env`.
+- Retomada segura:
+  - repetir `./scripts/glpictl.sh <env> deploy check all`.

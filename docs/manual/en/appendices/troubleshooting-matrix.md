@@ -68,3 +68,15 @@
 - Validate: file existence for `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH`.
 - Fix: set valid local paths and rerun TLS action.
 - Safe resume: `./scripts/glpictl.sh <env> tls install-provided`.
+
+## `render_product_config.py` NameError (`values` or `web_server_type`)
+
+- Symptom: `deploy check` fails with errors such as `NameError: name 'values' is not defined` or `NameError: name 'web_server_type' is not defined`.
+- Validate:
+  - `python3 scripts/lib/render_product_config.py --config config/<env>.env --mode public-runtime`
+  - `python3 scripts/lib/render_product_config.py --config config/<env>.env --mode inventory`
+- Fix:
+  - update local repository to latest commit (`git pull`) containing the renderer scope fix;
+  - ensure `WEB_SERVER_TYPE` is present in `config/<env>.env`.
+- Safe resume:
+  - rerun `./scripts/glpictl.sh <env> deploy check all`.

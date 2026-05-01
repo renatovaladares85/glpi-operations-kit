@@ -366,6 +366,9 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     tls_mode = require_value(values, "TLS_MODE").strip()
     if tls_mode not in TLS_MODES:
         fail("TLS_MODE must be one of: none, self_signed, provided.")
+    web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
+    if web_server_type not in WEB_SERVER_TYPES:
+        fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd, iis.")
 
     environment_name = require_value(values, "ENVIRONMENT_NAME").strip()
     release_root = read_value(values, "PATH_GLPI_RELEASE_ROOT", "/usr/share").strip() or "/usr/share"
@@ -589,6 +592,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
-    if web_server_type not in WEB_SERVER_TYPES:
-        fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd, iis.")

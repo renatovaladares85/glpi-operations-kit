@@ -8,6 +8,44 @@ All deployment values live in `config/<environment>.env`, created from `config/p
 
 In practice, you edit public values once in `config/<environment>.env`, run `deploy check`, and let the scripts render the runtime files used by Ansible.
 
+## How automatic `GLPI_APP_PACKAGES` works
+
+`GLPI_APP_PACKAGES` follows two modes:
+
+- Automatic mode: keep `GLPI_APP_PACKAGES=` empty in `config/<environment>.env`.
+- Manual override mode: set `GLPI_APP_PACKAGES` with a full comma-separated package list.
+
+When automatic mode is used, package resolution is done by the renderer in `scripts/lib/render_product_config.py`, using:
+
+- `WEB_SERVER_PACKAGES` (web-server-specific packages)
+- `DEFAULT_GLPI_APP_PACKAGES` (common PHP and utility packages)
+
+Effective logic:
+
+1. Read `WEB_SERVER_TYPE`.
+2. Build packages as `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE] + DEFAULT_GLPI_APP_PACKAGES`.
+3. If `GLPI_APP_PACKAGES` is explicitly set, use it as a full override.
+
+Examples in `config/<environment>.env`:
+
+- Nginx automatic:
+  - `WEB_SERVER_TYPE=nginx`
+  - `GLPI_APP_PACKAGES=`
+- Apache automatic:
+  - `WEB_SERVER_TYPE=apache`
+  - `GLPI_APP_PACKAGES=`
+- lighttpd automatic:
+  - `WEB_SERVER_TYPE=lighttpd`
+  - `GLPI_APP_PACKAGES=`
+- IIS reference only:
+  - `WEB_SERVER_TYPE=iis`
+  - On Ubuntu/Linux execution hosts this is blocked by policy in the app role.
+
+Manual override example:
+
+- `WEB_SERVER_TYPE=nginx`
+- `GLPI_APP_PACKAGES=nginx,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl`
+
 ## Runtime file map
 
 | File | Who creates it | Why it exists | Who consumes it |
