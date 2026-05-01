@@ -69,6 +69,15 @@ GLPI_EXECUTION_MODE=ssh ./scripts/glpictl.sh staging deploy check all
 
 Use this only when policy allows remote orchestration from one host. In ssh mode, private key policy (`0600`) and target reachability become mandatory checks.
 
+## Web routing and install-flow validation
+
+```bash
+./scripts/glpictl.sh <env> deploy apply app
+./scripts/glpictl.sh <env> deploy post-check app
+```
+
+These commands now validate the selected web engine routing contract end-to-end: root access, installer compatibility route (`/install/install.php` when installer is expected), representative `.js/.css` assets discovered from the page, and blocked sensitive paths (`/config`, `/files`, `/vendor`, arbitrary `.php` outside router).
+
 ## TLS lifecycle commands
 
 ```bash

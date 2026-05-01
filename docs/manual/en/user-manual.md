@@ -98,6 +98,12 @@ For a command-by-command reference, use [Command Reference](appendices/command-r
 
 The minimum operational validation after deployment is: GLPI page reachable, DB connectivity working, `nginx -t` passing, PHP-FPM config test passing, and runtime evidence files generated. If anything fails, runbook-safe remediation is documented in [Troubleshooting Matrix](appendices/troubleshooting-matrix.md), including missing dependencies, wrong host role, missing SSH material in ssh mode, invalid TLS paths, and policy-mode behavior.
 
+## Install and asset access matrix
+
+During install phase, the application must expose `/` and route installer flow correctly from `/install/install.php` without returning 404. Static assets referenced by the install page (`.js` and `.css`) must be reachable, and sensitive paths must remain blocked even while the installer is open. The automated checks now validate this contract for the selected engine by querying local loopback with the configured host header and by asserting blocked responses for sensitive paths such as `config/`, `files/`, and `vendor/`.
+
+If `/` opens but installer redirect fails, run `./scripts/glpictl.sh <env> deploy apply app` again and verify the generated web template for your selected engine. For Nginx, compatibility routing for `/install/install.php` is enforced while keeping `public` as web root and preserving direct PHP exposure restrictions.
+
 ## Related appendices
 
 - [Command Reference](appendices/command-reference.md)

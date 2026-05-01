@@ -406,3 +406,98 @@
       - "'Welcome to nginx!' not in (glpi_http_ip_check.content | default(''))"
     fail_msg: "Nginx default page detected for GLPI app IP. GLPI vhost routing is not active."
   when: glpi_web_server_type == 'nginx'
+
+- name: Resolve web check base URL for selected engine
+  ansible.builtin.set_fact:
+    glpi_web_check_scheme: "{{ 'https' if glpi_tls_mode != 'none' else 'http' }}"
+    glpi_web_check_port: "{{ nginx_https_port if glpi_tls_mode != 'none' else nginx_http_port }}"
+    glpi_web_check_host_header: "{{ glpi_domain }}"
+    glpi_web_check_base_url: "{{ ('https' if glpi_tls_mode != 'none' else 'http') ~ '://127.0.0.1:' ~ ((nginx_https_port if glpi_tls_mode != 'none' else nginx_http_port) | string) }}"
+
+- name: Check GLPI root endpoint for selected engine
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303]
+    validate_certs: false
+  register: glpi_root_route_check
+  changed_when: false
+
+- name: Determine whether installer route must be reachable
+  ansible.builtin.set_fact:
+    glpi_install_route_expected: "{{ '/install/install.php' in (glpi_root_route_check.content | default('')) }}"
+  changed_when: false
+
+- name: Check GLPI installer compatibility route
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/install/install.php"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303]
+    validate_certs: false
+  register: glpi_install_route_check
+  when: glpi_install_route_expected
+  changed_when: false
+
+- name: Assert installer route is not returning 404
+  ansible.builtin.assert:
+    that:
+      - glpi_install_route_check.status in [200, 301, 302, 303]
+      - "'404' not in (glpi_install_route_check.content | default(''))"
+    fail_msg: "Installer route '/install/install.php' failed. Verify web rewrite compatibility with public root."
+  when: glpi_install_route_expected
+  changed_when: false
+
+- name: Extract sample JS/CSS assets from root page
+  ansible.builtin.set_fact:
+    glpi_asset_paths: >-
+      {{
+        (
+          (glpi_root_route_check.content | default(''))
+          | regex_findall('(?:src|href)=["''](/[^"''?#]+\\.(?:js|css))')
+          | unique
+          | list
+        )[:3]
+      }}
+  changed_when: false
+
+- name: Check representative static assets
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}{{ item }}"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    follow_redirects: safe
+    status_code: [200, 301, 302, 304]
+    validate_certs: false
+  loop: "{{ glpi_asset_paths }}"
+  when: glpi_asset_paths | length > 0
+  changed_when: false
+
+- name: Ensure sensitive paths stay blocked
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/{{ item }}"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    follow_redirects: none
+    status_code: [403, 404]
+    validate_certs: false
+  loop:
+    - config/config_db.php
+    - files/_sessions/
+    - vendor/autoload.php
+  changed_when: false
+
+- name: Ensure arbitrary PHP outside router is blocked
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/should-not-exist.php"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    follow_redirects: none
+    status_code: [403, 404]
+    validate_certs: false
+  changed_when: false

@@ -76,4 +76,5 @@ Dual-server local flow without cross-host SSH:
 - [Prerequisites matrix](docs/product/prerequisites-matrix.md)
 - [Monitoring blueprint](docs/product/monitoring-blueprint.md)
 - [Product audit](docs/product/product-audit.md)
+- [Final compliance access report](docs/product/final-compliance-access-report.md)
 - [Standards catalog](docs/standards/index.md)
