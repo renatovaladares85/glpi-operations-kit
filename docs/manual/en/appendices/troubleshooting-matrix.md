@@ -62,6 +62,18 @@
   - permissive mode: continue with warning and evidence
 - Safe resume: run only the next required stage.
 
+## Web server mismatch (single-engine policy)
+
+- Symptom: `deploy check` or `deploy apply app` is blocked by `single-web-server` policy.
+- Validate:
+  - configured engine: `grep '^WEB_SERVER_TYPE=' config/<env>.env`
+  - active services: `systemctl is-active nginx apache2 lighttpd`
+- Fix:
+  - keep only one active engine matching `WEB_SERVER_TYPE`;
+  - stop/disable conflicting engines on the host.
+- Safe resume:
+  - rerun `./scripts/glpictl.sh <env> deploy check all` and then `deploy apply app`.
+
 ## TLS provided files missing
 
 - Symptom: `tls install-provided` fails.

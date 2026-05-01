@@ -8,7 +8,7 @@ from pathlib import Path
 EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
-WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd", "iis"}
+WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
 
 DEFAULT_GLPI_APP_PACKAGES = [
     "php-fpm",
@@ -36,7 +36,6 @@ WEB_SERVER_PACKAGES = {
     "nginx": ["nginx"],
     "apache": ["apache2", "libapache2-mod-fcgid"],
     "lighttpd": ["lighttpd"],
-    "iis": [],
 }
 
 DEFAULT_DATABASE_PACKAGES = ["mariadb-server", "mariadb-client", "python3-pymysql"]
@@ -368,7 +367,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         fail("TLS_MODE must be one of: none, self_signed, provided.")
     web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
     if web_server_type not in WEB_SERVER_TYPES:
-        fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd, iis.")
+        fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.")
 
     environment_name = require_value(values, "ENVIRONMENT_NAME").strip()
     release_root = read_value(values, "PATH_GLPI_RELEASE_ROOT", "/usr/share").strip() or "/usr/share"

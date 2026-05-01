@@ -223,7 +223,7 @@ validate_app_runtime_contract() {
   env_http_port="$(require_env_key "NGINX_HTTP_PORT" "nginx listen port for HTTP entrypoint")"
   env_fpm_socket="$(require_env_key "PHP_FPM_SOCKET" "php-fpm socket used by nginx fastcgi_pass")"
   env_install_dir="$(require_env_key "PATH_GLPI_INSTALL_DIR" "GLPI installation root used by nginx document root")"
-  env_web_server_type="$(require_env_key "WEB_SERVER_TYPE" "web server selection for app installation (nginx|apache|lighttpd|iis)")"
+  env_web_server_type="$(require_env_key "WEB_SERVER_TYPE" "web server selection for app installation (nginx|apache|lighttpd)")"
 
   rt_glpi_domain="$(require_runtime_key "glpi_domain" "rendered hostname consumed by app role")"
   rt_fpm_socket="$(require_runtime_key "glpi_php_fpm_socket" "rendered php-fpm socket consumed by app role")"
@@ -239,6 +239,53 @@ validate_app_runtime_contract() {
 
   echo "Config contract loaded: GLPI_DOMAIN=$env_glpi_domain, TOPOLOGY_APP_HOST=$env_app_host, NGINX_HTTP_PORT=$env_http_port, PHP_FPM_SOCKET=$env_fpm_socket, PATH_GLPI_INSTALL_DIR=$env_install_dir, WEB_SERVER_TYPE=$env_web_server_type"
   echo "Runtime contract loaded: glpi_domain=$rt_glpi_domain, glpi_php_fpm_socket=$rt_fpm_socket, glpi_install_dir=$rt_install_dir, nginx_http_port=$rt_http_port, glpi_web_server_type=$rt_web_server_type"
+}
+
+is_service_active() {
+  local service_name="$1"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet "$service_name" 2>/dev/null
+    return $?
+  fi
+  return 1
+}
+
+enforce_single_web_server_contract() {
+  local selected_type
+  selected_type="$(read_product_config_value "$ENVIRONMENT" "WEB_SERVER_TYPE" || true)"
+  if [[ -z "${selected_type// }" ]]; then
+    echo "Missing required config key: WEB_SERVER_TYPE" >&2
+    exit 1
+  fi
+  selected_type="${selected_type,,}"
+
+  local active_nginx="false" active_apache="false" active_lighttpd="false"
+  is_service_active "nginx" && active_nginx="true"
+  is_service_active "apache2" && active_apache="true"
+  is_service_active "lighttpd" && active_lighttpd="true"
+
+  local conflict_details=""
+  case "$selected_type" in
+    nginx)
+      [[ "$active_apache" == "true" ]] && conflict_details="${conflict_details}apache2 active; "
+      [[ "$active_lighttpd" == "true" ]] && conflict_details="${conflict_details}lighttpd active; "
+      ;;
+    apache)
+      [[ "$active_nginx" == "true" ]] && conflict_details="${conflict_details}nginx active; "
+      [[ "$active_lighttpd" == "true" ]] && conflict_details="${conflict_details}lighttpd active; "
+      ;;
+    lighttpd)
+      [[ "$active_nginx" == "true" ]] && conflict_details="${conflict_details}nginx active; "
+      [[ "$active_apache" == "true" ]] && conflict_details="${conflict_details}apache2 active; "
+      ;;
+  esac
+
+  if [[ -n "${conflict_details// }" ]]; then
+    policy_violation \
+      "single-web-server" \
+      "WEB_SERVER_TYPE=$selected_type but conflicting web service(s) detected: ${conflict_details}" \
+      "Stop/disable non-selected web server services on this host, or switch WEB_SERVER_TYPE to match the active engine."
+  fi
 }
 
 enforce_local_target_consistency() {
@@ -542,6 +589,9 @@ run_deploy() {
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
   if [[ "$mode" == "check" ]]; then
+    case "$target" in
+      app|all) enforce_single_web_server_contract ;;
+    esac
     write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
     mark_apply_sequence "$mode" "$target"
@@ -551,7 +601,10 @@ run_deploy() {
 
   if [[ "$mode" == "apply" ]]; then
     case "$target" in
-      app|all) validate_app_runtime_contract ;;
+      app|all)
+        validate_app_runtime_contract
+        enforce_single_web_server_contract
+        ;;
     esac
   fi
 

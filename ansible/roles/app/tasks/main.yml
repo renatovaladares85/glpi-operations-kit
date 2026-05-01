@@ -40,14 +40,8 @@
 - name: Assert valid web server type
   ansible.builtin.assert:
     that:
-      - glpi_web_server_type in ['nginx', 'apache', 'lighttpd', 'iis']
-    fail_msg: "Invalid glpi_web_server_type. Supported values: nginx, apache, lighttpd, iis."
-
-- name: Block IIS on Linux execution hosts
-  ansible.builtin.assert:
-    that:
-      - not (glpi_web_server_type == 'iis' and ansible_system == 'Linux')
-    fail_msg: "WEB_SERVER_TYPE=iis is not supported on Linux hosts. Use nginx, apache, or lighttpd on Ubuntu."
+      - glpi_web_server_type in ['nginx', 'apache', 'lighttpd']
+    fail_msg: "Invalid glpi_web_server_type. Supported values: nginx, apache, lighttpd."
 
 - name: Assert provided TLS inputs exist
   ansible.builtin.assert:

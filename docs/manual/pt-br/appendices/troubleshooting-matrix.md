@@ -62,6 +62,18 @@
   - modo permissivo: continuar com warning e evidência
 - Retomada segura: executar somente a próxima etapa necessária.
 
+## Conflito de servidor web (política de engine único)
+
+- Sintoma: `deploy check` ou `deploy apply app` é bloqueado pela política `single-web-server`.
+- Validação:
+  - engine configurado: `grep '^WEB_SERVER_TYPE=' config/<env>.env`
+  - serviços ativos: `systemctl is-active nginx apache2 lighttpd`
+- Correção:
+  - manter apenas um engine ativo, correspondente ao `WEB_SERVER_TYPE`;
+  - parar/desabilitar engines conflitantes no host.
+- Retomada segura:
+  - repetir `./scripts/glpictl.sh <env> deploy check all` e depois `deploy apply app`.
+
 ## Falha em `tls install-provided`
 
 - Sintoma: ação TLS falha.
