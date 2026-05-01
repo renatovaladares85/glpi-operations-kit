@@ -37,9 +37,10 @@ Exemplos no `config/<environment>.env`:
 - lighttpd automático:
   - `WEB_SERVER_TYPE=lighttpd`
   - `GLPI_APP_PACKAGES=`
-- IIS somente referência:
-  - `WEB_SERVER_TYPE=iis`
-  - Em hosts Ubuntu/Linux essa opção é bloqueada pela política da role de aplicação.
+- Valores suportados no Linux:
+  - `WEB_SERVER_TYPE=nginx`
+  - `WEB_SERVER_TYPE=apache`
+  - `WEB_SERVER_TYPE=lighttpd`
 
 Exemplo de override manual:
 
