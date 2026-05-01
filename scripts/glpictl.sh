@@ -288,6 +288,51 @@ enforce_single_web_server_contract() {
   fi
 }
 
+print_web_engine_postcheck_summary() {
+  local selected_type
+  selected_type="$(read_product_config_value "$ENVIRONMENT" "WEB_SERVER_TYPE" || true)"
+  selected_type="${selected_type,,}"
+  [[ -z "${selected_type// }" ]] && selected_type="unknown"
+
+  local nginx_state="inactive" apache_state="inactive" lighttpd_state="inactive"
+  is_service_active "nginx" && nginx_state="active"
+  is_service_active "apache2" && apache_state="active"
+  is_service_active "lighttpd" && lighttpd_state="active"
+
+  local active_list=""
+  [[ "$nginx_state" == "active" ]] && active_list="${active_list}nginx,"
+  [[ "$apache_state" == "active" ]] && active_list="${active_list}apache,"
+  [[ "$lighttpd_state" == "active" ]] && active_list="${active_list}lighttpd,"
+  active_list="${active_list%,}"
+  [[ -z "${active_list// }" ]] && active_list="none"
+
+  local conflict_list=""
+  case "$selected_type" in
+    nginx)
+      [[ "$apache_state" == "active" ]] && conflict_list="${conflict_list}apache,"
+      [[ "$lighttpd_state" == "active" ]] && conflict_list="${conflict_list}lighttpd,"
+      ;;
+    apache)
+      [[ "$nginx_state" == "active" ]] && conflict_list="${conflict_list}nginx,"
+      [[ "$lighttpd_state" == "active" ]] && conflict_list="${conflict_list}lighttpd,"
+      ;;
+    lighttpd)
+      [[ "$nginx_state" == "active" ]] && conflict_list="${conflict_list}nginx,"
+      [[ "$apache_state" == "active" ]] && conflict_list="${conflict_list}apache,"
+      ;;
+  esac
+  conflict_list="${conflict_list%,}"
+  [[ -z "${conflict_list// }" ]] && conflict_list="none"
+
+  echo "Web engine post-check summary:"
+  echo "  selected_engine: $selected_type"
+  echo "  active_engines: $active_list"
+  echo "  nginx_status: $nginx_state"
+  echo "  apache_status: $apache_state"
+  echo "  lighttpd_status: $lighttpd_state"
+  echo "  conflicts: $conflict_list"
+}
+
 enforce_local_target_consistency() {
   local domain="$1"
   local action="$2"
@@ -648,6 +693,9 @@ run_deploy() {
           ;;
       esac
       invoke_ansible "$ENVIRONMENT" "$post_check_tags" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
+      if [[ "$target" == "app" || "$target" == "all" ]]; then
+        print_web_engine_postcheck_summary
+      fi
       mark_apply_sequence "$mode" "$target"
       ;;
     *) echo "Unsupported deploy action: $mode (expected check|apply|post-check)" >&2; exit 1 ;;
