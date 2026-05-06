@@ -38,7 +38,7 @@ Esse comando cria o baseline do ambiente. Os scripts carregam esse arquivo autom
 ./scripts/glpictl.sh <env> deploy post-check all
 ```
 
-`deploy check all` valida ferramentas, permissões, política, inventário, host role e baseline de runtime antes de mudança mutável. `deploy apply db` aplica MariaDB e provisionamento de base/usuário/grants. `deploy apply app` aplica layout GLPI, web server, PHP-FPM e integração com banco. `deploy apply monitoring` aplica exporters e baseline de observabilidade. `deploy apply backup` aplica baseline de backup e retenção. `deploy post-check all` confirma validade operacional após as etapas mutáveis.
+`deploy check all` valida ferramentas, permissões, política, inventário, host role e baseline de runtime antes de mudança mutável. No fluxo local do host APP, também valida `mariadb-client` e pode auto-corrigir `php-bcmath` para baseline GLPI 11. `deploy apply db` aplica MariaDB e provisionamento de base/usuário/grants. `deploy apply app` aplica layout GLPI, engine web selecionado (`nginx`, `apache` ou `lighttpd`), PHP-FPM, validações obrigatórias de extensão PHP e teste de conectividade APP->DB (`SELECT 1`). `deploy apply monitoring` aplica exporters e baseline de observabilidade. `deploy apply backup` aplica baseline de backup e retenção. `deploy post-check all` confirma validade operacional após as etapas mutáveis e imprime resumo explícito do engine web.
 
 ## Fluxo dual-server local (sem SSH direto entre servidores)
 

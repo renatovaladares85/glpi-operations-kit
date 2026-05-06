@@ -42,10 +42,17 @@ Examples in `config/<environment>.env`:
   - `WEB_SERVER_TYPE=apache`
   - `WEB_SERVER_TYPE=lighttpd`
 
-Manual override example:
+Manual override examples:
 
-- `WEB_SERVER_TYPE=nginx`
-- `GLPI_APP_PACKAGES=nginx,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl`
+- Nginx:
+  - `WEB_SERVER_TYPE=nginx`
+  - `GLPI_APP_PACKAGES=nginx,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
+- Apache:
+  - `WEB_SERVER_TYPE=apache`
+  - `GLPI_APP_PACKAGES=apache2,libapache2-mod-fcgid,libapache2-mod-php8.3,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
+- lighttpd:
+  - `WEB_SERVER_TYPE=lighttpd`
+  - `GLPI_APP_PACKAGES=lighttpd,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
 
 ## Runtime file map
 

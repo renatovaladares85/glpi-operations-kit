@@ -17,7 +17,8 @@ Canonical files:
 1. Operator creates `config/<environment>.env` from `config/product.env`.
 2. Scripts load `config/<environment>.env` automatically.
 3. Scripts render `.runtime/<environment>/public.runtime.yml` and `.runtime/<environment>/inventory.runtime.yml`.
-4. Missing secret keys are collected into `.runtime/<environment>/secrets.yml`.
+4. Secret keys are read from `config/<environment>.env` and materialized into `.runtime/<environment>/secrets.yml`.
+5. If a required secret key is missing in `config/<environment>.env`, execution fails early with explicit remediation.
 5. Ansible consumes `public.runtime.yml`, `overrides.runtime.yml`, and `secrets.yml`.
 
 ## Runtime precedence
@@ -67,10 +68,28 @@ The configuration keys are grouped by operational domain:
 
 ## Secret keys (runtime only)
 
-The minimum required secret keys are:
+The minimum required secret keys in `config/<environment>.env` are:
 
 - `glpi_db_password`
 - `glpi_db_root_password`
 - `mysqld_exporter_password`
 
-Secrets are prompted at runtime when missing and never stored in public config.
+Secrets are never versioned in Git. They are copied from the environment file into runtime secret artifacts and restricted on disk.
+
+## Web engine and package resolution contract
+
+`WEB_SERVER_TYPE` is mandatory and must be one of:
+
+- `nginx`
+- `apache`
+- `lighttpd`
+
+`GLPI_APP_PACKAGES` behavior:
+
+- Empty (`GLPI_APP_PACKAGES=`): automatic package mapping from renderer.
+- Filled: full manual override (operator owns coherence with selected engine).
+
+Automatic source of truth is `scripts/lib/render_product_config.py`, which maps:
+
+- `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE]`
+- plus `DEFAULT_GLPI_APP_PACKAGES` (including `php-bcmath` and `mariadb-client` in the baseline).

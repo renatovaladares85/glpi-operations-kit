@@ -70,9 +70,9 @@ When `SECURITY_REQUIRE_ORDERED_EXECUTION=true` and effective `SECURITY_MODE=secu
 
 | Command | Where to run | Operational purpose |
 |---|---|---|
-| `./scripts/glpictl.sh staging deploy check all` | current host | Runs precheck, verifies permissions, validates config loading, materializes runtime files, validates inventory rendering, and confirms policy contract before any mutable change. |
+| `./scripts/glpictl.sh staging deploy check all` | current host | Runs precheck, verifies permissions, validates config loading, materializes runtime files, validates inventory rendering, confirms policy contract, and in app-host local flow validates/auto-installs `mariadb-client` and PHP `bcmath` for GLPI 11 baseline. |
 | `./scripts/glpictl.sh staging deploy apply db` | DB host in local dual-server, or orchestrator host in ssh mode | Installs and hardens MariaDB packages, applies DB runtime parameters, provisions GLPI database/user/grants, and enforces DB-side access constraints for app origin. |
-| `./scripts/glpictl.sh staging deploy apply app` | APP host in local dual-server, or orchestrator host in ssh mode | Installs app packages, deploys GLPI layout outside web root, configures Nginx + PHP-FPM, applies TLS mode template, and configures app connectivity to database. |
+| `./scripts/glpictl.sh staging deploy apply app` | APP host in local dual-server, or orchestrator host in ssh mode | Installs app packages, deploys GLPI layout outside web root, configures selected web engine + PHP-FPM, applies TLS mode template, validates `bcmath`, and verifies APP->DB connectivity with `SELECT 1` using GLPI DB user. |
 | `./scripts/glpictl.sh staging deploy apply monitoring` | APP host (and DB host according to role scope) | Installs and configures monitoring exporters and baseline observability settings from runtime values. |
 | `./scripts/glpictl.sh staging deploy apply backup` | APP host (and DB host according to role scope) | Applies backup baseline, retention policy settings, and backup runtime artifacts used for operational checks. |
 | `./scripts/glpictl.sh staging deploy post-check all` | current host | Runs post-deploy validations, service-level checks, and policy-related checks after mutable stages complete. |
@@ -102,7 +102,7 @@ The minimum operational validation after deployment is: GLPI page reachable, DB 
 
 During install phase, the application must expose `/` and route installer flow correctly from `/install/install.php` without returning 404. Static assets referenced by the install page (`.js` and `.css`) must be reachable, and sensitive paths must remain blocked even while the installer is open. The automated checks now validate this contract for the selected engine by querying local loopback with the configured host header and by asserting blocked responses for sensitive paths such as `config/`, `files/`, and `vendor/`.
 
-If `/` opens but installer redirect fails, run `./scripts/glpictl.sh <env> deploy apply app` again and verify the generated web template for your selected engine. For Nginx, compatibility routing for `/install/install.php` is enforced while keeping `public` as web root and preserving direct PHP exposure restrictions.
+If `/` opens but installer redirect fails, run `./scripts/glpictl.sh <env> deploy apply app` again and verify the generated web template for your selected engine. For Nginx, compatibility routing for `/install/install.php` is enforced while keeping `public` as web root and applying allowlist-only PHP execution (`/index.php`, `/ajax/*.php`, `/front/*.php`, `/report/*.php`, `/plugins/*.php`) with non-approved direct PHP paths blocked.
 
 ## Related appendices
 

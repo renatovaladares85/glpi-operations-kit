@@ -81,6 +81,37 @@
 - Fix: set valid local paths and rerun TLS action.
 - Safe resume: `./scripts/glpictl.sh <env> tls install-provided`.
 
+## Missing `bcmath` during GLPI install (QR code requirement)
+
+- Symptom: GLPI installer reports missing `bcmath`, or `deploy apply app` fails in PHP extension assertion.
+- Validate: `php -m | grep -i '^bcmath$'`
+- Fix:
+  - run `./scripts/glpictl.sh <env> deploy check all` and accept auto-install; or
+  - manual remediation: `sudo apt-get update && sudo apt-get install -y php-bcmath`
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy apply app`.
+
+## APP host cannot run DB connectivity checks
+
+- Symptom: app validation fails with `mysql: command not found` or APP->DB `SELECT 1` check fails.
+- Validate:
+  - `command -v mysql`
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --password --execute "SELECT 1;"`
+- Fix:
+  - install client: `sudo apt-get update && sudo apt-get install -y mariadb-client`
+  - confirm DB user/password and network path from APP host.
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy apply app`.
+
+## `/install/install.php` returns 404 or install flow breaks
+
+- Symptom: root page opens, but installer redirect path returns 404 or stops.
+- Validate:
+  - `curl -I -H "Host: <glpi-domain>" http://127.0.0.1:<http-port>/`
+  - `curl -I -H "Host: <glpi-domain>" http://127.0.0.1:<http-port>/install/install.php`
+- Fix:
+  - rerun `./scripts/glpictl.sh <env> deploy apply app` to re-render selected engine template;
+  - for nginx, confirm compatibility route and allowlist PHP locations exist in `nginx-glpi.conf`.
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy post-check app`.
+
 ## `render_product_config.py` NameError (`values` or `web_server_type`)
 
 - Symptom: `deploy check` fails with errors such as `NameError: name 'values' is not defined` or `NameError: name 'web_server_type' is not defined`.

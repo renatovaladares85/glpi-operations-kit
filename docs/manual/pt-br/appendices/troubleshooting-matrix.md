@@ -81,6 +81,37 @@
 - Correção: ajustar caminhos válidos e repetir ação TLS.
 - Retomada segura: `./scripts/glpictl.sh <env> tls install-provided`.
 
+## Falta de `bcmath` durante a instalação do GLPI (requisito de QR Code)
+
+- Sintoma: instalador do GLPI informa falta de `bcmath` ou o `deploy apply app` falha na validação de extensão PHP.
+- Validação: `php -m | grep -i '^bcmath$'`
+- Correção:
+  - executar `./scripts/glpictl.sh <env> deploy check all` e aceitar a auto-instalação; ou
+  - remediação manual: `sudo apt-get update && sudo apt-get install -y php-bcmath`
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy apply app`.
+
+## Host APP sem cliente MariaDB para testes de conectividade
+
+- Sintoma: validação da aplicação falha com `mysql: command not found` ou teste APP->DB `SELECT 1` falha.
+- Validação:
+  - `command -v mysql`
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --password --execute "SELECT 1;"`
+- Correção:
+  - instalar cliente: `sudo apt-get update && sudo apt-get install -y mariadb-client`
+  - confirmar usuário/senha do banco e caminho de rede a partir do host APP.
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy apply app`.
+
+## `/install/install.php` retorna 404 ou fluxo de instalação quebra
+
+- Sintoma: a página raiz abre, mas o caminho do instalador retorna 404 ou interrompe o fluxo.
+- Validação:
+  - `curl -I -H "Host: <glpi-domain>" http://127.0.0.1:<http-port>/`
+  - `curl -I -H "Host: <glpi-domain>" http://127.0.0.1:<http-port>/install/install.php`
+- Correção:
+  - repetir `./scripts/glpictl.sh <env> deploy apply app` para regenerar o template do engine selecionado;
+  - para nginx, confirmar rota de compatibilidade e allowlist de PHP no `nginx-glpi.conf`.
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy post-check app`.
+
 ## `render_product_config.py` com NameError (`values` ou `web_server_type`)
 
 - Sintoma: `deploy check` falha com erros como `NameError: name 'values' is not defined` ou `NameError: name 'web_server_type' is not defined`.

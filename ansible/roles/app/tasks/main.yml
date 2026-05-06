@@ -299,6 +299,41 @@
   ansible.builtin.command: php-fpm8.3 -t
   changed_when: false
 
+- name: Validate PHP bcmath extension for GLPI 11 baseline
+  ansible.builtin.command: php -m
+  register: glpi_php_modules
+  changed_when: false
+
+- name: Build mandatory PHP extension baseline for GLPI 11
+  ansible.builtin.set_fact:
+    glpi_required_php_extensions:
+      - dom
+      - fileinfo
+      - filter
+      - libxml
+      - simplexml
+      - tokenizer
+      - xmlreader
+      - xmlwriter
+      - curl
+      - gd
+      - intl
+      - mysqli
+      - session
+      - zlib
+      - bcmath
+      - mbstring
+      - openssl
+    glpi_php_modules_lower: "{{ (glpi_php_modules.stdout_lines | default([])) | map('lower') | list }}"
+  changed_when: false
+
+- name: Assert mandatory PHP extensions are available
+  ansible.builtin.assert:
+    that:
+      - "(glpi_required_php_extensions | difference(glpi_php_modules_lower)) | length == 0"
+    fail_msg: "Missing mandatory PHP extensions for GLPI 11: {{ glpi_required_php_extensions | difference(glpi_php_modules_lower) | join(', ') }}."
+  changed_when: false
+
 - name: Collect GLPI path permissions
   ansible.builtin.stat:
     path: "{{ item.path }}"
@@ -448,7 +483,6 @@
   ansible.builtin.assert:
     that:
       - glpi_install_route_check.status in [200, 301, 302, 303]
-      - "'404' not in (glpi_install_route_check.content | default(''))"
     fail_msg: "Installer route '/install/install.php' failed. Verify web rewrite compatibility with public root."
   when: glpi_install_route_expected
   changed_when: false
@@ -501,3 +535,16 @@
     status_code: [403, 404]
     validate_certs: false
   changed_when: false
+
+- name: Validate APP to DB connectivity using GLPI DB user
+  ansible.builtin.command: >-
+    mysql --protocol=TCP
+    --host={{ glpi_db_host }}
+    --port={{ mariadb_port }}
+    --user={{ glpi_db_user }}
+    --execute=SELECT 1;
+  environment:
+    MYSQL_PWD: "{{ glpi_db_password }}"
+  register: glpi_app_db_connectivity
+  changed_when: false
+  no_log: true

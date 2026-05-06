@@ -66,9 +66,9 @@ Quando `SECURITY_REQUIRE_ORDERED_EXECUTION=true` e o modo efetivo é `SECURITY_M
 
 | Comando | Onde executar | Finalidade operacional |
 |---|---|---|
-| `./scripts/glpictl.sh staging deploy check all` | host atual | Executa precheck, valida permissões, valida carregamento de config, materializa runtime, valida inventário e contrato de política antes de alterações mutáveis. |
+| `./scripts/glpictl.sh staging deploy check all` | host atual | Executa precheck, valida permissões, valida carregamento de config, materializa runtime, valida inventário e contrato de política antes de alterações mutáveis. No fluxo local do host APP, também valida e pode auto-instalar `mariadb-client` e a extensão PHP `bcmath` (baseline GLPI 11). |
 | `./scripts/glpictl.sh staging deploy apply db` | host DB no dual-server local, ou host orquestrador em modo ssh | Instala e aplica hardening no MariaDB, configura parâmetros, provisiona base/usuário/grants do GLPI e aplica restrições de origem de acesso da app. |
-| `./scripts/glpictl.sh staging deploy apply app` | host APP no dual-server local, ou host orquestrador em modo ssh | Instala pacotes da aplicação, publica layout GLPI fora da web root, configura web server + PHP-FPM, aplica template TLS e conectividade com banco. |
+| `./scripts/glpictl.sh staging deploy apply app` | host APP no dual-server local, ou host orquestrador em modo ssh | Instala pacotes da aplicação, publica layout GLPI fora da web root, configura o engine web selecionado + PHP-FPM, aplica template TLS, valida `bcmath` e testa conectividade APP->DB com `SELECT 1` usando o usuário do GLPI. |
 | `./scripts/glpictl.sh staging deploy apply monitoring` | APP (e DB conforme escopo) | Instala e configura exporters e baseline de observabilidade com base no runtime. |
 | `./scripts/glpictl.sh staging deploy apply backup` | APP (e DB conforme escopo) | Aplica baseline de backup, retenção e artefatos operacionais para validação e restore. |
 | `./scripts/glpictl.sh staging deploy post-check all` | host atual | Executa validações pós-implantação e checagens de serviço após etapas mutáveis. |
@@ -100,7 +100,7 @@ Durante a fase de instalação, a aplicação deve expor `/` e resolver o fluxo 
 
 Os checks automáticos validam esse contrato para o engine selecionado no host, consultando loopback local com header de host configurado e confirmando respostas bloqueadas para paths sensíveis.
 
-Se `/` abrir e o redirecionamento do instalador falhar, execute novamente `./scripts/glpictl.sh <env> deploy apply app` e valide o template web do engine selecionado. Para Nginx, a compatibilidade com `/install/install.php` está aplicada sem abrir execução PHP ampla fora do roteador.
+Se `/` abrir e o redirecionamento do instalador falhar, execute novamente `./scripts/glpictl.sh <env> deploy apply app` e valide o template web do engine selecionado. Para Nginx, a compatibilidade com `/install/install.php` está aplicada mantendo execução PHP por allowlist (`/index.php`, `/ajax/*.php`, `/front/*.php`, `/report/*.php`, `/plugins/*.php`) e bloqueio para rotas PHP não aprovadas.
 
 ## Validação e troubleshooting
 

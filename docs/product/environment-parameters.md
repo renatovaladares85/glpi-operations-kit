@@ -51,6 +51,7 @@ Edit key values and keep secrets out of this file. Runtime secrets stay in `.run
 |---|---|---|---|---|
 | `GLPI_VERSION` | yes | GLPI release version | semantic version; `11.0.0` | download and deploy logic |
 | `GLPI_DOMAIN` | yes | GLPI endpoint domain | FQDN; `glpi.example.internal` | Nginx and smoke checks |
+| `WEB_SERVER_TYPE` | yes | Selects the single web engine used on host | `nginx`, `apache`, `lighttpd` | renderer, app role, single-engine policy |
 | `GLPI_UPLOAD_MAX_FILESIZE` | optional | Upload limit | PHP size; `32M` | PHP runtime template |
 | `GLPI_POST_MAX_SIZE` | optional | POST body limit | PHP size; `32M` | PHP runtime template |
 | `GLPI_MEMORY_LIMIT` | optional | PHP memory ceiling | PHP size; `512M` | PHP runtime template |
@@ -59,7 +60,13 @@ Edit key values and keep secrets out of this file. Runtime secrets stay in `.run
 | `GLPI_CRON_SCHEDULE` | optional | GLPI cron cadence | quoted cron; `"*/5 * * * *"` | app role cron task |
 | `GLPI_FILESYSTEM_OWNER` | optional | Owner for writable paths | Linux user; `www-data` | permissions |
 | `GLPI_FILESYSTEM_GROUP` | optional | Group for writable paths | Linux group; `www-data` | permissions |
-| `GLPI_APP_PACKAGES` | optional | App package baseline | CSV package list | package install tasks |
+| `GLPI_APP_PACKAGES` | optional | App package baseline | CSV package list; leave empty for automatic mapping based on `WEB_SERVER_TYPE` | package install tasks |
+
+Automatic package source for `GLPI_APP_PACKAGES=`:
+
+- Renderer file: `scripts/lib/render_product_config.py`
+- Formula: `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE] + DEFAULT_GLPI_APP_PACKAGES`
+- Current auto baseline includes `php-bcmath` (GLPI 11 requirement) and `mariadb-client` (APP->DB connectivity validation support).
 
 ## Database parameters
 

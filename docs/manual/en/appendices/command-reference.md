@@ -38,7 +38,7 @@ This creates your environment baseline. The scripts read this file automatically
 ./scripts/glpictl.sh <env> deploy post-check all
 ```
 
-`deploy check all` is the operational gate before mutation. It validates tools, permissions, policy flags, inventory rendering, host role consistency, and runtime baseline materialization. `deploy apply db` handles MariaDB packages, hardening, schema, user grants, and DB-access restrictions. `deploy apply app` configures GLPI application layout, Nginx, PHP-FPM, and app-to-DB integration. `deploy apply monitoring` applies exporter baseline and monitoring wiring. `deploy apply backup` applies backup baseline and retention-related settings. `deploy post-check all` confirms service validity after mutable stages.
+`deploy check all` is the operational gate before mutation. It validates tools, permissions, policy flags, inventory rendering, host role consistency, and runtime baseline materialization. In app-host local flow, it also validates `mariadb-client` and can auto-fix `php-bcmath` for GLPI 11. `deploy apply db` handles MariaDB packages, hardening, schema, user grants, and DB-access restrictions. `deploy apply app` configures GLPI application layout, selected web engine (`nginx`, `apache`, or `lighttpd`), PHP-FPM, mandatory PHP extension checks, and APP->DB connectivity validation (`SELECT 1`). `deploy apply monitoring` applies exporter baseline and monitoring wiring. `deploy apply backup` applies backup baseline and retention-related settings. `deploy post-check all` confirms service validity after mutable stages and prints explicit web-engine summary.
 
 ## Dual-server local flow (no direct SSH between servers)
 

@@ -17,6 +17,7 @@ DEFAULT_GLPI_APP_PACKAGES = [
     "php-gd",
     "php-intl",
     "php-mbstring",
+    "php-bcmath",
     "php-mysql",
     "php-xml",
     "php-zip",
@@ -30,6 +31,7 @@ DEFAULT_GLPI_APP_PACKAGES = [
     "xz-utils",
     "curl",
     "openssl",
+    "mariadb-client",
 ]
 
 WEB_SERVER_PACKAGES = {
@@ -405,6 +407,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "glpi_backup_base_dir": read_value(values, "BACKUP_BASE_DIR", "/var/backups/glpi"),
         "glpi_domain": glpi_domain,
         "glpi_app_host": app_host,
+        "glpi_db_host": require_value(values, "TOPOLOGY_DB_HOST"),
         "glpi_web_server_type": web_server_type,
         "glpi_use_tls": tls_mode != "none",
         "glpi_tls_mode": tls_mode,

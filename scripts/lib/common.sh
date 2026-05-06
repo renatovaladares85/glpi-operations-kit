@@ -1175,6 +1175,58 @@ check_or_install_python_yaml_support() {
   return 1
 }
 
+php_extension_enabled() {
+  local extension_name="$1"
+  if ! command -v php >/dev/null 2>&1; then
+    return 1
+  fi
+  php -m 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -Fx "$extension_name" >/dev/null 2>&1
+}
+
+check_or_install_php_extension() {
+  local level="$1"
+  local extension_name="$2"
+  local package_name="$3"
+  local answer=""
+
+  if php_extension_enabled "$extension_name"; then
+    preflight_print_result "$level" "ok" "php extension '$extension_name' found"
+    return 0
+  fi
+
+  preflight_print_result "$level" "fail" "php extension '$extension_name' not found"
+  if [[ "$PREFLIGHT_AUTO_INSTALL" == "always" ]]; then
+    answer="y"
+  else
+    echo "PHP extension '$extension_name' is missing (${level})."
+    if prompt_yes_no "Install now on this Ubuntu host using package '${package_name}'?"; then
+      answer="y"
+    else
+      answer="n"
+    fi
+  fi
+
+  if [[ "$answer" != "y" ]]; then
+    return 1
+  fi
+
+  if install_command_ubuntu "$package_name" "$package_name"; then
+    if php_extension_enabled "$extension_name"; then
+      preflight_print_result "$level" "ok" "php extension '$extension_name' installed successfully"
+      return 0
+    fi
+  fi
+
+  echo "Automatic installation failed for PHP extension '${extension_name}'." >&2
+  echo "Manual remediation (Ubuntu):" >&2
+  if command -v sudo >/dev/null 2>&1; then
+    echo "  sudo apt-get update && sudo apt-get install -y ${package_name}" >&2
+  else
+    echo "  apt-get update && apt-get install -y ${package_name}" >&2
+  fi
+  return 1
+}
+
 normalize_bool_value() {
   local value="$1"
   local default_value="$2"
@@ -1248,10 +1300,11 @@ run_preflight_checks() {
   local runtime_base_dir="$SCRIPT_ROOT/../.runtime"
   local marker_file
   local items_file
-  local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled
+  local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled glpi_version
   local require_tls require_https require_sso require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
   local execution_mode host_role
+  local app_stack_expected glpi_major_version glpi_requires_bcmath
   local promotion_gate_path
   marker_file="$(bootstrap_marker_path)"
   items_file="$(preflight_items_file_path "$environment")"
@@ -1390,6 +1443,7 @@ run_preflight_checks() {
     ssh_user="$(read_product_config_value "$environment" "network.ssh.user" || true)"
     app_host="$(read_product_config_value "$environment" "topology.app.host" || true)"
     db_host="$(read_product_config_value "$environment" "topology.db.host" || true)"
+    glpi_version="$(read_product_config_value "$environment" "glpi.version" || true)"
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
     sso_enabled="$(read_product_config_value "$environment" "security.sso_enabled" || true)"
     security_mode="$(resolve_security_mode_for_environment "$environment")"
@@ -1418,6 +1472,58 @@ run_preflight_checks() {
     else
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
         "Host role controls allowed mutable actions in local mode." "GLPI_HOST_ROLE env var or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env" "set app/db/all" "true" "pass" "role=${host_role}"
+    fi
+
+    app_stack_expected="false"
+    if [[ "$command_domain" == "deploy" ]]; then
+      case "$command_target" in
+        app|all)
+          if [[ "$execution_mode" == "local" ]]; then
+            if [[ "$host_role" == "app" || "$host_role" == "all" ]]; then
+              app_stack_expected="true"
+            fi
+          fi
+          ;;
+      esac
+    fi
+
+    glpi_major_version="0"
+    if [[ "$glpi_version" =~ ^([0-9]+)\. ]]; then
+      glpi_major_version="${BASH_REMATCH[1]}"
+    fi
+    glpi_requires_bcmath="false"
+    if (( glpi_major_version >= 11 )); then
+      glpi_requires_bcmath="true"
+    fi
+
+    if [[ "$app_stack_expected" == "true" ]]; then
+      if check_or_install_command "mandatory" "mysql" "mariadb-client"; then
+        append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
+          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "apt install mariadb-client" "true" "pass" "none"
+      else
+        append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
+          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "apt install mariadb-client" "true" "fail" "Install mariadb-client and rerun precheck."
+        mandatory_failures=$((mandatory_failures + 1))
+      fi
+    else
+      append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "non-app local target or ssh execution" "not-applicable" \
+        "MariaDB client on local host is required only for app-host local verification flow." "command -v mysql" "n/a" "false" "skip" "none"
+    fi
+
+    if [[ "$glpi_requires_bcmath" == "true" ]]; then
+      if [[ "$app_stack_expected" == "true" ]]; then
+        if check_or_install_php_extension "mandatory" "bcmath" "php-bcmath"; then
+          append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
+            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "pass" "none"
+        else
+          append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
+            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "fail" "Install php-bcmath and rerun precheck."
+          mandatory_failures=$((mandatory_failures + 1))
+        fi
+      else
+        append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "non-app local target or ssh execution" "not-applicable" \
+          "bcmath is enforced on the app host runtime; remote or db-host local checks skip local PHP verification." "php -m | grep -i '^bcmath$'" "n/a" "false" "skip" "none"
+      fi
     fi
 
     if [[ "$security_mode" == "invalid" ]]; then
