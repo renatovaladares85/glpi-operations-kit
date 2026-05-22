@@ -113,6 +113,21 @@ EXECUTION_MODE_EFFECTIVE=""
 HOST_ROLE_EFFECTIVE=""
 TOPOLOGY_MODE_EFFECTIVE="dual-server"
 ASSUME_DB_APPLIED="false"
+AUTH_MODE_EFFECTIVE="local"
+AUTH_EXTERNAL_ENABLED_EFFECTIVE="false"
+AUTH_LDAP_ENABLED_EFFECTIVE="false"
+AUTH_SAML_ENABLED_EFFECTIVE="false"
+AUTH_OIDC_ENABLED_EFFECTIVE="false"
+AUTH_PROTOCOL_EFFECTIVE=""
+SSO_PUBLIC_URL_EFFECTIVE=""
+SSO_REQUIRE_PUBLIC_URL_EFFECTIVE="true"
+AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE="true"
+AUTH_SAML_PLUGIN_NAME_EFFECTIVE="saml"
+AUTH_SAML_ENTITY_ID_EFFECTIVE=""
+AUTH_SAML_ACS_URL_EFFECTIVE=""
+AUTH_SAML_LOGOUT_URL_EFFECTIVE=""
+AUTH_SAML_PLUGIN_PRESENT="false"
+AUTH_EVIDENCE_DIR="$(runtime_evidence_dir "$ENVIRONMENT")/auth"
 
 normalize_bool() {
   local value="$1"
@@ -127,6 +142,50 @@ yaml_escape() {
   local value="$1"
   value="${value//\'/\'\'}"
   printf "%s" "$value"
+}
+
+read_effective_runtime_value() {
+  local key="$1"
+  local default_value="${2:-}"
+  local value
+  value="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "$key" || true)"
+  [[ -z "${value// }" ]] && value="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "$key" || true)"
+  [[ -z "${value// }" ]] && value="$default_value"
+  echo "$value"
+}
+
+version_gte() {
+  local current="$1"
+  local minimum="$2"
+  [[ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" == "$minimum" ]]
+}
+
+auth_requires_external() {
+  if [[ "$AUTH_EXTERNAL_ENABLED_EFFECTIVE" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$AUTH_MODE_EFFECTIVE" != "local" ]]; then
+    return 0
+  fi
+  if [[ "$AUTH_LDAP_ENABLED_EFFECTIVE" == "true" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" || "$AUTH_OIDC_ENABLED_EFFECTIVE" == "true" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+auth_requires_https() {
+  if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_MODE_EFFECTIVE" == "oidc" ]]; then
+    return 0
+  fi
+  if [[ "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" || "$AUTH_OIDC_ENABLED_EFFECTIVE" == "true" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+ensure_auth_evidence_dir() {
+  ensure_directory "$AUTH_EVIDENCE_DIR"
+  chmod 700 "$AUTH_EVIDENCE_DIR" >/dev/null 2>&1 || true
 }
 
 read_policy_flag() {
@@ -376,7 +435,7 @@ resolve_policy_contract() {
 
 is_mutating_operation() {
   case "$DOMAIN/$ACTION" in
-    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*) return 0 ;;
+    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*|auth/prepare|auth/apply|auth/rollback) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -798,23 +857,262 @@ run_promote() {
   run_deploy apply "$TARGET"
 }
 
-run_auth() {
-  local auth_action="$ACTION"
-  local auth_mode
-
-  ensure_runtime_inputs_if_missing "false"
-  auth_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_mode" || true)"
-  [[ -z "${auth_mode// }" ]] && auth_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "auth_mode" || true)"
-  auth_mode="${auth_mode,,}"
-  [[ -z "${auth_mode// }" ]] && auth_mode="local"
-
-  case "$auth_mode" in
+resolve_auth_contract() {
+  AUTH_MODE_EFFECTIVE="$(read_effective_runtime_value "auth_mode" "local")"
+  AUTH_MODE_EFFECTIVE="${AUTH_MODE_EFFECTIVE,,}"
+  [[ -z "${AUTH_MODE_EFFECTIVE// }" ]] && AUTH_MODE_EFFECTIVE="local"
+  case "$AUTH_MODE_EFFECTIVE" in
     local|ldap|saml|oidc) ;;
     *)
-      echo "Unsupported AUTH_MODE '$auth_mode'. Allowed values: local|ldap|saml|oidc." >&2
+      echo "Unsupported AUTH_MODE '$AUTH_MODE_EFFECTIVE'. Allowed values: local|ldap|saml|oidc." >&2
       exit 1
       ;;
   esac
+
+  AUTH_EXTERNAL_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_external_enabled" "false")" "false")"
+  AUTH_LDAP_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_ldap_enabled" "false")" "false")"
+  AUTH_SAML_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_saml_enabled" "false")" "false")"
+  AUTH_OIDC_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_oidc_enabled" "false")" "false")"
+  AUTH_PROTOCOL_EFFECTIVE="$(read_effective_runtime_value "sso_protocol" "")"
+  SSO_PUBLIC_URL_EFFECTIVE="$(read_effective_runtime_value "sso_public_url" "")"
+  SSO_REQUIRE_PUBLIC_URL_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "sso_require_public_url" "true")" "true")"
+  AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_saml_plugin_expected" "true")" "true")"
+  AUTH_SAML_PLUGIN_NAME_EFFECTIVE="$(read_effective_runtime_value "auth_saml_plugin_name" "saml")"
+  AUTH_SAML_ENTITY_ID_EFFECTIVE="$(read_effective_runtime_value "auth_saml_entity_id" "")"
+  AUTH_SAML_ACS_URL_EFFECTIVE="$(read_effective_runtime_value "auth_saml_acs_url" "")"
+  AUTH_SAML_LOGOUT_URL_EFFECTIVE="$(read_effective_runtime_value "auth_saml_logout_url" "")"
+
+  if [[ -z "${AUTH_PROTOCOL_EFFECTIVE// }" ]]; then
+    AUTH_PROTOCOL_EFFECTIVE="$AUTH_MODE_EFFECTIVE"
+  fi
+}
+
+validate_auth_public_url() {
+  if [[ "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE" == "true" ]] || auth_requires_external; then
+    if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
+      echo "Missing required runtime key: sso_public_url" >&2
+      echo "Set SSO_PUBLIC_URL in config/$ENVIRONMENT.env." >&2
+      exit 1
+    fi
+  fi
+
+  if auth_requires_https; then
+    if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
+      echo "SSO public URL is required for SAML/OIDC flows." >&2
+      exit 1
+    fi
+    if [[ ! "$SSO_PUBLIC_URL_EFFECTIVE" =~ ^https:// ]]; then
+      echo "SSO_PUBLIC_URL must start with https:// when SAML/OIDC is enabled." >&2
+      exit 1
+    fi
+  fi
+}
+
+validate_auth_tls_requirements() {
+  local effective_tls_mode effective_use_tls
+  effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+  effective_use_tls="false"
+  [[ "$effective_tls_mode" != "none" ]] && effective_use_tls="true"
+  if auth_requires_https; then
+    if [[ "$effective_use_tls" != "true" ]]; then
+      echo "SAML/OIDC requires HTTPS/TLS enabled. Current TLS mode: '$effective_tls_mode'." >&2
+      exit 1
+    fi
+  fi
+}
+
+validate_auth_glpi_version() {
+  local glpi_version
+  glpi_version="$(read_effective_runtime_value "glpi_version" "")"
+  if auth_requires_https; then
+    if [[ -z "${glpi_version// }" ]]; then
+      echo "Missing runtime key: glpi_version." >&2
+      exit 1
+    fi
+    if ! version_gte "$glpi_version" "11.0.7"; then
+      echo "SAML/OIDC workflow requires GLPI >= 11.0.7. Current: $glpi_version" >&2
+      exit 1
+    fi
+  fi
+}
+
+validate_auth_webroot_public() {
+  local glpi_install_dir
+  glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
+  if [[ -z "${glpi_install_dir// }" ]]; then
+    echo "Missing runtime key: glpi_install_dir." >&2
+    exit 1
+  fi
+  if [[ ! "$glpi_install_dir" =~ /glpi$ ]]; then
+    echo "Warning: glpi_install_dir does not end with '/glpi'. Ensure web root points to '${glpi_install_dir}/public'."
+  fi
+}
+
+check_auth_php_openssl() {
+  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "php -m | grep -iq '^openssl$'" -o >/dev/null
+}
+
+check_auth_time_sync() {
+  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "if command -v systemctl >/dev/null 2>&1; then systemctl is-active --quiet chrony || systemctl is-active --quiet chronyd || systemctl is-active --quiet ntp || systemctl is-active --quiet ntpd || systemctl is-active --quiet systemd-timesyncd; else timedatectl show -p NTPSynchronized --value | grep -qi '^yes$'; fi" -o >/dev/null
+}
+
+detect_saml_plugin_presence() {
+  local glpi_install_dir glpi_plugin_dir plugin_name
+  glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
+  glpi_plugin_dir="$(read_effective_runtime_value "glpi_plugin_dir" "/var/lib/glpi/plugins")"
+  plugin_name="$AUTH_SAML_PLUGIN_NAME_EFFECTIVE"
+  AUTH_SAML_PLUGIN_PRESENT="false"
+
+  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "test -d '${glpi_install_dir}/marketplace/${plugin_name}' || test -d '${glpi_install_dir}/plugins/${plugin_name}' || test -d '${glpi_plugin_dir}/${plugin_name}'" -o >/dev/null; then
+    AUTH_SAML_PLUGIN_PRESENT="true"
+  fi
+}
+
+derive_saml_urls_if_missing() {
+  if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
+    return 0
+  fi
+  local base_url
+  base_url="${SSO_PUBLIC_URL_EFFECTIVE%/}"
+  if [[ -z "${AUTH_SAML_ENTITY_ID_EFFECTIVE// }" ]]; then
+    AUTH_SAML_ENTITY_ID_EFFECTIVE="$base_url"
+    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_entity_id" "$AUTH_SAML_ENTITY_ID_EFFECTIVE"
+  fi
+  if [[ -z "${AUTH_SAML_ACS_URL_EFFECTIVE// }" ]]; then
+    AUTH_SAML_ACS_URL_EFFECTIVE="${base_url}/front/saml.php"
+    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_acs_url" "$AUTH_SAML_ACS_URL_EFFECTIVE"
+  fi
+  if [[ -z "${AUTH_SAML_LOGOUT_URL_EFFECTIVE// }" ]]; then
+    AUTH_SAML_LOGOUT_URL_EFFECTIVE="${base_url}/front/saml_logout.php"
+    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_logout_url" "$AUTH_SAML_LOGOUT_URL_EFFECTIVE"
+  fi
+}
+
+write_auth_evidence() {
+  local action_name="$1"
+  local status="$2"
+  local notes="$3"
+  local timestamp report_md report_yml latest_md latest_yml
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  ensure_auth_evidence_dir
+  report_md="$AUTH_EVIDENCE_DIR/${action_name}-${timestamp}.md"
+  report_yml="$AUTH_EVIDENCE_DIR/${action_name}-${timestamp}.yml"
+  latest_md="$AUTH_EVIDENCE_DIR/${action_name}-latest.md"
+  latest_yml="$AUTH_EVIDENCE_DIR/${action_name}-latest.yml"
+
+  cat >"$report_md" <<EOF
+# Auth ${action_name} Evidence
+
+- environment: \`$ENVIRONMENT\`
+- status: \`$status\`
+- generated_at_utc: \`$(date -u +%FT%TZ)\`
+- auth_mode: \`$AUTH_MODE_EFFECTIVE\`
+- auth_protocol: \`$AUTH_PROTOCOL_EFFECTIVE\`
+- auth_external_enabled: \`$AUTH_EXTERNAL_ENABLED_EFFECTIVE\`
+- auth_ldap_enabled: \`$AUTH_LDAP_ENABLED_EFFECTIVE\`
+- auth_saml_enabled: \`$AUTH_SAML_ENABLED_EFFECTIVE\`
+- auth_oidc_enabled: \`$AUTH_OIDC_ENABLED_EFFECTIVE\`
+- sso_public_url: \`$SSO_PUBLIC_URL_EFFECTIVE\`
+- sso_require_public_url: \`$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE\`
+- saml_plugin_expected: \`$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE\`
+- saml_plugin_name: \`$AUTH_SAML_PLUGIN_NAME_EFFECTIVE\`
+- saml_plugin_detected: \`$AUTH_SAML_PLUGIN_PRESENT\`
+
+## Derived SAML URLs
+
+- Entity ID: \`$AUTH_SAML_ENTITY_ID_EFFECTIVE\`
+- ACS URL: \`$AUTH_SAML_ACS_URL_EFFECTIVE\`
+- Logout URL: \`$AUTH_SAML_LOGOUT_URL_EFFECTIVE\`
+
+## Azure/Entra Checklist
+
+- Identifier / Entity ID: \`$AUTH_SAML_ENTITY_ID_EFFECTIVE\`
+- Reply URL / ACS URL: \`$AUTH_SAML_ACS_URL_EFFECTIVE\`
+- Sign-on URL: \`$SSO_PUBLIC_URL_EFFECTIVE\`
+- Logout URL: \`$AUTH_SAML_LOGOUT_URL_EFFECTIVE\`
+- NameID format: \`emailAddress\`
+- Claims:
+  - email: \`user.mail\`
+  - username: \`user.userprincipalname\`
+  - firstname: \`user.givenname\`
+  - lastname: \`user.surname\`
+  - groups: \`user.groups\`
+
+## GLPI Checklist
+
+- Preserve local authentication and local admin account.
+- Do not auto-install SAML plugin; install manually via Marketplace.
+- Validate plugin presence only when SAML is enabled.
+- Do not expose secrets in logs/evidence.
+
+## Notes
+
+$notes
+EOF
+
+  cat >"$report_yml" <<EOF
+---
+environment: '$(yaml_escape "$ENVIRONMENT")'
+status: '$(yaml_escape "$status")'
+generated_at_utc: '$(date -u +%FT%TZ)'
+auth_mode: '$(yaml_escape "$AUTH_MODE_EFFECTIVE")'
+auth_protocol: '$(yaml_escape "$AUTH_PROTOCOL_EFFECTIVE")'
+auth_external_enabled: $(yaml_escape "$AUTH_EXTERNAL_ENABLED_EFFECTIVE")
+auth_ldap_enabled: $(yaml_escape "$AUTH_LDAP_ENABLED_EFFECTIVE")
+auth_saml_enabled: $(yaml_escape "$AUTH_SAML_ENABLED_EFFECTIVE")
+auth_oidc_enabled: $(yaml_escape "$AUTH_OIDC_ENABLED_EFFECTIVE")
+sso_public_url: '$(yaml_escape "$SSO_PUBLIC_URL_EFFECTIVE")'
+sso_require_public_url: $(yaml_escape "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE")
+saml_plugin_expected: $(yaml_escape "$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE")
+saml_plugin_name: '$(yaml_escape "$AUTH_SAML_PLUGIN_NAME_EFFECTIVE")'
+saml_plugin_detected: $(yaml_escape "$AUTH_SAML_PLUGIN_PRESENT")
+saml_entity_id: '$(yaml_escape "$AUTH_SAML_ENTITY_ID_EFFECTIVE")'
+saml_acs_url: '$(yaml_escape "$AUTH_SAML_ACS_URL_EFFECTIVE")'
+saml_logout_url: '$(yaml_escape "$AUTH_SAML_LOGOUT_URL_EFFECTIVE")'
+notes: '$(yaml_escape "$notes")'
+EOF
+
+  chmod 600 "$report_md" "$report_yml"
+  cp "$report_md" "$latest_md"
+  cp "$report_yml" "$latest_yml"
+  chmod 600 "$latest_md" "$latest_yml"
+}
+
+run_auth_validation_suite() {
+  validate_auth_public_url
+  validate_auth_tls_requirements
+  validate_auth_glpi_version
+  validate_auth_webroot_public
+
+  if auth_requires_https; then
+    if ! check_auth_php_openssl; then
+      echo "OpenSSL PHP extension validation failed on app host." >&2
+      exit 1
+    fi
+    if ! check_auth_time_sync; then
+      echo "Time synchronization validation failed on app host (chrony/ntpd/systemd-timesyncd)." >&2
+      exit 1
+    fi
+  fi
+
+  detect_saml_plugin_presence
+  if [[ "$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE" == "true" ]] && [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
+    if [[ "$AUTH_SAML_PLUGIN_PRESENT" != "true" ]]; then
+      echo "SAML plugin was expected but not detected. Install it manually via GLPI Marketplace." >&2
+      exit 1
+    fi
+  fi
+}
+
+run_auth() {
+  local auth_action="$ACTION"
+  local notes
+
+  ensure_runtime_inputs_if_missing "false"
+  resolve_auth_contract
 
   case "$auth_action" in
     check|prepare|apply|post-check|rollback) ;;
@@ -824,14 +1122,45 @@ run_auth() {
       ;;
   esac
 
-  if [[ "$auth_mode" == "local" ]]; then
-    echo "AUTH_MODE=local; no authentication workflow changes were applied."
-    echo "Auth action '$auth_action' completed in no-op compatibility mode."
-    return 0
-  fi
+  case "$auth_action" in
+    check)
+      run_auth_validation_suite
+      notes="Auth check completed. No mutable system changes were applied."
+      write_auth_evidence "check" "pass" "$notes"
+      ;;
+    prepare)
+      run_auth_validation_suite
+      if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
+        derive_saml_urls_if_missing
+      fi
+      notes="Auth prepare completed. Runtime auth values were prepared without destructive changes."
+      write_auth_evidence "prepare" "pass" "$notes"
+      ;;
+    apply)
+      run_auth_validation_suite
+      if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
+        derive_saml_urls_if_missing
+      fi
+      notes="Auth apply completed in safe mode. No plugin installation, no DB writes, no local auth/admin removal. Use manual checklist for provider-side and GLPI plugin internal configuration."
+      write_auth_evidence "apply" "pass" "$notes"
+      ;;
+    post-check)
+      run_auth_validation_suite
+      notes="Auth post-check completed. TLS/URL/plugin/checklist consistency validated."
+      write_auth_evidence "post-check" "pass" "$notes"
+      ;;
+    rollback)
+      notes="Auth rollback scaffold is not available yet. Implemented in the next phase."
+      write_auth_evidence "rollback" "pending" "$notes"
+      echo "Auth rollback is not available in this phase yet." >&2
+      exit 1
+      ;;
+  esac
 
-  echo "Auth action '$auth_action' scaffold executed for AUTH_MODE=$auth_mode."
-  echo "No authentication provider changes were applied in this scaffold phase."
+  if [[ "$AUTH_MODE_EFFECTIVE" == "local" && "$auth_action" != "rollback" ]]; then
+    echo "AUTH_MODE=local; authentication behavior remains unchanged."
+  fi
+  echo "Auth action '$auth_action' completed."
 }
 
 resolve_security_mode
