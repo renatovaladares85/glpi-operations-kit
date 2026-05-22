@@ -128,6 +128,9 @@ AUTH_SAML_ACS_URL_EFFECTIVE=""
 AUTH_SAML_LOGOUT_URL_EFFECTIVE=""
 AUTH_SAML_PLUGIN_PRESENT="false"
 AUTH_EVIDENCE_DIR="$(runtime_evidence_dir "$ENVIRONMENT")/auth"
+AUTH_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/auth-state.yml"
+AUTH_BACKUP_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/auth-backup-latest.yml"
+AUTH_BACKUP_ROOT_DIR="$(runtime_env_dir "$ENVIRONMENT")/backups/auth"
 
 normalize_bool() {
   local value="$1"
@@ -186,6 +189,196 @@ auth_requires_https() {
 ensure_auth_evidence_dir() {
   ensure_directory "$AUTH_EVIDENCE_DIR"
   chmod 700 "$AUTH_EVIDENCE_DIR" >/dev/null 2>&1 || true
+}
+
+write_auth_state() {
+  local action_name="$1"
+  local status="$2"
+  local details="$3"
+  save_yaml_map "$AUTH_STATE_PATH" \
+    environment "$ENVIRONMENT" \
+    action "$action_name" \
+    status "$status" \
+    details "$details" \
+    updated_at_utc "$(date -u +%FT%TZ)"
+}
+
+auth_capture_mode_if_exists() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    stat -c '%a' "$path" 2>/dev/null || echo ""
+  else
+    echo ""
+  fi
+}
+
+backup_copy_if_exists() {
+  local src="$1"
+  local dst="$2"
+  if [[ -e "$src" ]]; then
+    ensure_directory "$(dirname "$dst")"
+    cp -a "$src" "$dst"
+  fi
+}
+
+auth_create_backup_snapshot() {
+  local action_name="$1"
+  local timestamp backup_dir backup_files_dir state_before_path manifest_path rollback_path
+  local override_exists evidence_exists state_exists
+  local override_mode evidence_mode state_mode
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_dir="${AUTH_BACKUP_ROOT_DIR}/${timestamp}"
+  backup_files_dir="${backup_dir}/files"
+  state_before_path="${backup_dir}/STATE_BEFORE.yml"
+  manifest_path="${backup_dir}/MANIFEST.md"
+  rollback_path="${backup_dir}/ROLLBACK.md"
+
+  ensure_directory "$AUTH_BACKUP_ROOT_DIR"
+  chmod 700 "$AUTH_BACKUP_ROOT_DIR" >/dev/null 2>&1 || true
+  ensure_directory "$backup_files_dir"
+  chmod 700 "$backup_dir" "$backup_files_dir" >/dev/null 2>&1 || true
+
+  override_exists="false"
+  evidence_exists="false"
+  state_exists="false"
+  [[ -e "$OVERRIDE_RUNTIME_PATH" ]] && override_exists="true"
+  [[ -e "$AUTH_EVIDENCE_DIR" ]] && evidence_exists="true"
+  [[ -e "$AUTH_STATE_PATH" ]] && state_exists="true"
+
+  override_mode="$(auth_capture_mode_if_exists "$OVERRIDE_RUNTIME_PATH")"
+  evidence_mode="$(auth_capture_mode_if_exists "$AUTH_EVIDENCE_DIR")"
+  state_mode="$(auth_capture_mode_if_exists "$AUTH_STATE_PATH")"
+
+  backup_copy_if_exists "$OVERRIDE_RUNTIME_PATH" "${backup_files_dir}/overrides.runtime.yml"
+  backup_copy_if_exists "$PUBLIC_RUNTIME_PATH" "${backup_files_dir}/public.runtime.yml"
+  backup_copy_if_exists "$CONFIG_PATH" "${backup_files_dir}/environment.config.env"
+  backup_copy_if_exists "$AUTH_EVIDENCE_DIR" "${backup_files_dir}/auth-evidence"
+  backup_copy_if_exists "$AUTH_STATE_PATH" "${backup_files_dir}/auth-state.yml"
+
+  cat >"$state_before_path" <<EOF
+---
+environment: '$(yaml_escape "$ENVIRONMENT")'
+action: '$(yaml_escape "$action_name")'
+created_at_utc: '$(date -u +%FT%TZ)'
+override_runtime_path: '$(yaml_escape "$OVERRIDE_RUNTIME_PATH")'
+override_exists_before: $(yaml_escape "$override_exists")
+override_mode_before: '$(yaml_escape "$override_mode")'
+auth_evidence_dir: '$(yaml_escape "$AUTH_EVIDENCE_DIR")'
+auth_evidence_exists_before: $(yaml_escape "$evidence_exists")
+auth_evidence_mode_before: '$(yaml_escape "$evidence_mode")'
+auth_state_path: '$(yaml_escape "$AUTH_STATE_PATH")'
+auth_state_exists_before: $(yaml_escape "$state_exists")
+auth_state_mode_before: '$(yaml_escape "$state_mode")'
+EOF
+
+  cat >"$manifest_path" <<EOF
+# Auth Backup Manifest
+
+- environment: \`$ENVIRONMENT\`
+- action: \`$action_name\`
+- backup_dir: \`$backup_dir\`
+- created_at_utc: \`$(date -u +%FT%TZ)\`
+
+## Snapshot Contents
+
+- files/overrides.runtime.yml
+- files/public.runtime.yml
+- files/environment.config.env
+- files/auth-evidence/
+- files/auth-state.yml
+- STATE_BEFORE.yml
+- ROLLBACK.md
+EOF
+
+  cat >"$rollback_path" <<EOF
+# Auth Rollback Instructions
+
+This backup can be restored using:
+
+\`\`\`bash
+./scripts/glpictl.sh $ENVIRONMENT auth rollback
+\`\`\`
+
+Rollback source directory:
+
+\`$backup_dir\`
+EOF
+
+  chmod 600 "$state_before_path" "$manifest_path" "$rollback_path"
+  save_yaml_map "$AUTH_BACKUP_STATE_PATH" \
+    environment "$ENVIRONMENT" \
+    action "$action_name" \
+    backup_dir "$backup_dir" \
+    created_at_utc "$(date -u +%FT%TZ)"
+}
+
+find_latest_auth_backup_dir() {
+  if [[ ! -d "$AUTH_BACKUP_ROOT_DIR" ]]; then
+    echo ""
+    return 0
+  fi
+  find "$AUTH_BACKUP_ROOT_DIR" -mindepth 1 -maxdepth 1 -type d | sort | tail -n1
+}
+
+restore_auth_permissions_from_state() {
+  local state_file="$1"
+  local override_mode evidence_mode state_mode
+  override_mode="$(read_yaml_top_level_value "$state_file" "override_mode_before" || true)"
+  evidence_mode="$(read_yaml_top_level_value "$state_file" "auth_evidence_mode_before" || true)"
+  state_mode="$(read_yaml_top_level_value "$state_file" "auth_state_mode_before" || true)"
+
+  if [[ -n "${override_mode// }" && -e "$OVERRIDE_RUNTIME_PATH" ]]; then
+    chmod "$override_mode" "$OVERRIDE_RUNTIME_PATH" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${evidence_mode// }" && -e "$AUTH_EVIDENCE_DIR" ]]; then
+    chmod "$evidence_mode" "$AUTH_EVIDENCE_DIR" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${state_mode// }" && -e "$AUTH_STATE_PATH" ]]; then
+    chmod "$state_mode" "$AUTH_STATE_PATH" >/dev/null 2>&1 || true
+  fi
+}
+
+run_auth_rollback() {
+  local backup_dir backup_files_dir state_before_file evidence_exists_before state_exists_before
+  backup_dir="$(find_latest_auth_backup_dir)"
+  if [[ -z "${backup_dir// }" || ! -d "$backup_dir" ]]; then
+    echo "No auth backup found to restore under $AUTH_BACKUP_ROOT_DIR." >&2
+    exit 1
+  fi
+
+  backup_files_dir="${backup_dir}/files"
+  state_before_file="${backup_dir}/STATE_BEFORE.yml"
+  if [[ ! -f "$state_before_file" ]]; then
+    echo "Invalid auth backup: missing STATE_BEFORE.yml in $backup_dir." >&2
+    exit 1
+  fi
+
+  if [[ -f "${backup_files_dir}/overrides.runtime.yml" ]]; then
+    cp -a "${backup_files_dir}/overrides.runtime.yml" "$OVERRIDE_RUNTIME_PATH"
+  fi
+
+  evidence_exists_before="$(read_yaml_top_level_value "$state_before_file" "auth_evidence_exists_before" || true)"
+  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
+    rm -rf "$AUTH_EVIDENCE_DIR"
+  fi
+  if [[ -d "${backup_files_dir}/auth-evidence" ]]; then
+    cp -a "${backup_files_dir}/auth-evidence" "$AUTH_EVIDENCE_DIR"
+  elif [[ "$evidence_exists_before" == "true" ]]; then
+    ensure_directory "$AUTH_EVIDENCE_DIR"
+  fi
+
+  state_exists_before="$(read_yaml_top_level_value "$state_before_file" "auth_state_exists_before" || true)"
+  if [[ -f "${backup_files_dir}/auth-state.yml" ]]; then
+    cp -a "${backup_files_dir}/auth-state.yml" "$AUTH_STATE_PATH"
+  elif [[ "$state_exists_before" != "true" && -f "$AUTH_STATE_PATH" ]]; then
+    rm -f "$AUTH_STATE_PATH"
+  fi
+
+  restore_auth_permissions_from_state "$state_before_file"
+  AUTH_SAML_PLUGIN_PRESENT="$(normalize_bool "$AUTH_SAML_PLUGIN_PRESENT" "false")"
+  write_auth_state "rollback" "completed" "restored_from=${backup_dir}"
+  write_auth_evidence "rollback" "pass" "Auth rollback restored runtime/evidence/state from backup: ${backup_dir}"
 }
 
 read_policy_flag() {
@@ -435,7 +628,7 @@ resolve_policy_contract() {
 
 is_mutating_operation() {
   case "$DOMAIN/$ACTION" in
-    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*|auth/prepare|auth/apply|auth/rollback) return 0 ;;
+    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*|auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1126,34 +1319,39 @@ run_auth() {
     check)
       run_auth_validation_suite
       notes="Auth check completed. No mutable system changes were applied."
+      write_auth_state "check" "completed" "$notes"
       write_auth_evidence "check" "pass" "$notes"
       ;;
     prepare)
+      auth_create_backup_snapshot "prepare"
       run_auth_validation_suite
       if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
         derive_saml_urls_if_missing
       fi
       notes="Auth prepare completed. Runtime auth values were prepared without destructive changes."
+      write_auth_state "prepare" "completed" "$notes"
       write_auth_evidence "prepare" "pass" "$notes"
       ;;
     apply)
+      auth_create_backup_snapshot "apply"
       run_auth_validation_suite
       if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
         derive_saml_urls_if_missing
       fi
       notes="Auth apply completed in safe mode. No plugin installation, no DB writes, no local auth/admin removal. Use manual checklist for provider-side and GLPI plugin internal configuration."
+      write_auth_state "apply" "completed" "$notes"
       write_auth_evidence "apply" "pass" "$notes"
       ;;
     post-check)
+      auth_create_backup_snapshot "post-check"
       run_auth_validation_suite
       notes="Auth post-check completed. TLS/URL/plugin/checklist consistency validated."
+      write_auth_state "post-check" "completed" "$notes"
       write_auth_evidence "post-check" "pass" "$notes"
       ;;
     rollback)
-      notes="Auth rollback scaffold is not available yet. Implemented in the next phase."
-      write_auth_evidence "rollback" "pending" "$notes"
-      echo "Auth rollback is not available in this phase yet." >&2
-      exit 1
+      run_auth_rollback
+      notes="Auth rollback completed successfully."
       ;;
   esac
 
