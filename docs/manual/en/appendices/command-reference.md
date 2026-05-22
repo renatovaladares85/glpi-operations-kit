@@ -99,7 +99,12 @@ These commands now validate the selected web engine routing contract end-to-end:
 ## Certification, readiness, and evidence
 
 ```bash
+./scripts/glpictl.sh staging certify check
+./scripts/glpictl.sh staging certify prepare
 ./scripts/glpictl.sh staging certify run
+./scripts/glpictl.sh staging certify apply
+./scripts/glpictl.sh staging certify post-check
+./scripts/glpictl.sh staging certify rollback
 bash scripts/release-readiness.sh staging
 ```
 
@@ -118,6 +123,9 @@ These commands generate certification and readiness evidence under `.runtime/<en
 ./scripts/glpictl.sh <env> ops audit check
 ./scripts/glpictl.sh <env> ops resume
 ./scripts/glpictl.sh <env> ops rollback
+./scripts/glpictl.sh <env> audit check
+./scripts/glpictl.sh <env> audit prepare
+./scripts/glpictl.sh <env> audit rollback
 ```
 
 These commands support controlled user lifecycle, certificate lifecycle, operational audits, and resumable maintenance.

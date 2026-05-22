@@ -254,8 +254,8 @@ create_domain_backup_snapshot() {
   local timestamp backup_root backup_dir backup_files_dir backup_state_path
   local evidence_dir domain_state_file state_before_path manifest_path rollback_path
   local deploy_sequence_file deploy_sequence_exists deploy_sequence_mode
-  local override_exists evidence_exists state_exists
-  local override_mode evidence_mode state_mode
+  local config_exists public_exists evidence_exists state_exists override_exists promotion_gate_exists
+  local config_mode public_mode evidence_mode state_mode override_mode promotion_gate_mode
 
   timestamp="$(date -u +%Y%m%dT%H%M%S%NZ)"
   backup_root="$(domain_backup_root_dir "$domain_name")"
@@ -265,6 +265,8 @@ create_domain_backup_snapshot() {
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
   deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
+  config_exists="false"
+  public_exists="false"
   state_before_path="${backup_dir}/STATE_BEFORE.yml"
   manifest_path="${backup_dir}/MANIFEST.md"
   rollback_path="${backup_dir}/ROLLBACK.md"
@@ -278,17 +280,26 @@ create_domain_backup_snapshot() {
   evidence_exists="false"
   state_exists="false"
   deploy_sequence_exists="false"
+  promotion_gate_exists="false"
   [[ -e "$OVERRIDE_RUNTIME_PATH" ]] && override_exists="true"
+  [[ -e "$CONFIG_PATH" ]] && config_exists="true"
+  [[ -e "$PUBLIC_RUNTIME_PATH" ]] && public_exists="true"
   [[ -e "$evidence_dir" ]] && evidence_exists="true"
   [[ -e "$domain_state_file" ]] && state_exists="true"
   if [[ "$domain_name" == "deploy" && -e "$deploy_sequence_file" ]]; then
     deploy_sequence_exists="true"
   fi
+  if [[ "$domain_name" == "certify" && -e "$PROMOTION_GATE_PATH" ]]; then
+    promotion_gate_exists="true"
+  fi
 
+  config_mode="$(capture_mode_if_exists "$CONFIG_PATH")"
+  public_mode="$(capture_mode_if_exists "$PUBLIC_RUNTIME_PATH")"
   override_mode="$(capture_mode_if_exists "$OVERRIDE_RUNTIME_PATH")"
   evidence_mode="$(capture_mode_if_exists "$evidence_dir")"
   state_mode="$(capture_mode_if_exists "$domain_state_file")"
   deploy_sequence_mode="$(capture_mode_if_exists "$deploy_sequence_file")"
+  promotion_gate_mode="$(capture_mode_if_exists "$PROMOTION_GATE_PATH")"
 
   backup_copy_if_exists "$OVERRIDE_RUNTIME_PATH" "${backup_files_dir}/overrides.runtime.yml"
   backup_copy_if_exists "$PUBLIC_RUNTIME_PATH" "${backup_files_dir}/public.runtime.yml"
@@ -298,6 +309,9 @@ create_domain_backup_snapshot() {
   if [[ "$domain_name" == "deploy" ]]; then
     backup_copy_if_exists "$deploy_sequence_file" "${backup_files_dir}/deploy-sequence.yml"
   fi
+  if [[ "$domain_name" == "certify" ]]; then
+    backup_copy_if_exists "$PROMOTION_GATE_PATH" "${backup_files_dir}/promotion-gate.yml"
+  fi
 
   cat >"$state_before_path" <<EOF
 ---
@@ -305,6 +319,12 @@ domain: '$(yaml_escape "$domain_name")'
 environment: '$(yaml_escape "$ENVIRONMENT")'
 action: '$(yaml_escape "$action_name")'
 created_at_utc: '$(date -u +%FT%TZ)'
+environment_config_path: '$(yaml_escape "$CONFIG_PATH")'
+environment_config_exists_before: $(yaml_escape "$config_exists")
+environment_config_mode_before: '$(yaml_escape "$config_mode")'
+public_runtime_path: '$(yaml_escape "$PUBLIC_RUNTIME_PATH")'
+public_runtime_exists_before: $(yaml_escape "$public_exists")
+public_runtime_mode_before: '$(yaml_escape "$public_mode")'
 override_runtime_path: '$(yaml_escape "$OVERRIDE_RUNTIME_PATH")'
 override_exists_before: $(yaml_escape "$override_exists")
 override_mode_before: '$(yaml_escape "$override_mode")'
@@ -317,6 +337,9 @@ domain_state_mode_before: '$(yaml_escape "$state_mode")'
 deploy_sequence_path: '$(yaml_escape "$deploy_sequence_file")'
 deploy_sequence_exists_before: $(yaml_escape "$deploy_sequence_exists")
 deploy_sequence_mode_before: '$(yaml_escape "$deploy_sequence_mode")'
+promotion_gate_path: '$(yaml_escape "$PROMOTION_GATE_PATH")'
+promotion_gate_exists_before: $(yaml_escape "$promotion_gate_exists")
+promotion_gate_mode_before: '$(yaml_escape "$promotion_gate_mode")'
 EOF
 
   cat >"$manifest_path" <<EOF
@@ -336,6 +359,7 @@ EOF
 - files/${domain_name}-evidence/
 - files/${domain_name}-state.yml
 - files/deploy-sequence.yml (deploy domain only)
+- files/promotion-gate.yml (certify domain only)
 - STATE_BEFORE.yml
 - ROLLBACK.md
 EOF
@@ -393,16 +417,25 @@ restore_domain_permissions_from_state() {
   local domain_name="$1"
   local state_file="$2"
   local evidence_dir domain_state_file deploy_sequence_file
-  local override_mode evidence_mode state_mode deploy_sequence_mode
+  local config_mode public_mode override_mode evidence_mode state_mode deploy_sequence_mode promotion_gate_mode
 
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
   deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
+  config_mode="$(read_yaml_top_level_value "$state_file" "environment_config_mode_before" || true)"
+  public_mode="$(read_yaml_top_level_value "$state_file" "public_runtime_mode_before" || true)"
   override_mode="$(read_yaml_top_level_value "$state_file" "override_mode_before" || true)"
   evidence_mode="$(read_yaml_top_level_value "$state_file" "domain_evidence_mode_before" || true)"
   state_mode="$(read_yaml_top_level_value "$state_file" "domain_state_mode_before" || true)"
   deploy_sequence_mode="$(read_yaml_top_level_value "$state_file" "deploy_sequence_mode_before" || true)"
+  promotion_gate_mode="$(read_yaml_top_level_value "$state_file" "promotion_gate_mode_before" || true)"
 
+  if [[ -n "${config_mode// }" && -e "$CONFIG_PATH" ]]; then
+    chmod "$config_mode" "$CONFIG_PATH" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${public_mode// }" && -e "$PUBLIC_RUNTIME_PATH" ]]; then
+    chmod "$public_mode" "$PUBLIC_RUNTIME_PATH" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${override_mode// }" && -e "$OVERRIDE_RUNTIME_PATH" ]]; then
     chmod "$override_mode" "$OVERRIDE_RUNTIME_PATH" >/dev/null 2>&1 || true
   fi
@@ -415,13 +448,16 @@ restore_domain_permissions_from_state() {
   if [[ "$domain_name" == "deploy" ]] && [[ -n "${deploy_sequence_mode// }" && -e "$deploy_sequence_file" ]]; then
     chmod "$deploy_sequence_mode" "$deploy_sequence_file" >/dev/null 2>&1 || true
   fi
+  if [[ "$domain_name" == "certify" ]] && [[ -n "${promotion_gate_mode// }" && -e "$PROMOTION_GATE_PATH" ]]; then
+    chmod "$promotion_gate_mode" "$PROMOTION_GATE_PATH" >/dev/null 2>&1 || true
+  fi
 }
 
 run_domain_metadata_rollback() {
   local domain_name="$1"
   local prefer_previous="${2:-false}"
-  local backup_dir backup_files_dir state_before_file evidence_exists_before state_exists_before
-  local deploy_sequence_exists_before deploy_sequence_file
+  local backup_dir backup_files_dir state_before_file config_exists_before public_exists_before evidence_exists_before state_exists_before
+  local deploy_sequence_exists_before promotion_gate_exists_before deploy_sequence_file
   local evidence_dir domain_state_file
 
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
@@ -442,6 +478,20 @@ run_domain_metadata_rollback() {
 
   if [[ -f "${backup_files_dir}/overrides.runtime.yml" ]]; then
     cp -a "${backup_files_dir}/overrides.runtime.yml" "$OVERRIDE_RUNTIME_PATH"
+  fi
+
+  config_exists_before="$(read_yaml_top_level_value "$state_before_file" "environment_config_exists_before" || true)"
+  if [[ -f "${backup_files_dir}/environment.config.env" ]]; then
+    cp -a "${backup_files_dir}/environment.config.env" "$CONFIG_PATH"
+  elif [[ "$config_exists_before" != "true" && -f "$CONFIG_PATH" ]]; then
+    rm -f "$CONFIG_PATH"
+  fi
+
+  public_exists_before="$(read_yaml_top_level_value "$state_before_file" "public_runtime_exists_before" || true)"
+  if [[ -f "${backup_files_dir}/public.runtime.yml" ]]; then
+    cp -a "${backup_files_dir}/public.runtime.yml" "$PUBLIC_RUNTIME_PATH"
+  elif [[ "$public_exists_before" != "true" && -f "$PUBLIC_RUNTIME_PATH" ]]; then
+    rm -f "$PUBLIC_RUNTIME_PATH"
   fi
 
   evidence_exists_before="$(read_yaml_top_level_value "$state_before_file" "domain_evidence_exists_before" || true)"
@@ -467,6 +517,15 @@ run_domain_metadata_rollback() {
       cp -a "${backup_files_dir}/deploy-sequence.yml" "$deploy_sequence_file"
     elif [[ "$deploy_sequence_exists_before" != "true" && -f "$deploy_sequence_file" ]]; then
       rm -f "$deploy_sequence_file"
+    fi
+  fi
+
+  if [[ "$domain_name" == "certify" ]]; then
+    promotion_gate_exists_before="$(read_yaml_top_level_value "$state_before_file" "promotion_gate_exists_before" || true)"
+    if [[ -f "${backup_files_dir}/promotion-gate.yml" ]]; then
+      cp -a "${backup_files_dir}/promotion-gate.yml" "$PROMOTION_GATE_PATH"
+    elif [[ "$promotion_gate_exists_before" != "true" && -f "$PROMOTION_GATE_PATH" ]]; then
+      rm -f "$PROMOTION_GATE_PATH"
     fi
   fi
 
@@ -535,8 +594,8 @@ auth_create_backup_snapshot() {
 
 run_auth_rollback() {
   local backup_dir
-  backup_dir="$(find_domain_backup_for_restore "auth" "false")"
-  run_domain_metadata_rollback "auth" "false"
+  backup_dir="$(find_domain_backup_for_restore "auth" "true")"
+  run_domain_metadata_rollback "auth" "true"
   AUTH_SAML_PLUGIN_PRESENT="$(normalize_bool "$AUTH_SAML_PLUGIN_PRESENT" "false")"
   write_auth_state "rollback" "completed" "restored_from=${backup_dir}"
   write_auth_evidence "rollback" "pass" "Auth rollback restored runtime/evidence/state from backup: ${backup_dir}"
@@ -789,11 +848,13 @@ resolve_policy_contract() {
 
 is_mutating_operation() {
   case "$DOMAIN/$ACTION" in
-    deploy/prepare|deploy/apply|deploy/post-check|deploy/rollback|\
-    tls/prepare|tls/apply|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
-    promote/prepare|promote/apply|promote/post-check|promote/rollback|\
-    ops/prepare|ops/rollback|ops/users|ops/cert|ops/resume|\
-    auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
+    deploy/check|deploy/prepare|deploy/apply|deploy/post-check|deploy/rollback|\
+    certify/check|certify/prepare|certify/apply|certify/post-check|certify/rollback|certify/run|\
+    tls/check|tls/prepare|tls/apply|tls/post-check|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
+    promote/check|promote/prepare|promote/apply|promote/post-check|promote/rollback|promote/base|promote/app|promote/db|promote/monitoring|promote/backup|promote/all|\
+    ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|\
+    audit/check|audit/prepare|audit/rollback|\
+    auth/check|auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1051,7 +1112,7 @@ run_deploy() {
 
   if [[ "$run_as_deploy_domain" == "true" ]]; then
     case "$mode" in
-      prepare|apply|post-check|rollback)
+      check|prepare|apply|post-check|rollback)
         create_domain_backup_snapshot "deploy" "$mode"
         ;;
     esac
@@ -1182,11 +1243,69 @@ run_deploy() {
 }
 
 run_certify() {
+  local certify_action="$ACTION"
+  local notes backup_dir
+
   if [[ "$ENVIRONMENT" != "staging" ]]; then
     echo "Certification is only supported for staging." >&2
     exit 1
   fi
-  bash "$SCRIPT_ROOT/certify-staging.sh"
+
+  case "$certify_action" in
+    check|prepare|apply|post-check|rollback|run) ;;
+    *)
+      echo "Unsupported certify action: $certify_action (expected check|prepare|apply|post-check|rollback|run)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$certify_action" == "run" ]]; then
+    certify_action="apply"
+  fi
+
+  case "$certify_action" in
+    check)
+      create_domain_backup_snapshot "certify" "check"
+      ensure_runtime_inputs_if_missing "false"
+      ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
+      notes="Certify check completed. Runtime and inventory validations passed."
+      write_domain_state "certify" "check" "completed" "$notes"
+      write_domain_evidence_simple "certify" "check" "pass" "$notes"
+      ;;
+    prepare)
+      create_domain_backup_snapshot "certify" "prepare"
+      ensure_runtime_inputs_if_missing "false"
+      ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
+      notes="Certify prepare completed. Local runtime/evidence/state snapshot is ready."
+      write_domain_state "certify" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "certify" "prepare" "pass" "$notes"
+      ;;
+    apply)
+      create_domain_backup_snapshot "certify" "apply"
+      bash "$SCRIPT_ROOT/certify-staging.sh"
+      notes="Certify apply completed. Staging certification workflow executed."
+      write_domain_state "certify" "apply" "completed" "$notes"
+      write_domain_evidence_simple "certify" "apply" "pass" "$notes"
+      ;;
+    post-check)
+      create_domain_backup_snapshot "certify" "post-check"
+      if [[ ! -f "$PROMOTION_GATE_PATH" ]]; then
+        echo "Certification post-check failed: promotion gate file not found at $PROMOTION_GATE_PATH." >&2
+        exit 1
+      fi
+      notes="Certify post-check completed. Promotion gate file is present."
+      write_domain_state "certify" "post-check" "completed" "$notes"
+      write_domain_evidence_simple "certify" "post-check" "pass" "$notes"
+      ;;
+    rollback)
+      create_domain_backup_snapshot "certify" "rollback"
+      backup_dir="$(find_domain_backup_for_restore "certify" "true")"
+      run_domain_metadata_rollback "certify" "true"
+      notes="Certify rollback restored local runtime/config/evidence/state and promotion gate metadata from backup=${backup_dir}."
+      write_domain_state "certify" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "certify" "rollback" "pass" "$notes"
+      ;;
+  esac
 }
 
 resolve_tls_apply_action_from_target() {
@@ -1308,6 +1427,7 @@ run_tls() {
 
   case "$tls_action" in
     check)
+      create_domain_backup_snapshot "tls" "check"
       ensure_runtime_inputs_if_missing "false"
       effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
       use_tls="false"
@@ -1343,6 +1463,7 @@ run_tls() {
       return
       ;;
     post-check)
+      create_domain_backup_snapshot "tls" "post-check"
       ensure_runtime_inputs_if_missing "false"
       effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
       use_tls="false"
@@ -1386,6 +1507,7 @@ run_ops() {
 
   case "$ACTION" in
     check)
+      create_domain_backup_snapshot "ops" "check"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
       notes="Ops check alias completed via audit check."
       write_domain_state "ops" "check" "completed" "$notes"
@@ -1409,20 +1531,24 @@ run_ops() {
       return
       ;;
     users)
+      create_domain_backup_snapshot "ops" "users"
       users_action="$TARGET"
       users_scope="${SCOPE:-os}"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" users "$ENVIRONMENT" "$users_action" "$users_scope"
       return
       ;;
     cert)
+      create_domain_backup_snapshot "ops" "cert"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" cert "$ENVIRONMENT" "$TARGET"
       return
       ;;
     audit)
+      create_domain_backup_snapshot "ops" "audit"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
       return
       ;;
     resume)
+      create_domain_backup_snapshot "ops" "resume"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
       return
       ;;
@@ -1434,7 +1560,36 @@ run_ops() {
 }
 
 run_audit() {
-  bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
+  local audit_action="$ACTION"
+  local notes backup_dir
+
+  case "$audit_action" in
+    check)
+      create_domain_backup_snapshot "audit" "check"
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
+      notes="Audit check completed."
+      write_domain_state "audit" "check" "completed" "$notes"
+      write_domain_evidence_simple "audit" "check" "pass" "$notes"
+      ;;
+    prepare)
+      create_domain_backup_snapshot "audit" "prepare"
+      notes="Audit prepare completed. Local runtime/evidence/state snapshot is ready."
+      write_domain_state "audit" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "audit" "prepare" "pass" "$notes"
+      ;;
+    rollback)
+      create_domain_backup_snapshot "audit" "rollback"
+      backup_dir="$(find_domain_backup_for_restore "audit" "true")"
+      run_domain_metadata_rollback "audit" "true"
+      notes="Audit rollback restored local runtime/evidence/state from backup=${backup_dir}."
+      write_domain_state "audit" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "audit" "rollback" "pass" "$notes"
+      ;;
+    *)
+      echo "Unsupported audit action: $audit_action (expected check|prepare|rollback)" >&2
+      exit 1
+      ;;
+  esac
 }
 
 run_promote_legacy_apply() {
@@ -1463,6 +1618,7 @@ run_promote() {
 
   case "$promote_action" in
     check)
+      create_domain_backup_snapshot "promote" "check"
       ensure_runtime_inputs_if_missing "false"
       resolve_policy_contract
       enforce_security_policy_contract
@@ -1490,6 +1646,7 @@ run_promote() {
       write_domain_evidence_simple "promote" "apply" "pass" "$notes"
       ;;
     post-check)
+      create_domain_backup_snapshot "promote" "post-check"
       resolve_policy_contract
       enforce_security_policy_contract
       enforce_promotion_gate_policy_if_required
@@ -1589,14 +1746,44 @@ validate_auth_glpi_version() {
 }
 
 validate_auth_webroot_public() {
-  local glpi_install_dir
+  local glpi_install_dir glpi_public_dir web_server_type escaped_public_dir check_cmd
   glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
   if [[ -z "${glpi_install_dir// }" ]]; then
     echo "Missing runtime key: glpi_install_dir." >&2
     exit 1
   fi
-  if [[ ! "$glpi_install_dir" =~ /glpi$ ]]; then
-    echo "Warning: glpi_install_dir does not end with '/glpi'. Ensure web root points to '${glpi_install_dir}/public'."
+
+  glpi_public_dir="${glpi_install_dir%/}/public"
+  web_server_type="$(read_effective_runtime_value "glpi_web_server_type" "nginx")"
+  web_server_type="${web_server_type,,}"
+  escaped_public_dir="${glpi_public_dir//\'/\'\"\'\"\'}"
+
+  if ! auth_requires_https; then
+    if [[ ! "$glpi_install_dir" =~ /glpi$ ]]; then
+      echo "Warning: glpi_install_dir does not end with '/glpi'. Ensure web root points to '${glpi_public_dir}'." >&2
+    fi
+    return 0
+  fi
+
+  case "$web_server_type" in
+    nginx)
+      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/nginx/nginx.conf 2>/dev/null | grep -q ."
+      ;;
+    apache)
+      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/apache2/sites-enabled /etc/apache2/sites-available /etc/httpd/conf.d /etc/httpd/conf/httpd.conf 2>/dev/null | grep -q ."
+      ;;
+    lighttpd)
+      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/lighttpd/lighttpd.conf /etc/lighttpd/conf-enabled 2>/dev/null | grep -q ."
+      ;;
+    *)
+      check_cmd="test -d '${escaped_public_dir}'"
+      ;;
+  esac
+
+  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+  if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "$check_cmd" -o >/dev/null; then
+    echo "Webroot validation failed for auth flow. Expected web root reference to '${glpi_public_dir}' in ${web_server_type} configuration." >&2
+    exit 1
   fi
 }
 
@@ -1640,6 +1827,51 @@ derive_saml_urls_if_missing() {
   if [[ -z "${AUTH_SAML_LOGOUT_URL_EFFECTIVE// }" ]]; then
     AUTH_SAML_LOGOUT_URL_EFFECTIVE="${base_url}/front/saml_logout.php"
     update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_logout_url" "$AUTH_SAML_LOGOUT_URL_EFFECTIVE"
+  fi
+}
+
+validate_auth_local_sensitive_permissions() {
+  local secret_mode
+  if [[ -f "$SECRET_PATH" ]]; then
+    secret_mode="$(capture_mode_if_exists "$SECRET_PATH")"
+    if [[ "$secret_mode" != "600" ]]; then
+      echo "Invalid permissions for runtime secret file: $SECRET_PATH (expected 600, got ${secret_mode:-unknown})." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
+    while IFS= read -r evidence_file; do
+      local evidence_mode
+      evidence_mode="$(capture_mode_if_exists "$evidence_file")"
+      if [[ "$evidence_mode" != "600" ]]; then
+        echo "Invalid permissions for auth evidence file: $evidence_file (expected 600, got ${evidence_mode:-unknown})." >&2
+        exit 1
+      fi
+    done < <(find "$AUTH_EVIDENCE_DIR" -type f \( -name "*.md" -o -name "*.yml" \))
+  fi
+}
+
+validate_auth_sensitive_exposure() {
+  local evidence_match logs_match forbidden_pattern
+  forbidden_pattern='BEGIN ([A-Z ]*PRIVATE KEY)|auth_saml_x509_certificate[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*|ldap_bind_password[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*|oidc_client_secret[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*'
+  evidence_match=""
+  logs_match=""
+
+  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
+    evidence_match="$(grep -R -n -E "$forbidden_pattern" "$AUTH_EVIDENCE_DIR" 2>/dev/null | head -n 1 || true)"
+  fi
+  if [[ -d "$(runtime_logs_dir "$ENVIRONMENT")" ]]; then
+    logs_match="$(grep -R -n -E "$forbidden_pattern" "$(runtime_logs_dir "$ENVIRONMENT")" 2>/dev/null | head -n 1 || true)"
+  fi
+
+  if [[ -n "${evidence_match// }" ]]; then
+    echo "Sensitive exposure detected in auth evidence: ${evidence_match}" >&2
+    exit 1
+  fi
+  if [[ -n "${logs_match// }" ]]; then
+    echo "Sensitive exposure detected in runtime logs: ${logs_match}" >&2
+    exit 1
   fi
 }
 
@@ -1759,6 +1991,18 @@ run_auth_validation_suite() {
   fi
 }
 
+run_auth_post_check_suite() {
+  run_auth_validation_suite
+  if auth_requires_https; then
+    if ! run_tls_web_server_postcheck; then
+      echo "TLS/web server post-check failed for auth domain." >&2
+      exit 1
+    fi
+  fi
+  validate_auth_local_sensitive_permissions
+  validate_auth_sensitive_exposure
+}
+
 run_auth() {
   local auth_action="$ACTION"
   local notes
@@ -1776,6 +2020,7 @@ run_auth() {
 
   case "$auth_action" in
     check)
+      auth_create_backup_snapshot "check"
       run_auth_validation_suite
       notes="Auth check completed. No mutable system changes were applied."
       write_auth_state "check" "completed" "$notes"
@@ -1803,12 +2048,13 @@ run_auth() {
       ;;
     post-check)
       auth_create_backup_snapshot "post-check"
-      run_auth_validation_suite
+      run_auth_post_check_suite
       notes="Auth post-check completed. TLS/URL/plugin/checklist consistency validated."
       write_auth_state "post-check" "completed" "$notes"
       write_auth_evidence "post-check" "pass" "$notes"
       ;;
     rollback)
+      auth_create_backup_snapshot "rollback"
       run_auth_rollback
       notes="Auth rollback completed successfully."
       ;;

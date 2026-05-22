@@ -95,7 +95,12 @@ Esses comandos validam o contrato do engine selecionado: acesso raiz, rota de co
 ## Certificação, prontidão e evidências
 
 ```bash
+./scripts/glpictl.sh staging certify check
+./scripts/glpictl.sh staging certify prepare
 ./scripts/glpictl.sh staging certify run
+./scripts/glpictl.sh staging certify apply
+./scripts/glpictl.sh staging certify post-check
+./scripts/glpictl.sh staging certify rollback
 bash scripts/release-readiness.sh staging
 ```
 
@@ -112,6 +117,9 @@ bash scripts/release-readiness.sh staging
 ./scripts/glpictl.sh <env> ops audit check
 ./scripts/glpictl.sh <env> ops resume
 ./scripts/glpictl.sh <env> ops rollback
+./scripts/glpictl.sh <env> audit check
+./scripts/glpictl.sh <env> audit prepare
+./scripts/glpictl.sh <env> audit rollback
 ```
 
 ## Fluxo opcional de autenticação
