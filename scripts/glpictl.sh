@@ -286,6 +286,7 @@ domain_action_requires_remote_app_snapshot() {
   local domain_name="$1"
   local action_name="$2"
   local target_name="$3"
+  local scope_name="${4:-}"
   case "$domain_name/$action_name" in
     deploy/apply)
       case "$target_name" in
@@ -298,6 +299,11 @@ domain_action_requires_remote_app_snapshot() {
       esac
       ;;
     tls/apply|tls/disable|tls/self-signed|tls/install-provided|tls/reload) return 0 ;;
+    ops/users)
+      case "$scope_name" in
+        os|glpi|"") return 0 ;;
+      esac
+      ;;
     ops/cert|ops/resume) return 0 ;;
   esac
   return 1
@@ -333,7 +339,7 @@ domain_action_requires_remote_snapshot() {
   local action_name="$2"
   local target_name="$3"
   local scope_name="$4"
-  if domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name"; then
+  if domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name"; then
     return 0
   fi
   if domain_action_requires_remote_db_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name"; then
@@ -374,7 +380,7 @@ create_remote_domain_backup_snapshot() {
 
   app_required="false"
   db_required="false"
-  domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name" && app_required="true"
+  domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name" && app_required="true"
   domain_action_requires_remote_db_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name" && db_required="true"
 
   app_has_hosts="false"
@@ -394,7 +400,7 @@ create_remote_domain_backup_snapshot() {
     glpi_plugin_dir="$(read_effective_runtime_value "glpi_plugin_dir" "/var/lib/glpi/plugins")"
     glpi_log_dir="$(read_effective_runtime_value "glpi_log_dir" "/var/log/glpi")"
 
-    app_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
+    app_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php' '/etc/passwd' '/etc/group' '/etc/shadow'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
     ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_cmd" -o >/dev/null
   fi
 
