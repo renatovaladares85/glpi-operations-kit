@@ -18,7 +18,7 @@ TARGET="${4:-all}"
 SCOPE="${5:-}"
 
 if [[ -z "$ENVIRONMENT" || -z "$DOMAIN" || -z "$ACTION" ]]; then
-  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
+  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit|auth> <action> [target] [scope]" >&2
   echo "Execution contract: GLPI_ENVIRONMENT, GLPI_EXECUTION_MODE=local|ssh, GLPI_HOST_ROLE=app|db|all, SECURITY_MODE=secure|permissive" >&2
   exit 1
 fi
@@ -798,6 +798,42 @@ run_promote() {
   run_deploy apply "$TARGET"
 }
 
+run_auth() {
+  local auth_action="$ACTION"
+  local auth_mode
+
+  ensure_runtime_inputs_if_missing "false"
+  auth_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_mode" || true)"
+  [[ -z "${auth_mode// }" ]] && auth_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "auth_mode" || true)"
+  auth_mode="${auth_mode,,}"
+  [[ -z "${auth_mode// }" ]] && auth_mode="local"
+
+  case "$auth_mode" in
+    local|ldap|saml|oidc) ;;
+    *)
+      echo "Unsupported AUTH_MODE '$auth_mode'. Allowed values: local|ldap|saml|oidc." >&2
+      exit 1
+      ;;
+  esac
+
+  case "$auth_action" in
+    check|prepare|apply|post-check|rollback) ;;
+    *)
+      echo "Unsupported auth action: $auth_action (expected check|prepare|apply|post-check|rollback)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$auth_mode" == "local" ]]; then
+    echo "AUTH_MODE=local; no authentication workflow changes were applied."
+    echo "Auth action '$auth_action' completed in no-op compatibility mode."
+    return 0
+  fi
+
+  echo "Auth action '$auth_action' scaffold executed for AUTH_MODE=$auth_mode."
+  echo "No authentication provider changes were applied in this scaffold phase."
+}
+
 resolve_security_mode
 resolve_execution_contract
 resolve_execution_overrides
@@ -819,8 +855,9 @@ case "$DOMAIN" in
   tls) run_tls ;;
   ops) run_ops ;;
   audit) run_audit ;;
+  auth) run_auth ;;
   *)
-    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit)" >&2
+    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit|auth)" >&2
     exit 1
     ;;
 esac
