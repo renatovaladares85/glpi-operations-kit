@@ -31,11 +31,13 @@ This creates your environment baseline. The scripts read this file automatically
 
 ```bash
 ./scripts/glpictl.sh <env> deploy check all
+./scripts/glpictl.sh <env> deploy prepare all
 ./scripts/glpictl.sh <env> deploy apply db
 ./scripts/glpictl.sh <env> deploy apply app
 ./scripts/glpictl.sh <env> deploy apply monitoring
 ./scripts/glpictl.sh <env> deploy apply backup
 ./scripts/glpictl.sh <env> deploy post-check all
+./scripts/glpictl.sh <env> deploy rollback all
 ```
 
 `deploy check all` is the operational gate before mutation. It validates tools, permissions, policy flags, inventory rendering, host role consistency, and runtime baseline materialization. In app-host local flow, it also validates `mariadb-client` and can auto-fix `php-bcmath` for GLPI 11. `deploy apply db` handles MariaDB packages, hardening, schema, user grants, and DB-access restrictions. `deploy apply app` configures GLPI application layout, selected web engine (`nginx`, `apache`, or `lighttpd`), PHP-FPM, mandatory PHP extension checks, and APP->DB connectivity validation (`SELECT 1`). `deploy apply monitoring` applies exporter baseline and monitoring wiring. `deploy apply backup` applies backup baseline and retention-related settings. `deploy post-check all` confirms service validity after mutable stages and prints explicit web-engine summary.
@@ -81,6 +83,11 @@ These commands now validate the selected web engine routing contract end-to-end:
 ## TLS lifecycle commands
 
 ```bash
+./scripts/glpictl.sh <env> tls check
+./scripts/glpictl.sh <env> tls prepare self-signed
+./scripts/glpictl.sh <env> tls apply self-signed
+./scripts/glpictl.sh <env> tls post-check
+./scripts/glpictl.sh <env> tls rollback
 ./scripts/glpictl.sh <env> tls disable
 ./scripts/glpictl.sh <env> tls self-signed
 ./scripts/glpictl.sh <env> tls install-provided
@@ -92,7 +99,12 @@ These commands now validate the selected web engine routing contract end-to-end:
 ## Certification, readiness, and evidence
 
 ```bash
+./scripts/glpictl.sh staging certify check
+./scripts/glpictl.sh staging certify prepare
 ./scripts/glpictl.sh staging certify run
+./scripts/glpictl.sh staging certify apply
+./scripts/glpictl.sh staging certify post-check
+./scripts/glpictl.sh staging certify rollback
 bash scripts/release-readiness.sh staging
 ```
 
@@ -101,6 +113,8 @@ These commands generate certification and readiness evidence under `.runtime/<en
 ## Day-2 operations
 
 ```bash
+./scripts/glpictl.sh <env> ops check
+./scripts/glpictl.sh <env> ops prepare
 ./scripts/glpictl.sh <env> ops users add os
 ./scripts/glpictl.sh <env> ops users disable db
 ./scripts/glpictl.sh <env> ops users remove os
@@ -108,9 +122,25 @@ These commands generate certification and readiness evidence under `.runtime/<en
 ./scripts/glpictl.sh <env> ops cert renew
 ./scripts/glpictl.sh <env> ops audit check
 ./scripts/glpictl.sh <env> ops resume
+./scripts/glpictl.sh <env> ops rollback
+./scripts/glpictl.sh <env> audit check
+./scripts/glpictl.sh <env> audit prepare
+./scripts/glpictl.sh <env> audit rollback
 ```
 
 These commands support controlled user lifecycle, certificate lifecycle, operational audits, and resumable maintenance.
+
+## Optional authentication workflow
+
+```bash
+./scripts/glpictl.sh <env> auth check
+./scripts/glpictl.sh <env> auth prepare
+./scripts/glpictl.sh <env> auth apply
+./scripts/glpictl.sh <env> auth post-check
+./scripts/glpictl.sh <env> auth rollback
+```
+
+The auth domain validates and prepares local/LDAP/SAML/OIDC configuration safely, preserves local admin access, and provides evidence + rollback metadata without auto-installing plugins.
 
 ## Manual Ansible fallback
 

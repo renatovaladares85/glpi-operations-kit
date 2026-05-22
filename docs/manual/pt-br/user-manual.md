@@ -33,10 +33,10 @@ Não é necessário `export` manual no fluxo normal. O `glpictl` carrega `config
 O comando canônico é:
 
 ```bash
-./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]
+./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit|auth> <action> [target] [scope]
 ```
 
-O domínio define a área operacional (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`) e `action/target` definem exatamente o que será alterado.
+O domínio define a área operacional (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`, `auth`) e `action/target` definem exatamente o que será alterado.
 
 Quando faltar ferramenta obrigatória, como `ansible-playbook` ou `ansible-inventory`, os scripts oferecem instalação guiada em Ubuntu. Se a instalação falhar ou for recusada, a execução para com remediação explícita para retomada no mesmo ponto.
 
@@ -76,6 +76,7 @@ Quando `SECURITY_REQUIRE_ORDERED_EXECUTION=true` e o modo efetivo é `SECURITY_M
 | `./scripts/glpictl.sh staging tls install-provided` | host APP | Valida caminhos de certificado/chave, atualiza override, reaplica app e recarrega serviço após validação de configuração. |
 | `./scripts/glpictl.sh staging ops cert check` | host APP | Lê certificado ativo e alerta sobre vencimento próximo. |
 | `./scripts/glpictl.sh staging audit check` | host de auditoria operacional | Consolida checagens de permissão, política, runtime e saúde operacional. |
+| `./scripts/glpictl.sh staging auth check` | host de validação de autenticação | Valida contrato de autenticação (`local|ldap|saml|oidc`) e pré-requisitos de SSO/TLS/plugin sem alterações destrutivas. |
 | `bash scripts/release-readiness.sh staging` | host executor com acesso ao repositório | Gera evidências de prontidão e falha apenas em problemas técnicos críticos. |
 
 ## Decisões de TLS e modo de segurança

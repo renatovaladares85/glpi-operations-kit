@@ -771,12 +771,23 @@ ensure_secret_keys() {
   local environment="$1"
   local secret_path
   local glpi_db_password glpi_db_root_password mysqld_exporter_password
+  local auth_saml_x509_certificate ldap_bind_password oidc_client_secret
   secret_path="$(runtime_secret_path "$environment")"
   ensure_runtime_foundation "$environment"
 
   glpi_db_password="$(read_product_config_value "$environment" "DATABASE_PASSWORD" || true)"
   glpi_db_root_password="$(read_product_config_value "$environment" "DATABASE_ROOT_PASSWORD" || true)"
   mysqld_exporter_password="$(read_product_config_value "$environment" "MONITORING_MYSQLD_EXPORTER_PASSWORD" || true)"
+
+  # Auth secrets are runtime-only and must not depend on config/<environment>.env.
+  auth_saml_x509_certificate=""
+  ldap_bind_password=""
+  oidc_client_secret=""
+  if [[ -f "$secret_path" ]]; then
+    auth_saml_x509_certificate="$(read_yaml_top_level_value "$secret_path" "auth_saml_x509_certificate" || true)"
+    ldap_bind_password="$(read_yaml_top_level_value "$secret_path" "ldap_bind_password" || true)"
+    oidc_client_secret="$(read_yaml_top_level_value "$secret_path" "oidc_client_secret" || true)"
+  fi
 
   if [[ -z "${glpi_db_password// }" ]]; then
     echo "Missing required config key: DATABASE_PASSWORD" >&2
@@ -800,7 +811,10 @@ ensure_secret_keys() {
   save_yaml_map "$secret_path" \
     glpi_db_password "$glpi_db_password" \
     glpi_db_root_password "$glpi_db_root_password" \
-    mysqld_exporter_password "$mysqld_exporter_password"
+    mysqld_exporter_password "$mysqld_exporter_password" \
+    auth_saml_x509_certificate "$auth_saml_x509_certificate" \
+    ldap_bind_password "$ldap_bind_password" \
+    oidc_client_secret "$oidc_client_secret"
 }
 
 require_runtime_file() {
