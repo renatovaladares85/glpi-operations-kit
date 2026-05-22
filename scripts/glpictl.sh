@@ -186,16 +186,43 @@ auth_requires_https() {
   return 1
 }
 
-ensure_auth_evidence_dir() {
-  ensure_directory "$AUTH_EVIDENCE_DIR"
-  chmod 700 "$AUTH_EVIDENCE_DIR" >/dev/null 2>&1 || true
+domain_evidence_dir_path() {
+  local domain_name="$1"
+  echo "$(runtime_evidence_dir "$ENVIRONMENT")/${domain_name}"
 }
 
-write_auth_state() {
-  local action_name="$1"
-  local status="$2"
-  local details="$3"
-  save_yaml_map "$AUTH_STATE_PATH" \
+domain_state_path() {
+  local domain_name="$1"
+  echo "$(runtime_state_dir "$ENVIRONMENT")/${domain_name}-state.yml"
+}
+
+domain_backup_state_path() {
+  local domain_name="$1"
+  echo "$(runtime_state_dir "$ENVIRONMENT")/${domain_name}-backup-latest.yml"
+}
+
+domain_backup_root_dir() {
+  local domain_name="$1"
+  echo "$(runtime_env_dir "$ENVIRONMENT")/backups/${domain_name}"
+}
+
+ensure_domain_evidence_dir() {
+  local domain_name="$1"
+  local evidence_dir
+  evidence_dir="$(domain_evidence_dir_path "$domain_name")"
+  ensure_directory "$evidence_dir"
+  chmod 700 "$evidence_dir" >/dev/null 2>&1 || true
+}
+
+write_domain_state() {
+  local domain_name="$1"
+  local action_name="$2"
+  local status="$3"
+  local details="$4"
+  local state_path
+  state_path="$(domain_state_path "$domain_name")"
+  save_yaml_map "$state_path" \
+    domain "$domain_name" \
     environment "$ENVIRONMENT" \
     action "$action_name" \
     status "$status" \
@@ -203,7 +230,7 @@ write_auth_state() {
     updated_at_utc "$(date -u +%FT%TZ)"
 }
 
-auth_capture_mode_if_exists() {
+capture_mode_if_exists() {
   local path="$1"
   if [[ -e "$path" ]]; then
     stat -c '%a' "$path" 2>/dev/null || echo ""
@@ -221,21 +248,27 @@ backup_copy_if_exists() {
   fi
 }
 
-auth_create_backup_snapshot() {
-  local action_name="$1"
-  local timestamp backup_dir backup_files_dir state_before_path manifest_path rollback_path
+create_domain_backup_snapshot() {
+  local domain_name="$1"
+  local action_name="$2"
+  local timestamp backup_root backup_dir backup_files_dir backup_state_path
+  local evidence_dir domain_state_file state_before_path manifest_path rollback_path
   local override_exists evidence_exists state_exists
   local override_mode evidence_mode state_mode
 
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  backup_dir="${AUTH_BACKUP_ROOT_DIR}/${timestamp}"
+  backup_root="$(domain_backup_root_dir "$domain_name")"
+  backup_dir="${backup_root}/${timestamp}"
   backup_files_dir="${backup_dir}/files"
+  backup_state_path="$(domain_backup_state_path "$domain_name")"
+  evidence_dir="$(domain_evidence_dir_path "$domain_name")"
+  domain_state_file="$(domain_state_path "$domain_name")"
   state_before_path="${backup_dir}/STATE_BEFORE.yml"
   manifest_path="${backup_dir}/MANIFEST.md"
   rollback_path="${backup_dir}/ROLLBACK.md"
 
-  ensure_directory "$AUTH_BACKUP_ROOT_DIR"
-  chmod 700 "$AUTH_BACKUP_ROOT_DIR" >/dev/null 2>&1 || true
+  ensure_directory "$backup_root"
+  chmod 700 "$backup_root" >/dev/null 2>&1 || true
   ensure_directory "$backup_files_dir"
   chmod 700 "$backup_dir" "$backup_files_dir" >/dev/null 2>&1 || true
 
@@ -243,39 +276,41 @@ auth_create_backup_snapshot() {
   evidence_exists="false"
   state_exists="false"
   [[ -e "$OVERRIDE_RUNTIME_PATH" ]] && override_exists="true"
-  [[ -e "$AUTH_EVIDENCE_DIR" ]] && evidence_exists="true"
-  [[ -e "$AUTH_STATE_PATH" ]] && state_exists="true"
+  [[ -e "$evidence_dir" ]] && evidence_exists="true"
+  [[ -e "$domain_state_file" ]] && state_exists="true"
 
-  override_mode="$(auth_capture_mode_if_exists "$OVERRIDE_RUNTIME_PATH")"
-  evidence_mode="$(auth_capture_mode_if_exists "$AUTH_EVIDENCE_DIR")"
-  state_mode="$(auth_capture_mode_if_exists "$AUTH_STATE_PATH")"
+  override_mode="$(capture_mode_if_exists "$OVERRIDE_RUNTIME_PATH")"
+  evidence_mode="$(capture_mode_if_exists "$evidence_dir")"
+  state_mode="$(capture_mode_if_exists "$domain_state_file")"
 
   backup_copy_if_exists "$OVERRIDE_RUNTIME_PATH" "${backup_files_dir}/overrides.runtime.yml"
   backup_copy_if_exists "$PUBLIC_RUNTIME_PATH" "${backup_files_dir}/public.runtime.yml"
   backup_copy_if_exists "$CONFIG_PATH" "${backup_files_dir}/environment.config.env"
-  backup_copy_if_exists "$AUTH_EVIDENCE_DIR" "${backup_files_dir}/auth-evidence"
-  backup_copy_if_exists "$AUTH_STATE_PATH" "${backup_files_dir}/auth-state.yml"
+  backup_copy_if_exists "$evidence_dir" "${backup_files_dir}/${domain_name}-evidence"
+  backup_copy_if_exists "$domain_state_file" "${backup_files_dir}/${domain_name}-state.yml"
 
   cat >"$state_before_path" <<EOF
 ---
+domain: '$(yaml_escape "$domain_name")'
 environment: '$(yaml_escape "$ENVIRONMENT")'
 action: '$(yaml_escape "$action_name")'
 created_at_utc: '$(date -u +%FT%TZ)'
 override_runtime_path: '$(yaml_escape "$OVERRIDE_RUNTIME_PATH")'
 override_exists_before: $(yaml_escape "$override_exists")
 override_mode_before: '$(yaml_escape "$override_mode")'
-auth_evidence_dir: '$(yaml_escape "$AUTH_EVIDENCE_DIR")'
-auth_evidence_exists_before: $(yaml_escape "$evidence_exists")
-auth_evidence_mode_before: '$(yaml_escape "$evidence_mode")'
-auth_state_path: '$(yaml_escape "$AUTH_STATE_PATH")'
-auth_state_exists_before: $(yaml_escape "$state_exists")
-auth_state_mode_before: '$(yaml_escape "$state_mode")'
+domain_evidence_dir: '$(yaml_escape "$evidence_dir")'
+domain_evidence_exists_before: $(yaml_escape "$evidence_exists")
+domain_evidence_mode_before: '$(yaml_escape "$evidence_mode")'
+domain_state_path: '$(yaml_escape "$domain_state_file")'
+domain_state_exists_before: $(yaml_escape "$state_exists")
+domain_state_mode_before: '$(yaml_escape "$state_mode")'
 EOF
 
   cat >"$manifest_path" <<EOF
-# Auth Backup Manifest
+# ${domain_name} Backup Manifest
 
 - environment: \`$ENVIRONMENT\`
+- domain: \`$domain_name\`
 - action: \`$action_name\`
 - backup_dir: \`$backup_dir\`
 - created_at_utc: \`$(date -u +%FT%TZ)\`
@@ -285,19 +320,19 @@ EOF
 - files/overrides.runtime.yml
 - files/public.runtime.yml
 - files/environment.config.env
-- files/auth-evidence/
-- files/auth-state.yml
+- files/${domain_name}-evidence/
+- files/${domain_name}-state.yml
 - STATE_BEFORE.yml
 - ROLLBACK.md
 EOF
 
   cat >"$rollback_path" <<EOF
-# Auth Rollback Instructions
+# ${domain_name} Rollback Instructions
 
 This backup can be restored using:
 
 \`\`\`bash
-./scripts/glpictl.sh $ENVIRONMENT auth rollback
+./scripts/glpictl.sh $ENVIRONMENT ${domain_name} rollback
 \`\`\`
 
 Rollback source directory:
@@ -306,51 +341,80 @@ Rollback source directory:
 EOF
 
   chmod 600 "$state_before_path" "$manifest_path" "$rollback_path"
-  save_yaml_map "$AUTH_BACKUP_STATE_PATH" \
+  save_yaml_map "$backup_state_path" \
+    domain "$domain_name" \
     environment "$ENVIRONMENT" \
     action "$action_name" \
     backup_dir "$backup_dir" \
     created_at_utc "$(date -u +%FT%TZ)"
 }
 
-find_latest_auth_backup_dir() {
-  if [[ ! -d "$AUTH_BACKUP_ROOT_DIR" ]]; then
+find_domain_backup_for_restore() {
+  local domain_name="$1"
+  local prefer_previous="${2:-false}"
+  local backup_root
+  backup_root="$(domain_backup_root_dir "$domain_name")"
+  if [[ ! -d "$backup_root" ]]; then
     echo ""
     return 0
   fi
-  find "$AUTH_BACKUP_ROOT_DIR" -mindepth 1 -maxdepth 1 -type d | sort | tail -n1
+
+  mapfile -t backups < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d | sort)
+  if ((${#backups[@]} == 0)); then
+    echo ""
+    return 0
+  fi
+  if [[ "$prefer_previous" == "true" ]]; then
+    if ((${#backups[@]} < 2)); then
+      echo ""
+      return 0
+    fi
+    echo "${backups[$((${#backups[@]} - 2))]}"
+    return 0
+  fi
+  echo "${backups[$((${#backups[@]} - 1))]}"
 }
 
-restore_auth_permissions_from_state() {
-  local state_file="$1"
-  local override_mode evidence_mode state_mode
+restore_domain_permissions_from_state() {
+  local domain_name="$1"
+  local state_file="$2"
+  local evidence_dir domain_state_file override_mode evidence_mode state_mode
+
+  evidence_dir="$(domain_evidence_dir_path "$domain_name")"
+  domain_state_file="$(domain_state_path "$domain_name")"
   override_mode="$(read_yaml_top_level_value "$state_file" "override_mode_before" || true)"
-  evidence_mode="$(read_yaml_top_level_value "$state_file" "auth_evidence_mode_before" || true)"
-  state_mode="$(read_yaml_top_level_value "$state_file" "auth_state_mode_before" || true)"
+  evidence_mode="$(read_yaml_top_level_value "$state_file" "domain_evidence_mode_before" || true)"
+  state_mode="$(read_yaml_top_level_value "$state_file" "domain_state_mode_before" || true)"
 
   if [[ -n "${override_mode// }" && -e "$OVERRIDE_RUNTIME_PATH" ]]; then
     chmod "$override_mode" "$OVERRIDE_RUNTIME_PATH" >/dev/null 2>&1 || true
   fi
-  if [[ -n "${evidence_mode// }" && -e "$AUTH_EVIDENCE_DIR" ]]; then
-    chmod "$evidence_mode" "$AUTH_EVIDENCE_DIR" >/dev/null 2>&1 || true
+  if [[ -n "${evidence_mode// }" && -e "$evidence_dir" ]]; then
+    chmod "$evidence_mode" "$evidence_dir" >/dev/null 2>&1 || true
   fi
-  if [[ -n "${state_mode// }" && -e "$AUTH_STATE_PATH" ]]; then
-    chmod "$state_mode" "$AUTH_STATE_PATH" >/dev/null 2>&1 || true
+  if [[ -n "${state_mode// }" && -e "$domain_state_file" ]]; then
+    chmod "$state_mode" "$domain_state_file" >/dev/null 2>&1 || true
   fi
 }
 
-run_auth_rollback() {
+run_domain_metadata_rollback() {
+  local domain_name="$1"
+  local prefer_previous="${2:-false}"
   local backup_dir backup_files_dir state_before_file evidence_exists_before state_exists_before
-  backup_dir="$(find_latest_auth_backup_dir)"
+  local evidence_dir domain_state_file
+
+  evidence_dir="$(domain_evidence_dir_path "$domain_name")"
+  domain_state_file="$(domain_state_path "$domain_name")"
+  backup_dir="$(find_domain_backup_for_restore "$domain_name" "$prefer_previous")"
   if [[ -z "${backup_dir// }" || ! -d "$backup_dir" ]]; then
-    echo "No auth backup found to restore under $AUTH_BACKUP_ROOT_DIR." >&2
+    echo "No ${domain_name} backup found to restore under $(domain_backup_root_dir "$domain_name")." >&2
     exit 1
   fi
 
   backup_files_dir="${backup_dir}/files"
   state_before_file="${backup_dir}/STATE_BEFORE.yml"
   if [[ ! -f "$state_before_file" ]]; then
-    echo "Invalid auth backup: missing STATE_BEFORE.yml in $backup_dir." >&2
+    echo "Invalid ${domain_name} backup: missing STATE_BEFORE.yml in $backup_dir." >&2
     exit 1
   fi
 
@@ -358,24 +422,90 @@ run_auth_rollback() {
     cp -a "${backup_files_dir}/overrides.runtime.yml" "$OVERRIDE_RUNTIME_PATH"
   fi
 
-  evidence_exists_before="$(read_yaml_top_level_value "$state_before_file" "auth_evidence_exists_before" || true)"
-  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
-    rm -rf "$AUTH_EVIDENCE_DIR"
+  evidence_exists_before="$(read_yaml_top_level_value "$state_before_file" "domain_evidence_exists_before" || true)"
+  if [[ -d "$evidence_dir" ]]; then
+    rm -rf "$evidence_dir"
   fi
-  if [[ -d "${backup_files_dir}/auth-evidence" ]]; then
-    cp -a "${backup_files_dir}/auth-evidence" "$AUTH_EVIDENCE_DIR"
+  if [[ -d "${backup_files_dir}/${domain_name}-evidence" ]]; then
+    cp -a "${backup_files_dir}/${domain_name}-evidence" "$evidence_dir"
   elif [[ "$evidence_exists_before" == "true" ]]; then
-    ensure_directory "$AUTH_EVIDENCE_DIR"
+    ensure_directory "$evidence_dir"
   fi
 
-  state_exists_before="$(read_yaml_top_level_value "$state_before_file" "auth_state_exists_before" || true)"
-  if [[ -f "${backup_files_dir}/auth-state.yml" ]]; then
-    cp -a "${backup_files_dir}/auth-state.yml" "$AUTH_STATE_PATH"
-  elif [[ "$state_exists_before" != "true" && -f "$AUTH_STATE_PATH" ]]; then
-    rm -f "$AUTH_STATE_PATH"
+  state_exists_before="$(read_yaml_top_level_value "$state_before_file" "domain_state_exists_before" || true)"
+  if [[ -f "${backup_files_dir}/${domain_name}-state.yml" ]]; then
+    cp -a "${backup_files_dir}/${domain_name}-state.yml" "$domain_state_file"
+  elif [[ "$state_exists_before" != "true" && -f "$domain_state_file" ]]; then
+    rm -f "$domain_state_file"
   fi
 
-  restore_auth_permissions_from_state "$state_before_file"
+  restore_domain_permissions_from_state "$domain_name" "$state_before_file"
+}
+
+write_domain_evidence_simple() {
+  local domain_name="$1"
+  local action_name="$2"
+  local status="$3"
+  local notes="$4"
+  local timestamp evidence_dir report_md report_yml latest_md latest_yml
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  ensure_domain_evidence_dir "$domain_name"
+  evidence_dir="$(domain_evidence_dir_path "$domain_name")"
+  report_md="$evidence_dir/${action_name}-${timestamp}.md"
+  report_yml="$evidence_dir/${action_name}-${timestamp}.yml"
+  latest_md="$evidence_dir/${action_name}-latest.md"
+  latest_yml="$evidence_dir/${action_name}-latest.yml"
+
+  cat >"$report_md" <<EOF
+# ${domain_name} ${action_name} Evidence
+
+- environment: \`$ENVIRONMENT\`
+- domain: \`$domain_name\`
+- status: \`$status\`
+- generated_at_utc: \`$(date -u +%FT%TZ)\`
+
+## Notes
+
+$notes
+EOF
+
+  cat >"$report_yml" <<EOF
+---
+environment: '$(yaml_escape "$ENVIRONMENT")'
+domain: '$(yaml_escape "$domain_name")'
+action: '$(yaml_escape "$action_name")'
+status: '$(yaml_escape "$status")'
+generated_at_utc: '$(date -u +%FT%TZ)'
+notes: '$(yaml_escape "$notes")'
+EOF
+
+  chmod 600 "$report_md" "$report_yml"
+  cp "$report_md" "$latest_md"
+  cp "$report_yml" "$latest_yml"
+  chmod 600 "$latest_md" "$latest_yml"
+}
+
+ensure_auth_evidence_dir() {
+  ensure_domain_evidence_dir "auth"
+}
+
+write_auth_state() {
+  local action_name="$1"
+  local status="$2"
+  local details="$3"
+  write_domain_state "auth" "$action_name" "$status" "$details"
+}
+
+auth_create_backup_snapshot() {
+  local action_name="$1"
+  create_domain_backup_snapshot "auth" "$action_name"
+}
+
+run_auth_rollback() {
+  local backup_dir
+  backup_dir="$(find_domain_backup_for_restore "auth" "false")"
+  run_domain_metadata_rollback "auth" "false"
   AUTH_SAML_PLUGIN_PRESENT="$(normalize_bool "$AUTH_SAML_PLUGIN_PRESENT" "false")"
   write_auth_state "rollback" "completed" "restored_from=${backup_dir}"
   write_auth_evidence "rollback" "pass" "Auth rollback restored runtime/evidence/state from backup: ${backup_dir}"
@@ -628,7 +758,11 @@ resolve_policy_contract() {
 
 is_mutating_operation() {
   case "$DOMAIN/$ACTION" in
-    deploy/apply|deploy/post-check|tls/*|promote/*|ops/*|auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
+    deploy/apply|deploy/post-check|\
+    tls/prepare|tls/apply|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
+    promote/prepare|promote/apply|promote/post-check|promote/rollback|\
+    ops/prepare|ops/rollback|ops/users|ops/cert|ops/resume|\
+    auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -962,15 +1096,30 @@ run_certify() {
   bash "$SCRIPT_ROOT/certify-staging.sh"
 }
 
-run_tls() {
-  local tls_action="$ACTION"
-  local domain local_cert_path local_key_path tls_mode use_tls
-  ensure_runtime_inputs_if_missing
-  resolve_policy_contract
-  domain="$(awk -F'"' '/glpi_domain:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"
-  local_cert_path=""
-  local_key_path=""
-  tls_mode="none"
+resolve_tls_apply_action_from_target() {
+  local target="${1:-}"
+  local normalized configured_mode
+  normalized="${target,,}"
+  if [[ -z "${normalized// }" || "$normalized" == "all" ]]; then
+    configured_mode="$(read_product_config_value "$ENVIRONMENT" "tls.mode" || true)"
+    [[ -z "${configured_mode// }" ]] && configured_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+    normalized="${configured_mode,,}"
+  fi
+  case "$normalized" in
+    none|disable) echo "disable" ;;
+    self_signed|self-signed|selfsigned) echo "self-signed" ;;
+    provided|install-provided|install_provided) echo "install-provided" ;;
+    reload) echo "reload" ;;
+    *)
+      echo "Unsupported TLS apply target: $target (expected none|self-signed|provided)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+resolve_tls_payload_for_legacy_action() {
+  local tls_action="$1"
+  local local_cert_path="" local_key_path="" tls_mode="none"
   case "$tls_action" in
     disable) tls_mode="none" ;;
     self-signed) tls_mode="self_signed" ;;
@@ -992,16 +1141,30 @@ run_tls() {
     reload)
       tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
       [[ -z "${tls_mode// }" ]] && tls_mode="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_mode" || true)"
+      [[ -z "${tls_mode// }" ]] && tls_mode="none"
       local_cert_path="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" || true)"
       [[ -z "${local_cert_path// }" ]] && local_cert_path="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" || true)"
       local_key_path="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" || true)"
       [[ -z "${local_key_path// }" ]] && local_key_path="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_tls_provided_local_key_path" || true)"
       ;;
     *)
-      echo "Unsupported TLS action: $tls_action (expected disable|self-signed|install-provided|reload)" >&2
+      echo "Unsupported TLS legacy action: $tls_action (expected disable|self-signed|install-provided|reload)." >&2
       exit 1
       ;;
   esac
+  printf "%s\n%s\n%s\n" "$tls_mode" "$local_cert_path" "$local_key_path"
+}
+
+execute_tls_legacy_apply() {
+  local tls_action="$1"
+  local domain local_cert_path local_key_path tls_mode use_tls
+  local -a payload
+  mapfile -t payload < <(resolve_tls_payload_for_legacy_action "$tls_action")
+  tls_mode="${payload[0]:-none}"
+  local_cert_path="${payload[1]:-}"
+  local_key_path="${payload[2]:-}"
+  domain="$(read_effective_runtime_value "glpi_domain" "")"
+  [[ -z "${domain// }" ]] && domain="$(read_product_config_value "$ENVIRONMENT" "glpi.domain" || true)"
   use_tls="false"
   [[ "$tls_mode" != "none" ]] && use_tls="true"
   enforce_security_policy_contract "$tls_mode" "$use_tls"
@@ -1012,42 +1175,245 @@ run_tls() {
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
   invoke_ansible "$ENVIRONMENT" "app" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
-  echo "TLS action '$tls_action' completed."
+}
+
+run_tls_web_server_postcheck() {
+  local web_server_type postcheck_cmd
+  web_server_type="$(read_effective_runtime_value "glpi_web_server_type" "nginx")"
+  web_server_type="${web_server_type,,}"
+  case "$web_server_type" in
+    nginx)
+      postcheck_cmd="nginx -t"
+      ;;
+    apache)
+      postcheck_cmd="if command -v apache2ctl >/dev/null 2>&1; then apache2ctl -t; elif command -v httpd >/dev/null 2>&1; then httpd -t; else exit 1; fi"
+      ;;
+    lighttpd)
+      postcheck_cmd="lighttpd -tt -f /etc/lighttpd/lighttpd.conf"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "$postcheck_cmd" -o >/dev/null
+}
+
+run_tls() {
+  local tls_action="$ACTION"
+  local tls_target="$TARGET"
+  local effective_tls_mode use_tls legacy_action notes backup_dir
+
+  case "$tls_action" in
+    check|prepare|apply|post-check|rollback|disable|self-signed|install-provided|reload) ;;
+    *)
+      echo "Unsupported TLS action: $tls_action (expected check|prepare|apply|post-check|rollback|disable|self-signed|install-provided|reload)" >&2
+      exit 1
+      ;;
+  esac
+  resolve_policy_contract
+
+  case "$tls_action" in
+    check)
+      ensure_runtime_inputs_if_missing "false"
+      effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+      use_tls="false"
+      [[ "$effective_tls_mode" != "none" ]] && use_tls="true"
+      enforce_security_policy_contract "$effective_tls_mode" "$use_tls"
+      notes="TLS check completed. Current mode=${effective_tls_mode}. No mutable changes were applied."
+      write_domain_state "tls" "check" "completed" "$notes"
+      write_domain_evidence_simple "tls" "check" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+    prepare)
+      create_domain_backup_snapshot "tls" "prepare"
+      ensure_runtime_inputs_if_missing "false"
+      legacy_action="$(resolve_tls_apply_action_from_target "$tls_target")"
+      resolve_tls_payload_for_legacy_action "$legacy_action" >/dev/null
+      notes="TLS prepare completed. Requested target=${tls_target}, mapped_action=${legacy_action}. Runtime preparation only."
+      write_domain_state "tls" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "tls" "prepare" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+    apply)
+      create_domain_backup_snapshot "tls" "apply"
+      ensure_runtime_inputs_if_missing "true"
+      legacy_action="$(resolve_tls_apply_action_from_target "$tls_target")"
+      execute_tls_legacy_apply "$legacy_action"
+      run_tls_web_server_postcheck
+      notes="TLS apply completed. Requested target=${tls_target}, mapped_action=${legacy_action}."
+      write_domain_state "tls" "apply" "completed" "$notes"
+      write_domain_evidence_simple "tls" "apply" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+    post-check)
+      ensure_runtime_inputs_if_missing "false"
+      effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+      use_tls="false"
+      [[ "$effective_tls_mode" != "none" ]] && use_tls="true"
+      enforce_security_policy_contract "$effective_tls_mode" "$use_tls"
+      run_tls_web_server_postcheck
+      notes="TLS post-check completed. Mode=${effective_tls_mode}, use_tls=${use_tls}."
+      write_domain_state "tls" "post-check" "completed" "$notes"
+      write_domain_evidence_simple "tls" "post-check" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+    rollback)
+      create_domain_backup_snapshot "tls" "rollback"
+      backup_dir="$(find_domain_backup_for_restore "tls" "true")"
+      run_domain_metadata_rollback "tls" "true"
+      notes="TLS rollback restored runtime/evidence/state from backup=${backup_dir}. Re-run tls apply if remote service reconfiguration is required."
+      write_domain_state "tls" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "tls" "rollback" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+    disable|self-signed|install-provided|reload)
+      create_domain_backup_snapshot "tls" "$tls_action"
+      ensure_runtime_inputs_if_missing "true"
+      execute_tls_legacy_apply "$tls_action"
+      run_tls_web_server_postcheck
+      notes="TLS legacy action completed using action=${tls_action}."
+      write_domain_state "tls" "$tls_action" "completed" "$notes"
+      write_domain_evidence_simple "tls" "$tls_action" "pass" "$notes"
+      echo "TLS action '$tls_action' completed."
+      return
+      ;;
+  esac
 }
 
 run_ops() {
+  local backup_dir users_action users_scope notes
   resolve_policy_contract
   enforce_security_policy_contract
-  if [[ "$ACTION" == "users" ]]; then
-    local users_action="$TARGET"
-    local users_scope="${SCOPE:-os}"
-    bash "$SCRIPT_ROOT/ops-maintenance.sh" users "$ENVIRONMENT" "$users_action" "$users_scope"
-    return
-  fi
-  if [[ "$ACTION" == "cert" ]]; then
-    bash "$SCRIPT_ROOT/ops-maintenance.sh" cert "$ENVIRONMENT" "$TARGET"
-    return
-  fi
-  if [[ "$ACTION" == "audit" ]]; then
-    bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
-    return
-  fi
-  if [[ "$ACTION" == "resume" ]]; then
-    bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
-    return
-  fi
-  echo "Unsupported ops action: $ACTION (expected users|cert|audit|resume)" >&2
-  exit 1
+
+  case "$ACTION" in
+    check)
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
+      notes="Ops check alias completed via audit check."
+      write_domain_state "ops" "check" "completed" "$notes"
+      write_domain_evidence_simple "ops" "check" "pass" "$notes"
+      return
+      ;;
+    prepare)
+      create_domain_backup_snapshot "ops" "prepare"
+      notes="Ops prepare completed. Local runtime/evidence/state snapshot is ready."
+      write_domain_state "ops" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "ops" "prepare" "pass" "$notes"
+      return
+      ;;
+    rollback)
+      create_domain_backup_snapshot "ops" "rollback"
+      backup_dir="$(find_domain_backup_for_restore "ops" "true")"
+      run_domain_metadata_rollback "ops" "true"
+      notes="Ops rollback restored local runtime/evidence/state from backup=${backup_dir}."
+      write_domain_state "ops" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "ops" "rollback" "pass" "$notes"
+      return
+      ;;
+    users)
+      users_action="$TARGET"
+      users_scope="${SCOPE:-os}"
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" users "$ENVIRONMENT" "$users_action" "$users_scope"
+      return
+      ;;
+    cert)
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" cert "$ENVIRONMENT" "$TARGET"
+      return
+      ;;
+    audit)
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
+      return
+      ;;
+    resume)
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
+      return
+      ;;
+    *)
+      echo "Unsupported ops action: $ACTION (expected check|prepare|rollback|users|cert|audit|resume)" >&2
+      exit 1
+      ;;
+  esac
 }
 
 run_audit() {
   bash "$SCRIPT_ROOT/ops-maintenance.sh" audit "$ENVIRONMENT" check
 }
 
-run_promote() {
+run_promote_legacy_apply() {
+  local promote_target="$1"
   resolve_policy_contract
   enforce_promotion_gate_policy_if_required
-  run_deploy apply "$TARGET"
+  run_deploy apply "$promote_target"
+}
+
+run_promote() {
+  local promote_action="$ACTION"
+  local promote_target="$TARGET"
+  local notes backup_dir
+
+  case "$promote_action" in
+    check|prepare|apply|post-check|rollback) ;;
+    *)
+      case "$promote_action" in
+        base|app|db|monitoring|backup|all)
+          promote_target="$promote_action"
+          ;;
+      esac
+      promote_action="apply"
+      ;;
+  esac
+
+  case "$promote_action" in
+    check)
+      ensure_runtime_inputs_if_missing "false"
+      resolve_policy_contract
+      enforce_security_policy_contract
+      enforce_promotion_gate_policy_if_required
+      ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
+      notes="Promote check completed. Inventory and promotion gate validations passed."
+      write_domain_state "promote" "check" "completed" "$notes"
+      write_domain_evidence_simple "promote" "check" "pass" "$notes"
+      ;;
+    prepare)
+      create_domain_backup_snapshot "promote" "prepare"
+      ensure_runtime_inputs_if_missing "false"
+      resolve_policy_contract
+      enforce_security_policy_contract
+      enforce_promotion_gate_policy_if_required
+      notes="Promote prepare completed. Local metadata snapshot created before promotion apply."
+      write_domain_state "promote" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "promote" "prepare" "pass" "$notes"
+      ;;
+    apply)
+      create_domain_backup_snapshot "promote" "apply"
+      run_promote_legacy_apply "$promote_target"
+      notes="Promote apply completed using target=${promote_target}."
+      write_domain_state "promote" "apply" "completed" "$notes"
+      write_domain_evidence_simple "promote" "apply" "pass" "$notes"
+      ;;
+    post-check)
+      resolve_policy_contract
+      enforce_security_policy_contract
+      enforce_promotion_gate_policy_if_required
+      run_deploy post-check "$promote_target"
+      notes="Promote post-check completed using target=${promote_target}."
+      write_domain_state "promote" "post-check" "completed" "$notes"
+      write_domain_evidence_simple "promote" "post-check" "pass" "$notes"
+      ;;
+    rollback)
+      create_domain_backup_snapshot "promote" "rollback"
+      backup_dir="$(find_domain_backup_for_restore "promote" "true")"
+      run_domain_metadata_rollback "promote" "true"
+      notes="Promote rollback restored local metadata from backup=${backup_dir}. Manual infrastructure rollback checklist must be executed by operator."
+      write_domain_state "promote" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "promote" "rollback" "pass" "$notes"
+      ;;
+  esac
 }
 
 resolve_auth_contract() {
