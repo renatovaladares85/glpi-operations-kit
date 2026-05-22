@@ -256,7 +256,7 @@ create_domain_backup_snapshot() {
   local override_exists evidence_exists state_exists
   local override_mode evidence_mode state_mode
 
-  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  timestamp="$(date -u +%Y%m%dT%H%M%S%NZ)"
   backup_root="$(domain_backup_root_dir "$domain_name")"
   backup_dir="${backup_root}/${timestamp}"
   backup_files_dir="${backup_dir}/files"
