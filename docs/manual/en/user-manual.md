@@ -38,7 +38,7 @@ The canonical command is:
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
-`domain` maps to major operational areas (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`). `action` and `target` define exactly what will change. The same command format is used for every environment; what changes is only the `<environment>.env` content and runtime secrets.
+`domain` maps to major operational areas (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`, `auth`). `action` and `target` define exactly what will change. The same command format is used for every environment; what changes is only the `<environment>.env` content and runtime secrets.
 
 When the scripts detect missing mandatory tooling such as `ansible-playbook` or `ansible-inventory`, they offer guided installation on Ubuntu. If auto-install fails or is denied, execution stops with a direct remediation command so you can continue from the same point after fixing the host.
 
@@ -80,6 +80,7 @@ When `SECURITY_REQUIRE_ORDERED_EXECUTION=true` and effective `SECURITY_MODE=secu
 | `./scripts/glpictl.sh staging tls install-provided` | APP host | Validates provided cert/key paths, updates runtime override and target cert paths, reapplies app path, and reloads only after config validation. |
 | `./scripts/glpictl.sh staging ops cert check` | APP host | Reads active certificate details and warns when expiration is near the configured threshold. |
 | `./scripts/glpictl.sh staging audit check` | host where operational audit is performed | Consolidates permission, policy, runtime, and operational checks for day-2 verification. |
+| `./scripts/glpictl.sh staging auth check` | host where auth validation is performed | Validates auth contract (`local|ldap|saml|oidc`) and SSO/TLS/plugin prerequisites without destructive changes. |
 | `bash scripts/release-readiness.sh staging` | execution host with repo access | Generates readiness evidence artifacts and fails only on critical technical readiness issues. |
 
 ## TLS and security mode decisions
