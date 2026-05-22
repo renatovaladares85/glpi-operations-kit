@@ -253,6 +253,7 @@ create_domain_backup_snapshot() {
   local action_name="$2"
   local timestamp backup_root backup_dir backup_files_dir backup_state_path
   local evidence_dir domain_state_file state_before_path manifest_path rollback_path
+  local deploy_sequence_file deploy_sequence_exists deploy_sequence_mode
   local override_exists evidence_exists state_exists
   local override_mode evidence_mode state_mode
 
@@ -263,6 +264,7 @@ create_domain_backup_snapshot() {
   backup_state_path="$(domain_backup_state_path "$domain_name")"
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
+  deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
   state_before_path="${backup_dir}/STATE_BEFORE.yml"
   manifest_path="${backup_dir}/MANIFEST.md"
   rollback_path="${backup_dir}/ROLLBACK.md"
@@ -275,19 +277,27 @@ create_domain_backup_snapshot() {
   override_exists="false"
   evidence_exists="false"
   state_exists="false"
+  deploy_sequence_exists="false"
   [[ -e "$OVERRIDE_RUNTIME_PATH" ]] && override_exists="true"
   [[ -e "$evidence_dir" ]] && evidence_exists="true"
   [[ -e "$domain_state_file" ]] && state_exists="true"
+  if [[ "$domain_name" == "deploy" && -e "$deploy_sequence_file" ]]; then
+    deploy_sequence_exists="true"
+  fi
 
   override_mode="$(capture_mode_if_exists "$OVERRIDE_RUNTIME_PATH")"
   evidence_mode="$(capture_mode_if_exists "$evidence_dir")"
   state_mode="$(capture_mode_if_exists "$domain_state_file")"
+  deploy_sequence_mode="$(capture_mode_if_exists "$deploy_sequence_file")"
 
   backup_copy_if_exists "$OVERRIDE_RUNTIME_PATH" "${backup_files_dir}/overrides.runtime.yml"
   backup_copy_if_exists "$PUBLIC_RUNTIME_PATH" "${backup_files_dir}/public.runtime.yml"
   backup_copy_if_exists "$CONFIG_PATH" "${backup_files_dir}/environment.config.env"
   backup_copy_if_exists "$evidence_dir" "${backup_files_dir}/${domain_name}-evidence"
   backup_copy_if_exists "$domain_state_file" "${backup_files_dir}/${domain_name}-state.yml"
+  if [[ "$domain_name" == "deploy" ]]; then
+    backup_copy_if_exists "$deploy_sequence_file" "${backup_files_dir}/deploy-sequence.yml"
+  fi
 
   cat >"$state_before_path" <<EOF
 ---
@@ -304,6 +314,9 @@ domain_evidence_mode_before: '$(yaml_escape "$evidence_mode")'
 domain_state_path: '$(yaml_escape "$domain_state_file")'
 domain_state_exists_before: $(yaml_escape "$state_exists")
 domain_state_mode_before: '$(yaml_escape "$state_mode")'
+deploy_sequence_path: '$(yaml_escape "$deploy_sequence_file")'
+deploy_sequence_exists_before: $(yaml_escape "$deploy_sequence_exists")
+deploy_sequence_mode_before: '$(yaml_escape "$deploy_sequence_mode")'
 EOF
 
   cat >"$manifest_path" <<EOF
@@ -322,6 +335,7 @@ EOF
 - files/environment.config.env
 - files/${domain_name}-evidence/
 - files/${domain_name}-state.yml
+- files/deploy-sequence.yml (deploy domain only)
 - STATE_BEFORE.yml
 - ROLLBACK.md
 EOF
@@ -378,13 +392,16 @@ find_domain_backup_for_restore() {
 restore_domain_permissions_from_state() {
   local domain_name="$1"
   local state_file="$2"
-  local evidence_dir domain_state_file override_mode evidence_mode state_mode
+  local evidence_dir domain_state_file deploy_sequence_file
+  local override_mode evidence_mode state_mode deploy_sequence_mode
 
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
+  deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
   override_mode="$(read_yaml_top_level_value "$state_file" "override_mode_before" || true)"
   evidence_mode="$(read_yaml_top_level_value "$state_file" "domain_evidence_mode_before" || true)"
   state_mode="$(read_yaml_top_level_value "$state_file" "domain_state_mode_before" || true)"
+  deploy_sequence_mode="$(read_yaml_top_level_value "$state_file" "deploy_sequence_mode_before" || true)"
 
   if [[ -n "${override_mode// }" && -e "$OVERRIDE_RUNTIME_PATH" ]]; then
     chmod "$override_mode" "$OVERRIDE_RUNTIME_PATH" >/dev/null 2>&1 || true
@@ -395,16 +412,21 @@ restore_domain_permissions_from_state() {
   if [[ -n "${state_mode// }" && -e "$domain_state_file" ]]; then
     chmod "$state_mode" "$domain_state_file" >/dev/null 2>&1 || true
   fi
+  if [[ "$domain_name" == "deploy" ]] && [[ -n "${deploy_sequence_mode// }" && -e "$deploy_sequence_file" ]]; then
+    chmod "$deploy_sequence_mode" "$deploy_sequence_file" >/dev/null 2>&1 || true
+  fi
 }
 
 run_domain_metadata_rollback() {
   local domain_name="$1"
   local prefer_previous="${2:-false}"
   local backup_dir backup_files_dir state_before_file evidence_exists_before state_exists_before
+  local deploy_sequence_exists_before deploy_sequence_file
   local evidence_dir domain_state_file
 
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
+  deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
   backup_dir="$(find_domain_backup_for_restore "$domain_name" "$prefer_previous")"
   if [[ -z "${backup_dir// }" || ! -d "$backup_dir" ]]; then
     echo "No ${domain_name} backup found to restore under $(domain_backup_root_dir "$domain_name")." >&2
@@ -437,6 +459,15 @@ run_domain_metadata_rollback() {
     cp -a "${backup_files_dir}/${domain_name}-state.yml" "$domain_state_file"
   elif [[ "$state_exists_before" != "true" && -f "$domain_state_file" ]]; then
     rm -f "$domain_state_file"
+  fi
+
+  if [[ "$domain_name" == "deploy" ]]; then
+    deploy_sequence_exists_before="$(read_yaml_top_level_value "$state_before_file" "deploy_sequence_exists_before" || true)"
+    if [[ -f "${backup_files_dir}/deploy-sequence.yml" ]]; then
+      cp -a "${backup_files_dir}/deploy-sequence.yml" "$deploy_sequence_file"
+    elif [[ "$deploy_sequence_exists_before" != "true" && -f "$deploy_sequence_file" ]]; then
+      rm -f "$deploy_sequence_file"
+    fi
   fi
 
   restore_domain_permissions_from_state "$domain_name" "$state_before_file"
@@ -758,7 +789,7 @@ resolve_policy_contract() {
 
 is_mutating_operation() {
   case "$DOMAIN/$ACTION" in
-    deploy/apply|deploy/post-check|\
+    deploy/prepare|deploy/apply|deploy/post-check|deploy/rollback|\
     tls/prepare|tls/apply|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
     promote/prepare|promote/apply|promote/post-check|promote/rollback|\
     ops/prepare|ops/rollback|ops/users|ops/cert|ops/resume|\
@@ -1004,8 +1035,41 @@ run_deploy() {
   local mode="$1"
   local target="$2"
   local post_check_tags="app,db"
+  local run_as_deploy_domain="false"
+  local backup_dir notes
 
+  [[ "$DOMAIN" == "deploy" ]] && run_as_deploy_domain="true"
   enforce_local_target_consistency "deploy" "$mode" "$target"
+
+  case "$mode" in
+    check|prepare|apply|post-check|rollback) ;;
+    *)
+      echo "Unsupported deploy action: $mode (expected check|prepare|apply|post-check|rollback)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$run_as_deploy_domain" == "true" ]]; then
+    case "$mode" in
+      prepare|apply|post-check|rollback)
+        create_domain_backup_snapshot "deploy" "$mode"
+        ;;
+    esac
+  fi
+
+  if [[ "$mode" == "rollback" ]]; then
+    if [[ "$run_as_deploy_domain" != "true" ]]; then
+      echo "Deploy rollback is only supported through deploy domain entrypoint." >&2
+      exit 1
+    fi
+    backup_dir="$(find_domain_backup_for_restore "deploy" "true")"
+    run_domain_metadata_rollback "deploy" "true"
+    notes="Deploy rollback restored local runtime/config/evidence/sequence metadata from backup=${backup_dir}."
+    write_domain_state "deploy" "rollback" "completed" "$notes"
+    write_domain_evidence_simple "deploy" "rollback" "pass" "$notes"
+    echo "Deploy action '$mode' completed."
+    return 0
+  fi
 
   if [[ "$mode" == "check" ]]; then
     ensure_runtime_inputs_if_missing "false"
@@ -1026,7 +1090,27 @@ run_deploy() {
     write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
     mark_apply_sequence "$mode" "$target"
+    if [[ "$run_as_deploy_domain" == "true" ]]; then
+      notes="Deploy check completed. No mutable system changes were applied."
+      write_domain_state "deploy" "check" "completed" "$notes"
+      write_domain_evidence_simple "deploy" "check" "pass" "$notes"
+    fi
     echo "Check completed successfully."
+    return 0
+  fi
+
+  if [[ "$mode" == "prepare" ]]; then
+    case "$target" in
+      app|all) enforce_single_web_server_contract ;;
+    esac
+    write_step "Validating rendered Ansible inventory"
+    ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
+    if [[ "$run_as_deploy_domain" == "true" ]]; then
+      notes="Deploy prepare completed. Runtime and inventory were prepared without invoking mutable deployment tasks."
+      write_domain_state "deploy" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "deploy" "prepare" "pass" "$notes"
+    fi
+    echo "Deploy action '$mode' completed."
     return 0
   fi
 
@@ -1084,8 +1168,17 @@ run_deploy() {
       fi
       mark_apply_sequence "$mode" "$target"
       ;;
-    *) echo "Unsupported deploy action: $mode (expected check|apply|post-check)" >&2; exit 1 ;;
+    *)
+      echo "Unsupported deploy action: $mode (expected check|prepare|apply|post-check|rollback)" >&2
+      exit 1
+      ;;
   esac
+
+  if [[ "$run_as_deploy_domain" == "true" ]]; then
+    notes="Deploy ${mode} completed for target=${target}."
+    write_domain_state "deploy" "$mode" "completed" "$notes"
+    write_domain_evidence_simple "deploy" "$mode" "pass" "$notes"
+  fi
 }
 
 run_certify() {
