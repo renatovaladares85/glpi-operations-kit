@@ -1081,7 +1081,7 @@ resolve_auth_contract() {
 }
 
 validate_auth_public_url() {
-  if [[ "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE" == "true" ]] || auth_requires_external; then
+  if [[ "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE" == "true" ]] && auth_requires_external; then
     if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
       echo "Missing required runtime key: sso_public_url" >&2
       echo "Set SSO_PUBLIC_URL in config/$ENVIRONMENT.env." >&2
