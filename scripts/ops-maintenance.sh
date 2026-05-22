@@ -25,7 +25,7 @@ PROTECTED_USERS=("root" "www-data" "mysql")
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" "ops" "${DOMAIN:-unknown}" "${ACTION:-${SCOPE:-all}}" bash git python3 ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" "ops" "${DOMAIN:-unknown}" "${ACTION:-${SCOPE:-all}}" bash git python3 ansible ansible-playbook ansible-inventory
 require_runtime_file "$(config_file_path "$ENVIRONMENT")" "product configuration file"
 materialize_runtime_from_config "$ENVIRONMENT"
 ensure_secret_keys "$ENVIRONMENT"

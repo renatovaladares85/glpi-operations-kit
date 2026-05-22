@@ -147,6 +147,12 @@ yaml_escape() {
   printf "%s" "$value"
 }
 
+shell_escape_single_quotes() {
+  local value="$1"
+  value="${value//\'/\'\"\'\"\'}"
+  printf "%s" "$value"
+}
+
 read_effective_runtime_value() {
   local key="$1"
   local default_value="${2:-}"
@@ -245,6 +251,233 @@ backup_copy_if_exists() {
   if [[ -e "$src" ]]; then
     ensure_directory "$(dirname "$dst")"
     cp -a "$src" "$dst"
+  fi
+}
+
+latest_domain_backup_dir() {
+  local domain_name="$1"
+  read_yaml_top_level_value "$(domain_backup_state_path "$domain_name")" "backup_dir" || true
+}
+
+inventory_group_has_hosts() {
+  local group_name="$1"
+  python3 - "$INVENTORY_RUNTIME_PATH" "$group_name" <<'PY'
+import sys
+from pathlib import Path
+import yaml
+
+inventory_path = Path(sys.argv[1])
+group_name = sys.argv[2]
+if not inventory_path.exists():
+    print("false")
+    sys.exit(0)
+data = yaml.safe_load(inventory_path.read_text(encoding="utf-8")) or {}
+hosts = (
+    (data.get("all") or {})
+    .get("children", {})
+    .get(group_name, {})
+    .get("hosts", {})
+)
+print("true" if isinstance(hosts, dict) and len(hosts) > 0 else "false")
+PY
+}
+
+domain_action_requires_remote_app_snapshot() {
+  local domain_name="$1"
+  local action_name="$2"
+  local target_name="$3"
+  case "$domain_name/$action_name" in
+    deploy/apply)
+      case "$target_name" in
+        app|monitoring|backup|all) return 0 ;;
+      esac
+      ;;
+    promote/apply)
+      case "$target_name" in
+        app|monitoring|backup|all) return 0 ;;
+      esac
+      ;;
+    tls/apply|tls/disable|tls/self-signed|tls/install-provided|tls/reload) return 0 ;;
+    ops/cert|ops/resume) return 0 ;;
+  esac
+  return 1
+}
+
+domain_action_requires_remote_db_snapshot() {
+  local domain_name="$1"
+  local action_name="$2"
+  local target_name="$3"
+  local scope_name="$4"
+  case "$domain_name/$action_name" in
+    deploy/apply)
+      case "$target_name" in
+        db|all) return 0 ;;
+      esac
+      ;;
+    promote/apply)
+      case "$target_name" in
+        db|all) return 0 ;;
+      esac
+      ;;
+    ops/users)
+      if [[ "$scope_name" == "db" ]]; then
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
+domain_action_requires_remote_snapshot() {
+  local domain_name="$1"
+  local action_name="$2"
+  local target_name="$3"
+  local scope_name="$4"
+  if domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name"; then
+    return 0
+  fi
+  if domain_action_requires_remote_db_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name"; then
+    return 0
+  fi
+  return 1
+}
+
+remote_snapshot_root_for_backup() {
+  local domain_name="$1"
+  local backup_dir="$2"
+  local remote_base timestamp
+  remote_base="$(read_effective_runtime_value "glpi_backup_base_dir" "/var/backups/glpi")"
+  timestamp="$(basename "$backup_dir")"
+  echo "${remote_base%/}/opskit/${ENVIRONMENT}/${domain_name}/${timestamp}"
+}
+
+create_remote_domain_backup_snapshot() {
+  local domain_name="$1"
+  local action_name="$2"
+  local target_name="$3"
+  local scope_name="$4"
+  local backup_dir remote_root remote_backup_file manifest_path
+  local app_required db_required app_has_hosts db_has_hosts
+  local glpi_install_dir glpi_config_dir glpi_var_dir glpi_plugin_dir glpi_log_dir glpi_db_name
+  local db_root_password db_root_password_escaped remote_root_escaped
+  local app_cmd db_cmd
+
+  if ! domain_action_requires_remote_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name"; then
+    return 0
+  fi
+
+  backup_dir="$(latest_domain_backup_dir "$domain_name")"
+  if [[ -z "${backup_dir// }" || ! -d "$backup_dir" ]]; then
+    echo "Unable to resolve backup directory for remote snapshot (${domain_name}/${action_name})." >&2
+    exit 1
+  fi
+
+  app_required="false"
+  db_required="false"
+  domain_action_requires_remote_app_snapshot "$domain_name" "$action_name" "$target_name" && app_required="true"
+  domain_action_requires_remote_db_snapshot "$domain_name" "$action_name" "$target_name" "$scope_name" && db_required="true"
+
+  app_has_hosts="false"
+  db_has_hosts="false"
+  [[ "$(inventory_group_has_hosts "glpi_app")" == "true" ]] && app_has_hosts="true"
+  [[ "$(inventory_group_has_hosts "glpi_db")" == "true" ]] && db_has_hosts="true"
+
+  remote_root="$(remote_snapshot_root_for_backup "$domain_name" "$backup_dir")"
+  remote_backup_file="${backup_dir}/REMOTE_BACKUP.yml"
+  manifest_path="${backup_dir}/MANIFEST.md"
+  remote_root_escaped="$(shell_escape_single_quotes "$remote_root")"
+
+  if [[ "$app_required" == "true" && "$app_has_hosts" == "true" ]]; then
+    glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
+    glpi_config_dir="$(read_effective_runtime_value "glpi_config_dir" "/etc/glpi")"
+    glpi_var_dir="$(read_effective_runtime_value "glpi_var_dir" "/var/lib/glpi/files")"
+    glpi_plugin_dir="$(read_effective_runtime_value "glpi_plugin_dir" "/var/lib/glpi/plugins")"
+    glpi_log_dir="$(read_effective_runtime_value "glpi_log_dir" "/var/log/glpi")"
+
+    app_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
+    ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_cmd" -o >/dev/null
+  fi
+
+  if [[ "$db_required" == "true" && "$db_has_hosts" == "true" ]]; then
+    require_runtime_file "$SECRET_PATH" "runtime secret file"
+    db_root_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_root_password" || true)"
+    if [[ -z "${db_root_password// }" ]]; then
+      echo "Missing runtime secret: glpi_db_root_password (required for DB snapshot)." >&2
+      exit 1
+    fi
+    db_root_password_escaped="$(shell_escape_single_quotes "$db_root_password")"
+    glpi_db_name="$(read_effective_runtime_value "glpi_db_name" "")"
+    if [[ -z "${glpi_db_name// }" ]]; then
+      echo "Missing runtime key: glpi_db_name (required for DB snapshot)." >&2
+      exit 1
+    fi
+    db_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/db'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '/etc/mysql' '/var/lib/mysql' '/etc/my.cnf' '/etc/my.cnf.d'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\"; mysqldump --single-transaction --routines --events --triggers --databases '$(shell_escape_single_quotes "$glpi_db_name")' -u root -p'${db_root_password_escaped}' > \"\$ROOT/glpi-db.sql\""
+    ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$db_cmd" -o >/dev/null
+  fi
+
+  cat >"$remote_backup_file" <<EOF
+---
+domain: '$(yaml_escape "$domain_name")'
+action: '$(yaml_escape "$action_name")'
+target: '$(yaml_escape "$target_name")'
+scope: '$(yaml_escape "$scope_name")'
+environment: '$(yaml_escape "$ENVIRONMENT")'
+created_at_utc: '$(date -u +%FT%TZ)'
+remote_root: '$(yaml_escape "$remote_root")'
+app_snapshot_required: $(yaml_escape "$app_required")
+db_snapshot_required: $(yaml_escape "$db_required")
+app_hosts_detected: $(yaml_escape "$app_has_hosts")
+db_hosts_detected: $(yaml_escape "$db_has_hosts")
+EOF
+  chmod 600 "$remote_backup_file"
+
+  {
+    echo ""
+    echo "## Remote Snapshot"
+    echo ""
+    echo "- REMOTE_BACKUP.yml"
+    echo "- remote_root: \`$remote_root\`"
+    echo "- app_snapshot_required: \`$app_required\` (hosts_detected=\`$app_has_hosts\`)"
+    echo "- db_snapshot_required: \`$db_required\` (hosts_detected=\`$db_has_hosts\`)"
+  } >>"$manifest_path"
+}
+
+restore_remote_domain_backup_snapshot() {
+  local domain_name="$1"
+  local backup_dir="$2"
+  local remote_backup_file remote_root app_required db_required app_has_hosts db_has_hosts
+  local db_root_password db_root_password_escaped
+  local app_restore_cmd db_restore_cmd
+
+  remote_backup_file="${backup_dir}/REMOTE_BACKUP.yml"
+  if [[ ! -f "$remote_backup_file" ]]; then
+    return 0
+  fi
+
+  remote_root="$(read_yaml_top_level_value "$remote_backup_file" "remote_root" || true)"
+  app_required="$(normalize_bool "$(read_yaml_top_level_value "$remote_backup_file" "app_snapshot_required" || true)" "false")"
+  db_required="$(normalize_bool "$(read_yaml_top_level_value "$remote_backup_file" "db_snapshot_required" || true)" "false")"
+  app_has_hosts="$(normalize_bool "$(read_yaml_top_level_value "$remote_backup_file" "app_hosts_detected" || true)" "false")"
+  db_has_hosts="$(normalize_bool "$(read_yaml_top_level_value "$remote_backup_file" "db_hosts_detected" || true)" "false")"
+  if [[ -z "${remote_root// }" ]]; then
+    return 0
+  fi
+
+  if [[ "$app_required" == "true" && "$app_has_hosts" == "true" ]]; then
+    app_restore_cmd="set -euo pipefail; ROOT='$(shell_escape_single_quotes "$remote_root")/{{ inventory_hostname }}/app'; if [ -f \"\$ROOT/files.tar.gz\" ]; then tar -xzf \"\$ROOT/files.tar.gz\" -C /; fi; if [ -f \"\$ROOT/PERMISSIONS.txt\" ]; then while IFS= read -r line; do mode=\"\${line%% *}\"; path=\"\${line#* }\"; if [ -n \"\${mode// }\" ] && [ -e \"\$path\" ]; then chmod \"\$mode\" \"\$path\" || true; fi; done < \"\$ROOT/PERMISSIONS.txt\"; fi"
+    ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_restore_cmd" -o >/dev/null
+  fi
+
+  if [[ "$db_required" == "true" && "$db_has_hosts" == "true" ]]; then
+    require_runtime_file "$SECRET_PATH" "runtime secret file"
+    db_root_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_root_password" || true)"
+    if [[ -z "${db_root_password// }" ]]; then
+      echo "Missing runtime secret: glpi_db_root_password (required for DB restore)." >&2
+      exit 1
+    fi
+    db_root_password_escaped="$(shell_escape_single_quotes "$db_root_password")"
+    db_restore_cmd="set -euo pipefail; ROOT='$(shell_escape_single_quotes "$remote_root")/{{ inventory_hostname }}/db'; if [ -f \"\$ROOT/files.tar.gz\" ]; then tar -xzf \"\$ROOT/files.tar.gz\" -C /; fi; if [ -f \"\$ROOT/PERMISSIONS.txt\" ]; then while IFS= read -r line; do mode=\"\${line%% *}\"; path=\"\${line#* }\"; if [ -n \"\${mode// }\" ] && [ -e \"\$path\" ]; then chmod \"\$mode\" \"\$path\" || true; fi; done < \"\$ROOT/PERMISSIONS.txt\"; fi; if [ -f \"\$ROOT/glpi-db.sql\" ]; then mysql -u root -p'${db_root_password_escaped}' < \"\$ROOT/glpi-db.sql\"; fi"
+    ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$db_restore_cmd" -o >/dev/null
   fi
 }
 
@@ -453,17 +686,16 @@ restore_domain_permissions_from_state() {
   fi
 }
 
-run_domain_metadata_rollback() {
+run_domain_metadata_restore_from_backup() {
   local domain_name="$1"
-  local prefer_previous="${2:-false}"
-  local backup_dir backup_files_dir state_before_file config_exists_before public_exists_before evidence_exists_before state_exists_before
+  local backup_dir="$2"
+  local backup_files_dir state_before_file config_exists_before public_exists_before evidence_exists_before state_exists_before
   local deploy_sequence_exists_before promotion_gate_exists_before deploy_sequence_file
   local evidence_dir domain_state_file
 
   evidence_dir="$(domain_evidence_dir_path "$domain_name")"
   domain_state_file="$(domain_state_path "$domain_name")"
   deploy_sequence_file="${DEPLOY_SEQUENCE_PATH}"
-  backup_dir="$(find_domain_backup_for_restore "$domain_name" "$prefer_previous")"
   if [[ -z "${backup_dir// }" || ! -d "$backup_dir" ]]; then
     echo "No ${domain_name} backup found to restore under $(domain_backup_root_dir "$domain_name")." >&2
     exit 1
@@ -532,6 +764,14 @@ run_domain_metadata_rollback() {
   restore_domain_permissions_from_state "$domain_name" "$state_before_file"
 }
 
+run_domain_metadata_rollback() {
+  local domain_name="$1"
+  local prefer_previous="${2:-false}"
+  local backup_dir
+  backup_dir="$(find_domain_backup_for_restore "$domain_name" "$prefer_previous")"
+  run_domain_metadata_restore_from_backup "$domain_name" "$backup_dir"
+}
+
 write_domain_evidence_simple() {
   local domain_name="$1"
   local action_name="$2"
@@ -595,7 +835,8 @@ auth_create_backup_snapshot() {
 run_auth_rollback() {
   local backup_dir
   backup_dir="$(find_domain_backup_for_restore "auth" "true")"
-  run_domain_metadata_rollback "auth" "true"
+  restore_remote_domain_backup_snapshot "auth" "$backup_dir"
+  run_domain_metadata_restore_from_backup "auth" "$backup_dir"
   AUTH_SAML_PLUGIN_PRESENT="$(normalize_bool "$AUTH_SAML_PLUGIN_PRESENT" "false")"
   write_auth_state "rollback" "completed" "restored_from=${backup_dir}"
   write_auth_evidence "rollback" "pass" "Auth rollback restored runtime/evidence/state from backup: ${backup_dir}"
@@ -1124,8 +1365,9 @@ run_deploy() {
       exit 1
     fi
     backup_dir="$(find_domain_backup_for_restore "deploy" "true")"
-    run_domain_metadata_rollback "deploy" "true"
-    notes="Deploy rollback restored local runtime/config/evidence/sequence metadata from backup=${backup_dir}."
+    restore_remote_domain_backup_snapshot "deploy" "$backup_dir"
+    run_domain_metadata_restore_from_backup "deploy" "$backup_dir"
+    notes="Deploy rollback restored remote/local runtime/config/evidence/sequence metadata from backup=${backup_dir}."
     write_domain_state "deploy" "rollback" "completed" "$notes"
     write_domain_evidence_simple "deploy" "rollback" "pass" "$notes"
     echo "Deploy action '$mode' completed."
@@ -1199,6 +1441,9 @@ run_deploy() {
   case "$mode" in
     apply)
       enforce_apply_sequence "$target"
+      if [[ "$run_as_deploy_domain" == "true" ]]; then
+        create_remote_domain_backup_snapshot "deploy" "apply" "$target" "$SCOPE"
+      fi
       invoke_ansible "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
       mark_apply_sequence "$mode" "$target"
       ;;
@@ -1300,7 +1545,7 @@ run_certify() {
     rollback)
       create_domain_backup_snapshot "certify" "rollback"
       backup_dir="$(find_domain_backup_for_restore "certify" "true")"
-      run_domain_metadata_rollback "certify" "true"
+      run_domain_metadata_restore_from_backup "certify" "$backup_dir"
       notes="Certify rollback restored local runtime/config/evidence/state and promotion gate metadata from backup=${backup_dir}."
       write_domain_state "certify" "rollback" "completed" "$notes"
       write_domain_evidence_simple "certify" "rollback" "pass" "$notes"
@@ -1454,6 +1699,7 @@ run_tls() {
       create_domain_backup_snapshot "tls" "apply"
       ensure_runtime_inputs_if_missing "true"
       legacy_action="$(resolve_tls_apply_action_from_target "$tls_target")"
+      create_remote_domain_backup_snapshot "tls" "apply" "$legacy_action" "$SCOPE"
       execute_tls_legacy_apply "$legacy_action"
       run_tls_web_server_postcheck
       notes="TLS apply completed. Requested target=${tls_target}, mapped_action=${legacy_action}."
@@ -1479,8 +1725,9 @@ run_tls() {
     rollback)
       create_domain_backup_snapshot "tls" "rollback"
       backup_dir="$(find_domain_backup_for_restore "tls" "true")"
-      run_domain_metadata_rollback "tls" "true"
-      notes="TLS rollback restored runtime/evidence/state from backup=${backup_dir}. Re-run tls apply if remote service reconfiguration is required."
+      restore_remote_domain_backup_snapshot "tls" "$backup_dir"
+      run_domain_metadata_restore_from_backup "tls" "$backup_dir"
+      notes="TLS rollback restored remote/local runtime/evidence/state from backup=${backup_dir}."
       write_domain_state "tls" "rollback" "completed" "$notes"
       write_domain_evidence_simple "tls" "rollback" "pass" "$notes"
       echo "TLS action '$tls_action' completed."
@@ -1489,6 +1736,7 @@ run_tls() {
     disable|self-signed|install-provided|reload)
       create_domain_backup_snapshot "tls" "$tls_action"
       ensure_runtime_inputs_if_missing "true"
+      create_remote_domain_backup_snapshot "tls" "$tls_action" "$TARGET" "$SCOPE"
       execute_tls_legacy_apply "$tls_action"
       run_tls_web_server_postcheck
       notes="TLS legacy action completed using action=${tls_action}."
@@ -1524,8 +1772,9 @@ run_ops() {
     rollback)
       create_domain_backup_snapshot "ops" "rollback"
       backup_dir="$(find_domain_backup_for_restore "ops" "true")"
-      run_domain_metadata_rollback "ops" "true"
-      notes="Ops rollback restored local runtime/evidence/state from backup=${backup_dir}."
+      restore_remote_domain_backup_snapshot "ops" "$backup_dir"
+      run_domain_metadata_restore_from_backup "ops" "$backup_dir"
+      notes="Ops rollback restored remote/local runtime/evidence/state from backup=${backup_dir}."
       write_domain_state "ops" "rollback" "completed" "$notes"
       write_domain_evidence_simple "ops" "rollback" "pass" "$notes"
       return
@@ -1534,11 +1783,15 @@ run_ops() {
       create_domain_backup_snapshot "ops" "users"
       users_action="$TARGET"
       users_scope="${SCOPE:-os}"
+      ensure_runtime_inputs_if_missing "true"
+      create_remote_domain_backup_snapshot "ops" "users" "$users_action" "$users_scope"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" users "$ENVIRONMENT" "$users_action" "$users_scope"
       return
       ;;
     cert)
       create_domain_backup_snapshot "ops" "cert"
+      ensure_runtime_inputs_if_missing "true"
+      create_remote_domain_backup_snapshot "ops" "cert" "$TARGET" "$SCOPE"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" cert "$ENVIRONMENT" "$TARGET"
       return
       ;;
@@ -1549,6 +1802,8 @@ run_ops() {
       ;;
     resume)
       create_domain_backup_snapshot "ops" "resume"
+      ensure_runtime_inputs_if_missing "true"
+      create_remote_domain_backup_snapshot "ops" "resume" "$TARGET" "$SCOPE"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
       return
       ;;
@@ -1580,7 +1835,7 @@ run_audit() {
     rollback)
       create_domain_backup_snapshot "audit" "rollback"
       backup_dir="$(find_domain_backup_for_restore "audit" "true")"
-      run_domain_metadata_rollback "audit" "true"
+      run_domain_metadata_restore_from_backup "audit" "$backup_dir"
       notes="Audit rollback restored local runtime/evidence/state from backup=${backup_dir}."
       write_domain_state "audit" "rollback" "completed" "$notes"
       write_domain_evidence_simple "audit" "rollback" "pass" "$notes"
@@ -1640,6 +1895,8 @@ run_promote() {
       ;;
     apply)
       create_domain_backup_snapshot "promote" "apply"
+      ensure_runtime_inputs_if_missing "true"
+      create_remote_domain_backup_snapshot "promote" "apply" "$promote_target" "$SCOPE"
       run_promote_legacy_apply "$promote_target"
       notes="Promote apply completed using target=${promote_target}."
       write_domain_state "promote" "apply" "completed" "$notes"
@@ -1658,8 +1915,9 @@ run_promote() {
     rollback)
       create_domain_backup_snapshot "promote" "rollback"
       backup_dir="$(find_domain_backup_for_restore "promote" "true")"
-      run_domain_metadata_rollback "promote" "true"
-      notes="Promote rollback restored local metadata from backup=${backup_dir}. Manual infrastructure rollback checklist must be executed by operator."
+      restore_remote_domain_backup_snapshot "promote" "$backup_dir"
+      run_domain_metadata_restore_from_backup "promote" "$backup_dir"
+      notes="Promote rollback restored remote/local metadata from backup=${backup_dir}."
       write_domain_state "promote" "rollback" "completed" "$notes"
       write_domain_evidence_simple "promote" "rollback" "pass" "$notes"
       ;;
@@ -2073,7 +2331,7 @@ ensure_runtime_foundation "$ENVIRONMENT"
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
 trap 'finalize_glpictl_operation "$?"' EXIT
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
-run_preflight_checks "$ENVIRONMENT" "$DOMAIN" "$ACTION" "$TARGET" bash git python3 ansible-playbook ansible-inventory
+run_preflight_checks "$ENVIRONMENT" "$DOMAIN" "$ACTION" "$TARGET" bash git python3 ansible ansible-playbook ansible-inventory
 
 if is_mutating_operation && [[ "$SECURITY_MODE_EFFECTIVE" == "permissive" ]]; then
   ensure_permissive_justification
