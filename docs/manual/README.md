@@ -12,6 +12,11 @@ This folder contains the operator manuals and appendices in mirrored English and
 - English: [Appendices Index](en/appendices/index.md)
 - Português (Brasil): [Índice de Apêndices](pt-br/appendices/index.md)
 
+## Technical and contribution references
+
+- [Architecture manuals](../architecture/README.md)
+- [Open source contribution guide](../../CONTRIBUTING.md)
+
 Most operators should read in this order:
 
 1. User Manual.
