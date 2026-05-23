@@ -1,114 +1,192 @@
-# GLPI Operations Kit - Operator Runbook (EN)
+# GLPI Operations Kit - Operator Manual (EN)
 
-This manual is for Linux operators, DevOps engineers, and auditors who need to deploy and operate GLPI with repeatable controls. You do not need to read the full codebase before starting. If you follow this runbook in order, the scripts will generate runtime files, validate prerequisites, and show explicit remediation when something is missing.
+This manual guides a complete GLPI Operations Kit installation from Linux shell. It covers preparation, `.env` filling, TLS, SSO, database, application, monitoring, backup, validation, and rollback.
 
-You can edit files from a Windows workstation, but all operational commands in this runbook must be executed from a Linux shell on the target servers.
+You may edit files from Windows, but operational commands must run from Linux shell on the target host or a Linux execution host.
 
-The expected skill level is practical Ubuntu administration with `sudo`, basic shell usage, and familiarity with Ansible command execution. If your company requires interactive login, password, and 2FA on each host, the runbook already supports that through local host execution.
+## Index
 
-## Start here
+1. [Prerequisites](#prerequisites)
+2. [Files you need to fill](#files-you-need-to-fill)
+3. [Recommended flow from zero](#recommended-flow-from-zero)
+4. [Topology choice](#topology-choice)
+5. [TLS and certificates](#tls-and-certificates)
+6. [SSO and external authentication](#sso-and-external-authentication)
+7. [Database, application, monitoring, and backup](#database-application-monitoring-and-backup)
+8. [Validation, evidence, and rollback](#validation-evidence-and-rollback)
+9. [Appendices](#appendices)
 
-Your first action is always to prepare configuration, then bootstrap permissions. Copy the product template and create the environment file you want to use:
+## Prerequisites
+
+Before changing the environment, confirm:
+
+- Linux access with `sudo` when required.
+- Repository available on the execution host.
+- `config/<environment>.env` created from `config/product.env`.
+- Strong secrets available for database and monitoring.
+- GLPI FQDN defined, especially when TLS or SSO is used.
+- Topology decision: `single-server` or `dual-server`.
+- Execution decision: `local` or `ssh`.
+
+Prepare permissions and local baseline:
+
+```bash
+bash scripts/bootstrap-permissions.sh
+```
+
+## Files you need to fill
+
+| File | Purpose | Commit to Git? |
+|---|---|---|
+| `config/product.env` | Versioned product template. | Yes. Do not put real sensitive values. |
+| `config/<environment>.env` | Environment public config and some required deployment secrets. | Do not commit real environment copies. |
+| `.runtime/<environment>/secrets.yml` | Runtime secrets, especially external auth. | Never. |
+| `.runtime/<environment>/public.runtime.yml` | Public runtime rendered by scripts. | Never. |
+| `.runtime/<environment>/evidence/` | Execution evidence. | Never, except sanitized audit packages outside Git. |
+| `.runtime/<environment>/backups/` | Domain snapshots/backups. | Never. |
+
+To fill each `.env` key, use [Environment Configuration Field Guide](appendices/configuration-field-guide.md).
+
+## Recommended flow from zero
+
+1. Create environment config.
 
 ```bash
 cp config/product.env config/staging.env
 ```
 
-Open `config/staging.env` and adjust all required values, including sensitive ones required by deployment. The script does not prompt for missing secrets anymore; it reads them from the environment file and materializes `.runtime/<environment>/secrets.yml` with restricted permissions.
+2. Fill `config/staging.env` using the field guide.
 
-After editing the environment file, run:
+3. Run precheck.
 
 ```bash
-bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy check all
 ```
 
-You do not need to run manual `export` commands for execution variables in normal use. `glpictl` automatically loads `config/<environment>.env`, then applies this precedence:
+4. Apply database, application, monitoring, and backup in the correct order.
 
-1. CLI arguments (for example `staging deploy apply db`)
-2. already-set process variables (optional one-off overrides)
-3. `config/<environment>.env`
-4. internal defaults
+```bash
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
+```
 
-## How execution works
+5. Validate TLS and auth when applicable.
 
-The canonical command is:
+```bash
+./scripts/glpictl.sh staging tls check
+./scripts/glpictl.sh staging auth check
+```
+
+6. Generate final evidence.
+
+```bash
+./scripts/glpictl.sh staging audit check
+bash scripts/release-readiness.sh staging
+```
+
+## Topology choice
+
+Use `TOPOLOGY_MODE=single-server` when app and DB are on the same host. Use `EXECUTION_HOST_ROLE_DEFAULT=all`.
+
+Use `TOPOLOGY_MODE=dual-server` when app and DB are on separate hosts. In local execution without direct SSH between servers:
+
+On DB host:
+
+```bash
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply db
+```
+
+On APP host:
+
+```bash
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
+```
+
+Use `EXECUTION_MODE=ssh` only when policy allows remote orchestration and the private key is available with restricted permissions.
+
+## TLS and certificates
+
+The kit supports `TLS_MODE=none`, `TLS_MODE=self_signed`, and `TLS_MODE=provided`.
+
+For production, the expected path is `provided`: HTTPS server certificate, full PEM chain, and matching PEM private key. It is not a client certificate. mTLS/client certificate is not automated by the current kit.
+
+Read [TLS Modes and Certificate Operations](appendices/tls-modes.md) before requesting a certificate from CA/security.
+
+## SSO and external authentication
+
+`AUTH_MODE=local` preserves current behavior. For LDAP, SAML, or OIDC, the `auth` domain prepares, validates, and generates evidence without installing plugins automatically and without removing local/admin login.
+
+For Azure/Entra ID with SAML, read [Authentication, SSO, and Azure/Entra ID Guide](appendices/auth-sso-guide.md). The SAML plugin must be installed manually in GLPI via Marketplace or an approved procedure.
+
+Basic flow:
+
+```bash
+./scripts/glpictl.sh staging auth check
+./scripts/glpictl.sh staging auth prepare
+./scripts/glpictl.sh staging auth apply
+./scripts/glpictl.sh staging auth post-check
+```
+
+## Database, application, monitoring, and backup
+
+Main deploy syntax:
 
 ```bash
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
-`domain` maps to major operational areas (`deploy`, `tls`, `ops`, `audit`, `certify`, `promote`, `auth`). `action` and `target` define exactly what will change. The same command format is used for every environment; what changes is only the `<environment>.env` content and runtime secrets.
+Core commands:
 
-When the scripts detect missing mandatory tooling such as `ansible-playbook` or `ansible-inventory`, they offer guided installation on Ubuntu. If auto-install fails or is denied, execution stops with a direct remediation command so you can continue from the same point after fixing the host.
+| Command | Purpose |
+|---|---|
+| `deploy check all` | Validates tools, permissions, config, runtime, policy, and inventory. |
+| `deploy apply db` | Installs/configures MariaDB, schema, user, and grants. |
+| `deploy apply app` | Installs GLPI, web engine, PHP-FPM, secure paths, and APP -> DB connectivity. |
+| `deploy apply monitoring` | Applies exporters and observability baseline. |
+| `deploy apply backup` | Applies backup/retention baseline. |
+| `deploy post-check all` | Validates final state. |
 
-## Single-server and dual-server execution
+Use [Command Reference](appendices/command-reference.md) for the complete list.
 
-In a single-server setup, set `TOPOLOGY_MODE=single-server` and keep `EXECUTION_HOST_ROLE_DEFAULT=all` in the environment file. Then run the deploy stages in order on that same host.
+## Validation, evidence, and rollback
 
-In a dual-server setup, `TOPOLOGY_MODE=dual-server` is the recommended model. If your company blocks direct SSH between servers, keep `EXECUTION_MODE=local`. In that mode, each host is configured locally after interactive login with your company access policy (including 2FA when required):
+Runtime, evidence, and backup files live under `.runtime/<environment>/`.
 
-1. On DB host: run `deploy check all`, then `deploy apply db`.
-2. On APP host: run `deploy check all`, then `deploy apply app`, `deploy apply monitoring`, `deploy apply backup`, and `deploy post-check all`.
+Important structures:
 
-If remote automation is allowed, set `EXECUTION_MODE=ssh`, provide `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH`, and keep private key mode as `0600`.
+| Structure | Use |
+|---|---|
+| `.runtime/<env>/state/` | Checkpoints and state pointers. |
+| `.runtime/<env>/evidence/` | Domain evidence. |
+| `.runtime/<env>/backups/<domain>/<timestamp>/` | Domain snapshots with manifest and rollback instructions. |
 
-## Required execution order
+Standardized commands where available:
 
-The safe order is:
+```bash
+./scripts/glpictl.sh staging auth rollback
+./scripts/glpictl.sh staging tls rollback
+./scripts/glpictl.sh staging ops rollback
+./scripts/glpictl.sh staging audit rollback
+./scripts/glpictl.sh staging deploy rollback all
+```
 
-1. `deploy check all`
-2. `deploy apply db`
-3. `deploy apply app`
-4. `deploy apply monitoring`
-5. `deploy apply backup`
-6. `deploy post-check all`
+Local metadata rollback restores runtime/evidence/state for the domain. Rollback for manual changes in GLPI, IAM, external certificates, or remote infrastructure must follow the responsible team's operational checklist.
 
-When `SECURITY_REQUIRE_ORDERED_EXECUTION=true` and effective `SECURITY_MODE=secure`, out-of-order mutable calls are blocked. In `permissive` mode, policy violations are downgraded to warnings and persisted as explicit risk evidence with operator justification.
+## Appendices
 
-## What the key commands actually do
-
-| Command | Where to run | Operational purpose |
-|---|---|---|
-| `./scripts/glpictl.sh staging deploy check all` | current host | Runs precheck, verifies permissions, validates config loading, materializes runtime files, validates inventory rendering, confirms policy contract, and in app-host local flow validates/auto-installs `mariadb-client` and PHP `bcmath` for GLPI 11 baseline. |
-| `./scripts/glpictl.sh staging deploy apply db` | DB host in local dual-server, or orchestrator host in ssh mode | Installs and hardens MariaDB packages, applies DB runtime parameters, provisions GLPI database/user/grants, and enforces DB-side access constraints for app origin. |
-| `./scripts/glpictl.sh staging deploy apply app` | APP host in local dual-server, or orchestrator host in ssh mode | Installs app packages, deploys GLPI layout outside web root, configures selected web engine + PHP-FPM, applies TLS mode template, validates `bcmath`, and verifies APP->DB connectivity with `SELECT 1` using GLPI DB user. |
-| `./scripts/glpictl.sh staging deploy apply monitoring` | APP host (and DB host according to role scope) | Installs and configures monitoring exporters and baseline observability settings from runtime values. |
-| `./scripts/glpictl.sh staging deploy apply backup` | APP host (and DB host according to role scope) | Applies backup baseline, retention policy settings, and backup runtime artifacts used for operational checks. |
-| `./scripts/glpictl.sh staging deploy post-check all` | current host | Runs post-deploy validations, service-level checks, and policy-related checks after mutable stages complete. |
-| `./scripts/glpictl.sh staging tls self-signed` | APP host | Switches TLS mode to self-signed, updates runtime override, applies app role path, validates Nginx config, and reloads service safely. |
-| `./scripts/glpictl.sh staging tls install-provided` | APP host | Validates provided cert/key paths, updates runtime override and target cert paths, reapplies app path, and reloads only after config validation. |
-| `./scripts/glpictl.sh staging ops cert check` | APP host | Reads active certificate details and warns when expiration is near the configured threshold. |
-| `./scripts/glpictl.sh staging audit check` | host where operational audit is performed | Consolidates permission, policy, runtime, and operational checks for day-2 verification. |
-| `./scripts/glpictl.sh staging auth check` | host where auth validation is performed | Validates auth contract (`local|ldap|saml|oidc`) and SSO/TLS/plugin prerequisites without destructive changes. |
-| `bash scripts/release-readiness.sh staging` | execution host with repo access | Generates readiness evidence artifacts and fails only on critical technical readiness issues. |
-
-## TLS and security mode decisions
-
-TLS operation has three intentional paths: `none`, `self_signed`, and `provided`. You can start with `none` in controlled development or homologation, move to `self_signed` for encrypted internal tests, and then switch to `provided` when valid certificates are available. The switch is script-driven and does not require manual Nginx template editing.
-
-Security policy is selected per execution. `SECURITY_MODE=secure` enforces policy flags as blocking checks. `SECURITY_MODE=permissive` allows continuation with warnings, but always records who accepted the risk, when, and which policies were violated.
-
-## Runtime files and their meaning
-
-After `deploy check`, runtime files appear under `.runtime/<environment>/`. `public.runtime.yml` is the rendered non-sensitive baseline derived from `config/<environment>.env`. `overrides.runtime.yml` stores mutable operational overrides, such as runtime TLS transitions, without changing your baseline config. `secrets.yml` stores sensitive values collected at runtime and must stay restricted. `inventory.runtime.yml` is the effective inventory contract consumed by Ansible for local or ssh execution. `state/` and `evidence/` hold checkpoints and audit outputs used for certification, troubleshooting, and investigations.
-
-For a command-by-command reference, use [Command Reference](appendices/command-reference.md). For field-level configuration details, use [Environment Parameters](../../product/environment-parameters.md) and [Configuration Reference](../../product/configuration-reference.md).
-
-## Validation and troubleshooting path
-
-The minimum operational validation after deployment is: GLPI page reachable, DB connectivity working, `nginx -t` passing, PHP-FPM config test passing, and runtime evidence files generated. If anything fails, runbook-safe remediation is documented in [Troubleshooting Matrix](appendices/troubleshooting-matrix.md), including missing dependencies, wrong host role, missing SSH material in ssh mode, invalid TLS paths, and policy-mode behavior.
-
-## Install and asset access matrix
-
-During install phase, the application must expose `/` and route installer flow correctly from `/install/install.php` without returning 404. Static assets referenced by the install page (`.js` and `.css`) must be reachable, and sensitive paths must remain blocked even while the installer is open. The automated checks now validate this contract for the selected engine by querying local loopback with the configured host header and by asserting blocked responses for sensitive paths such as `config/`, `files/`, and `vendor/`.
-
-If `/` opens but installer redirect fails, run `./scripts/glpictl.sh <env> deploy apply app` again and verify the generated web template for your selected engine. For Nginx, compatibility routing for `/install/install.php` is enforced while keeping `public` as web root and applying allowlist-only PHP execution (`/index.php`, `/ajax/*.php`, `/front/*.php`, `/report/*.php`, `/plugins/*.php`) with non-approved direct PHP paths blocked.
-
-## Related appendices
-
+- [Environment Configuration Field Guide](appendices/configuration-field-guide.md)
+- [Environment Examples](appendices/environment-examples.md)
+- [TLS Modes and Certificate Operations](appendices/tls-modes.md)
+- [Authentication, SSO, and Azure/Entra ID Guide](appendices/auth-sso-guide.md)
+- [Runtime Inputs and Files](appendices/runtime-input-reference.md)
 - [Command Reference](appendices/command-reference.md)
-- [Runtime Input and Runtime Files](appendices/runtime-input-reference.md)
-- [TLS Modes](appendices/tls-modes.md)
 - [Operational Checks](appendices/operational-checks.md)
 - [Troubleshooting Matrix](appendices/troubleshooting-matrix.md)
