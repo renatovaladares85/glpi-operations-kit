@@ -7,6 +7,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 ## Golden rule
 
 - Public values stay in `config/<environment>.env`.
+- `config/product.env` keeps only mandatory baseline keys uncommented.
 - Keys not used in the current scenario stay commented with a filled default example.
 - Keys used in the current scenario stay uncommented with real environment values.
 - Deployment secrets currently read from the environment file are `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, and `MONITORING_MYSQLD_EXPORTER_PASSWORD`.

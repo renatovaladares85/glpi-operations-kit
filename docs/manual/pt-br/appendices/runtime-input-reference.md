@@ -6,6 +6,11 @@ Este apêndice explica como os dados de configuração e runtime circulam no pro
 
 Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos obrigatórios de deploy atualmente lidos desse arquivo são materializados em `.runtime/<environment>/secrets.yml`; segredos de autenticação externa devem permanecer somente em `.runtime/<environment>/secrets.yml`.
 
+Comportamento baseline do template:
+
+- `config/product.env` mantém descomentadas apenas as chaves obrigatórias de baseline.
+- Chaves opcionais e específicas de cenário ficam comentadas até o cenário ser explicitamente habilitado.
+
 Na prática, você ajusta os valores públicos em `config/<environment>.env`, executa `deploy check`, e deixa os scripts renderizarem os arquivos runtime usados pelo Ansible.
 
 ## Como funciona o `GLPI_APP_PACKAGES` automático
@@ -101,4 +106,23 @@ Segredos de autenticação externa não devem ser colocados no Git e devem perma
 
 ## Regras condicionais de runtime
 
-Quando o modo é `local`, não há exigência de conectividade SSH remota, e comandos por papel devem ser executados no host correto em topologia dual-server. Quando o modo é `ssh`, chave e conectividade remota tornam-se obrigatórias. Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem existir de fato. Se faltarem chaves obrigatórias no `config/<environment>.env`, a execução falha cedo e não solicita dados no terminal. As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas, e o efeito de bloqueio depende do `SECURITY_MODE` efetivo.
+Quando o modo é `local`, não há exigência de conectividade SSH remota, e comandos por papel devem ser executados no host correto em topologia dual-server.
+
+Quando o modo é `ssh`, chave e conectividade remota tornam-se obrigatórias:
+
+- `NETWORK_SSH_USER` deve estar ativo.
+- `NETWORK_SSH_PRIVATE_KEY_PATH` deve estar ativo e apontar para arquivo real.
+
+Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem estar ativos e apontar para arquivos reais:
+
+- `TLS_PROVIDED_LOCAL_CERT_PATH`
+- `TLS_PROVIDED_LOCAL_KEY_PATH`
+
+Quando auth externa é habilitada (`AUTH_MODE!=local` ou `AUTH_*_ENABLED=true`), entram checks de contrato de URL:
+
+- `SSO_PUBLIC_URL` torna-se obrigatório quando a exigência de URL está ativa.
+- Em cenários SAML/OIDC, `SSO_PUBLIC_URL` deve ser `https://` e `TLS_MODE` não pode ser `none`.
+
+Se faltarem chaves obrigatórias no `config/<environment>.env`, a execução falha cedo e não solicita dados no terminal.
+
+As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas, e o efeito de bloqueio depende do `SECURITY_MODE` efetivo.

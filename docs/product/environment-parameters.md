@@ -18,6 +18,17 @@ Activation rule:
 - Commented key: not used in the current scenario.
 - Uncommented key: active and used in runtime rendering.
 - Conditional key guidance can keep a commented default line as an example for later activation.
+- In `config/product.env`, only mandatory baseline keys stay uncommented by default.
+
+## Conditional checks by enabled feature
+
+Validation does not check only global mandatory keys. It also checks required keys for enabled features:
+
+- `EXECUTION_MODE=ssh`: `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and valid.
+- `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
+- External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): `SSO_PUBLIC_URL` becomes mandatory when URL enforcement is active.
+- SAML/OIDC enabled: `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
+- `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
 
 ## Secret handling
 

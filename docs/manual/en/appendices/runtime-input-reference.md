@@ -6,6 +6,11 @@ This appendix explains how configuration and runtime data flow through the proje
 
 Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment secrets currently read from that file are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets must stay only in `.runtime/<environment>/secrets.yml`.
 
+Template baseline behavior:
+
+- `config/product.env` keeps only mandatory baseline keys uncommented.
+- Optional and scenario-specific keys stay commented until the scenario is explicitly enabled.
+
 In practice, you edit public values once in `config/<environment>.env`, run `deploy check`, and let the scripts render the runtime files used by Ansible.
 
 ## How automatic `GLPI_APP_PACKAGES` works
@@ -101,4 +106,21 @@ External-auth secrets must not be committed and must remain only in `.runtime/<e
 
 ## Conditional runtime rules
 
-When execution mode is `local`, SSH reachability checks are not required, and role-scoped commands must run on the correct host in dual-server topology. When execution mode is `ssh`, key material and remote reachability become mandatory checks. When `TLS_MODE=provided`, local certificate and key paths must point to real files. Security policy flags (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) are always evaluated, and their blocking behavior depends on effective `SECURITY_MODE`.
+When execution mode is `local`, SSH reachability checks are not required, and role-scoped commands must run on the correct host in dual-server topology.
+
+When execution mode is `ssh`, key material and remote reachability become mandatory checks:
+
+- `NETWORK_SSH_USER` must be active.
+- `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and point to a real file.
+
+When `TLS_MODE=provided`, local certificate and key paths must be active and point to real files:
+
+- `TLS_PROVIDED_LOCAL_CERT_PATH`
+- `TLS_PROVIDED_LOCAL_KEY_PATH`
+
+When external auth is enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`), URL contract checks become active:
+
+- `SSO_PUBLIC_URL` becomes required when URL enforcement is enabled.
+- For SAML/OIDC scenarios, `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
+
+Policy flags (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) are always evaluated, and their blocking behavior depends on effective `SECURITY_MODE`.

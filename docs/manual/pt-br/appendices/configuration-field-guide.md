@@ -7,6 +7,7 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 ## Regra de ouro
 
 - Valores públicos ficam em `config/<environment>.env`.
+- `config/product.env` mantém descomentadas apenas as chaves obrigatórias de baseline.
 - Chaves não usadas no cenário atual ficam comentadas com exemplo default preenchido.
 - Chaves usadas no cenário atual ficam descomentadas com valores reais do ambiente.
 - Segredos obrigatórios de deploy atualmente lidos do ambiente são `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD` e `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
