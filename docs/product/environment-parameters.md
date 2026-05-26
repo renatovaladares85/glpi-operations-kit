@@ -13,6 +13,12 @@ cp config/product.env config/staging.env
 
 Edit public values in the environment copy. Real environment copies should not be committed.
 
+Activation rule:
+
+- Commented key: not used in the current scenario.
+- Uncommented key: active and used in runtime rendering.
+- Conditional key guidance can keep a commented default line as an example for later activation.
+
 ## Secret handling
 
 Deployment secrets currently read from `config/<environment>.env` and materialized into `.runtime/<environment>/secrets.yml` are:
@@ -59,6 +65,25 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure`. | Prevents silent risk acceptance. |
 | `RESOURCE_PROFILE_ACTIVE` | `small` until sized by real workload. | Avoids overcommitting small hosts. |
+
+## DB access mode examples
+
+Restricted mode example:
+
+```env
+NETWORK_DATABASE_ACCESS_MODE=restricted
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11
+```
+
+Open mode example:
+
+```env
+NETWORK_DATABASE_ACCESS_MODE=open
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=
+#NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11
+```
+
+In open mode, `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` stays active and empty.
 
 ## Runtime rendering
 

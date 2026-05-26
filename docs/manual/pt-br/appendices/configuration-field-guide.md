@@ -7,10 +7,12 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 ## Regra de ouro
 
 - Valores públicos ficam em `config/<environment>.env`.
+- Chaves não usadas no cenário atual ficam comentadas com exemplo default preenchido.
+- Chaves usadas no cenário atual ficam descomentadas com valores reais do ambiente.
 - Segredos obrigatórios de deploy atualmente lidos do ambiente são `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD` e `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
 - Segredos de autenticação externa devem permanecer somente em `.runtime/<environment>/secrets.yml`, como `auth_saml_x509_certificate`, `ldap_bind_password` e `oidc_client_secret`.
 - Nunca coloque certificados privados, tokens, senhas reais ou dumps em Git.
-- Em exemplos, substitua valores como `<generate-high-entropy-password>` por segredos aleatórios fortes antes da execução real.
+- Exemplo de segredo forte fictício: `DATABASE_PASSWORD=kit-demo-9f4aT2m7Q1x`.
 
 ## Como começar
 
@@ -20,6 +22,7 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 4. Se houver SSO, preencha `AUTH_*`, `SSO_*` e coloque segredos somente em `.runtime/<environment>/secrets.yml`.
 5. Execute `bash scripts/bootstrap-permissions.sh`.
 6. Execute `./scripts/glpictl.sh <environment> deploy check all` antes de qualquer `apply`.
+   Exemplo: `./scripts/glpictl.sh staging deploy check all`.
 
 ## Como coletar informações
 
@@ -63,9 +66,9 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 |---|---|---|---|
 | `NETWORK_SSH_USER` | Usuário Linux para SSH. | Peça à equipe Linux; use conta nominal ou operacional aprovada. | Necessário só em `EXECUTION_MODE=ssh`. |
 | `NETWORK_SSH_PRIVATE_KEY_PATH` | Caminho da chave privada SSH no host executor. | Gere ou solicite chave por ambiente; mantenha permissão `0600`. | Necessário só em `EXECUTION_MODE=ssh`. |
-| `NETWORK_DATABASE_APP_ACCESS_HOST` | Origem que receberá grant no DB. | Normalmente é o IP/FQDN do APP visto pelo DB. | Deve bater com a origem real da conexão APP -> DB. |
-| `NETWORK_DATABASE_ACCESS_MODE` | Modo da política de acesso ao DB. | Use `restricted` para limitar origens ou `open` para permitir qualquer origem. | Quando omitido, o padrão é `restricted`. |
-| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Lista CSV de origens permitidas usada no modo restricted. | Inclua APP e, se necessário, host de manutenção aprovado. | Não use espaços; exemplo `192.0.2.10,192.0.2.11`. |
+| `NETWORK_DATABASE_APP_ACCESS_HOST` | Origem que receberá grant no DB no modo restricted. | Use o endereço do host APP visto pelo DB. | Exemplo: `NETWORK_DATABASE_APP_ACCESS_HOST=192.0.2.10`. |
+| `NETWORK_DATABASE_ACCESS_MODE` | Modo da política de acesso ao DB. | Use `restricted` para modo com allowlist ou `open` para modo sem restrição de origem. | Exemplos: `NETWORK_DATABASE_ACCESS_MODE=restricted` ou `NETWORK_DATABASE_ACCESS_MODE=open`. |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Lista CSV de origens no modo restricted. | Use hosts separados por vírgula no modo restricted. Mantenha a chave ativa e vazia no modo open. | Exemplo restricted: `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11`. Exemplo open: `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=`. |
 
 Observação de risco:
 `NETWORK_DATABASE_ACCESS_MODE=open` remove restrição de origem tanto no firewall quanto no grant do banco. Use apenas com aceite explícito de risco.
@@ -103,7 +106,7 @@ Observação de risco:
 
 | Chave | O que colocar | Como obter ou definir | Validação comum |
 |---|---|---|---|
-| `PHP_FPM_SERVICE_NAME` | Nome do serviço PHP-FPM. | Confirme versão instalada no host, exemplo `php8.3-fpm`. | `systemctl status <servico>` deve existir após instalação. |
+| `PHP_FPM_SERVICE_NAME` | Nome do serviço PHP-FPM. | Confirme versão instalada no host, exemplo `php8.3-fpm`. | Exemplo de validação: `systemctl status php8.3-fpm`. |
 | `PHP_FPM_SOCKET` | Socket Unix do PHP-FPM. | Confirme padrão da distro/PHP. | Deve bater com o template web. |
 | `PHP_FPM_PM` | `static`, `dynamic` ou `ondemand`. | Use `dynamic` salvo requisito específico. | Deve ser aceito pelo PHP-FPM. |
 | `NGINX_HTTP_PORT` | Porta HTTP. | Normalmente `80`. | Usada por template Nginx. |

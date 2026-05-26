@@ -143,6 +143,12 @@ O deploy principal segue a sintaxe:
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
+Exemplo preenchido:
+
+```bash
+./scripts/glpictl.sh staging deploy apply app
+```
+
 Comandos centrais:
 
 | Comando | Finalidade |

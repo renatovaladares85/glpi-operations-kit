@@ -71,14 +71,15 @@ The configuration keys are grouped by operational domain:
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | Defines default enforcement mode when `SECURITY_MODE` is not passed. | `secure`, `permissive` |
 | `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile used by runtime rendering. | `small`, `medium`, `large` |
 | `NETWORK_DATABASE_ACCESS_MODE` | Selects restricted or open DB access behavior. | `restricted`, `open` |
-| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Restricts DB access surface. | CSV host list |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Stores DB source hosts for restricted mode. | CSV host list or empty |
 | `MONITORING_*_JSON` | Centralizes labels, thresholds, scrape profiles, alert routes. | one-line JSON objects |
 
 Notes for DB access controls:
 
 - `NETWORK_DATABASE_ACCESS_MODE` defaults to `restricted` when omitted.
-- `restricted` enforces source allowlist for firewall rules and DB grants.
-- `open` allows any source at firewall and DB grant layers; use only with explicit risk acceptance.
+- `restricted` uses a comma-separated allowlist such as `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11`.
+- `open` uses `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=` (active and empty).
+- Commented keys are considered not used; uncommented keys are active configuration.
 
 ## Secret contract
 

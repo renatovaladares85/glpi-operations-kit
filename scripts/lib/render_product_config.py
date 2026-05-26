@@ -416,10 +416,13 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     if db_access_mode not in {"restricted", "open"}:
         fail("NETWORK_DATABASE_ACCESS_MODE must be one of: restricted, open.")
     db_app_access_host = read_value(values, "NETWORK_DATABASE_APP_ACCESS_HOST", app_host).strip() or app_host
+    db_allowed_hosts_raw = read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", "").strip()
     restricted_db_sources = as_list(
-        read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", ""),
+        db_allowed_hosts_raw,
         [app_host],
     )
+    if db_access_mode == "open" and db_allowed_hosts_raw:
+        fail("When NETWORK_DATABASE_ACCESS_MODE=open, use NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS= (empty value).")
     db_grant_host = db_app_access_host if db_access_mode == "restricted" else "%"
     db_firewall_open = db_access_mode == "open"
     db_firewall_sources = [] if db_firewall_open else restricted_db_sources

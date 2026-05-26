@@ -7,10 +7,12 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 ## Golden rule
 
 - Public values stay in `config/<environment>.env`.
+- Keys not used in the current scenario stay commented with a filled default example.
+- Keys used in the current scenario stay uncommented with real environment values.
 - Deployment secrets currently read from the environment file are `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, and `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
 - External-auth secrets must remain only in `.runtime/<environment>/secrets.yml`, such as `auth_saml_x509_certificate`, `ldap_bind_password`, and `oidc_client_secret`.
 - Never commit private certificates, tokens, passwords, or dumps to Git.
-- Replace placeholders such as `<generate-high-entropy-password>` with strong random secrets before real execution.
+- Example strong non-real secret value: `DATABASE_PASSWORD=kit-demo-9f4aT2m7Q1x`.
 
 ## First steps
 
@@ -20,6 +22,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 4. If SSO is enabled, fill `AUTH_*`, `SSO_*`, and keep secrets only in `.runtime/<environment>/secrets.yml`.
 5. Run `bash scripts/bootstrap-permissions.sh`.
 6. Run `./scripts/glpictl.sh <environment> deploy check all` before any `apply`.
+   Example: `./scripts/glpictl.sh staging deploy check all`.
 
 ## Information collection checklist
 
@@ -63,9 +66,9 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 |---|---|---|---|
 | `NETWORK_SSH_USER` | Linux SSH user. | Ask the Linux team; use an approved named or operational account. | Required only with `EXECUTION_MODE=ssh`. |
 | `NETWORK_SSH_PRIVATE_KEY_PATH` | SSH private key path on executor. | Generate or request one key pair per environment; keep mode `0600`. | Required only with `EXECUTION_MODE=ssh`. |
-| `NETWORK_DATABASE_APP_ACCESS_HOST` | Source granted DB access. | Usually the app host address as seen by DB. | Must match the real APP -> DB source. |
-| `NETWORK_DATABASE_ACCESS_MODE` | DB access policy mode. | Use `restricted` to limit source hosts or `open` to allow any source. | Default is `restricted` when omitted. |
-| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | CSV allowlist of DB sources used in restricted mode. | Include APP and approved maintenance hosts only. | No spaces; example `192.0.2.10,192.0.2.11`. |
+| `NETWORK_DATABASE_APP_ACCESS_HOST` | Source granted DB access in restricted mode. | Use the app host address as seen by DB. | Example: `NETWORK_DATABASE_APP_ACCESS_HOST=192.0.2.10`. |
+| `NETWORK_DATABASE_ACCESS_MODE` | DB access policy mode. | Use `restricted` for allowlist mode or `open` for unrestricted source mode. | Examples: `NETWORK_DATABASE_ACCESS_MODE=restricted` or `NETWORK_DATABASE_ACCESS_MODE=open`. |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | CSV allowlist for restricted mode. | Use comma-separated hosts in restricted mode. Keep this key active and empty in open mode. | Restricted example: `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11`. Open example: `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=`. |
 
 Risk note:
 `NETWORK_DATABASE_ACCESS_MODE=open` removes source restrictions at both firewall and DB grant layers. Use only with explicit risk acceptance.
@@ -103,7 +106,7 @@ Risk note:
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `PHP_FPM_SERVICE_NAME` | PHP-FPM service name. | Confirm installed PHP version, e.g. `php8.3-fpm`. | `systemctl status <service>` should exist after install. |
+| `PHP_FPM_SERVICE_NAME` | PHP-FPM service name. | Confirm installed PHP version, e.g. `php8.3-fpm`. | Example validation: `systemctl status php8.3-fpm`. |
 | `PHP_FPM_SOCKET` | PHP-FPM Unix socket. | Confirm distro/PHP default. | Must match web template. |
 | `PHP_FPM_PM` | `static`, `dynamic`, or `ondemand`. | Use `dynamic` unless there is a specific reason. | Must be accepted by PHP-FPM. |
 | `NGINX_HTTP_PORT` | HTTP port. | Usually `80`. | Used by Nginx template. |

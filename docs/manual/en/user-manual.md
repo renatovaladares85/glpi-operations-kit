@@ -143,6 +143,12 @@ Main deploy syntax:
 ./scripts/glpictl.sh <environment> <domain> <action> [target] [scope]
 ```
 
+Filled example:
+
+```bash
+./scripts/glpictl.sh staging deploy apply app
+```
+
 Core commands:
 
 | Command | Purpose |
