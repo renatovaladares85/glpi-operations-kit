@@ -64,7 +64,11 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 | `NETWORK_SSH_USER` | Linux SSH user. | Ask the Linux team; use an approved named or operational account. | Required only with `EXECUTION_MODE=ssh`. |
 | `NETWORK_SSH_PRIVATE_KEY_PATH` | SSH private key path on executor. | Generate or request one key pair per environment; keep mode `0600`. | Required only with `EXECUTION_MODE=ssh`. |
 | `NETWORK_DATABASE_APP_ACCESS_HOST` | Source granted DB access. | Usually the app host address as seen by DB. | Must match the real APP -> DB source. |
-| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | CSV allowlist of DB sources. | Include APP and approved maintenance hosts only. | No spaces; example `192.0.2.10,192.0.2.11`. |
+| `NETWORK_DATABASE_ACCESS_MODE` | DB access policy mode. | Use `restricted` to limit source hosts or `open` to allow any source. | Default is `restricted` when omitted. |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | CSV allowlist of DB sources used in restricted mode. | Include APP and approved maintenance hosts only. | No spaces; example `192.0.2.10,192.0.2.11`. |
+
+Risk note:
+`NETWORK_DATABASE_ACCESS_MODE=open` removes source restrictions at both firewall and DB grant layers. Use only with explicit risk acceptance.
 
 ## GLPI, web server, and PHP
 

@@ -64,7 +64,11 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 | `NETWORK_SSH_USER` | Usuário Linux para SSH. | Peça à equipe Linux; use conta nominal ou operacional aprovada. | Necessário só em `EXECUTION_MODE=ssh`. |
 | `NETWORK_SSH_PRIVATE_KEY_PATH` | Caminho da chave privada SSH no host executor. | Gere ou solicite chave por ambiente; mantenha permissão `0600`. | Necessário só em `EXECUTION_MODE=ssh`. |
 | `NETWORK_DATABASE_APP_ACCESS_HOST` | Origem que receberá grant no DB. | Normalmente é o IP/FQDN do APP visto pelo DB. | Deve bater com a origem real da conexão APP -> DB. |
-| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Lista CSV de origens permitidas. | Inclua APP e, se necessário, host de manutenção aprovado. | Não use espaços; exemplo `192.0.2.10,192.0.2.11`. |
+| `NETWORK_DATABASE_ACCESS_MODE` | Modo da política de acesso ao DB. | Use `restricted` para limitar origens ou `open` para permitir qualquer origem. | Quando omitido, o padrão é `restricted`. |
+| `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Lista CSV de origens permitidas usada no modo restricted. | Inclua APP e, se necessário, host de manutenção aprovado. | Não use espaços; exemplo `192.0.2.10,192.0.2.11`. |
+
+Observação de risco:
+`NETWORK_DATABASE_ACCESS_MODE=open` remove restrição de origem tanto no firewall quanto no grant do banco. Use apenas com aceite explícito de risco.
 
 ## GLPI, web server e PHP
 

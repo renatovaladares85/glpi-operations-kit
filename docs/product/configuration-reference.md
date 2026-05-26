@@ -45,7 +45,7 @@ The configuration keys are grouped by operational domain:
 
 - `PRODUCT_*`, `CUSTOMER_*`, `ENVIRONMENT_*`: product/customer metadata
 - `EXECUTION_*`, `TOPOLOGY_*`: orchestration model and host scope
-- `NETWORK_*`: SSH and DB source restrictions
+- `NETWORK_*`: SSH and DB access policy/source restrictions
 - `GLPI_*`, `PHP_FPM_*`, `NGINX_*`: application stack settings
 - `DATABASE_*`: database baseline and packages
 - `TLS_*`: TLS mode and certificate paths
@@ -70,8 +70,15 @@ The configuration keys are grouped by operational domain:
 | `SECURITY_REQUIRE_*` | Enables policy checks for TLS, HTTPS, SSO, promotion gate, and ordered execution. | `true`, `false` |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | Defines default enforcement mode when `SECURITY_MODE` is not passed. | `secure`, `permissive` |
 | `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile used by runtime rendering. | `small`, `medium`, `large` |
+| `NETWORK_DATABASE_ACCESS_MODE` | Selects restricted or open DB access behavior. | `restricted`, `open` |
 | `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Restricts DB access surface. | CSV host list |
 | `MONITORING_*_JSON` | Centralizes labels, thresholds, scrape profiles, alert routes. | one-line JSON objects |
+
+Notes for DB access controls:
+
+- `NETWORK_DATABASE_ACCESS_MODE` defaults to `restricted` when omitted.
+- `restricted` enforces source allowlist for firewall rules and DB grants.
+- `open` allows any source at firewall and DB grant layers; use only with explicit risk acceptance.
 
 ## Secret contract
 
