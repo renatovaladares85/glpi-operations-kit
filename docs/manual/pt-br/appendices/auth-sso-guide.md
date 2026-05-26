@@ -64,8 +64,8 @@ AUTH_SAML_ENTITY_ID=
 AUTH_SAML_ACS_URL=
 AUTH_SAML_LOGOUT_URL=
 AUTH_SAML_NAMEID_FORMAT=urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
-AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/<tenant-id>/
-AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/<tenant-id>/saml2
+AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/11111111-2222-3333-4444-555555555555/
+AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/saml2
 AUTH_SAML_IDP_SLO_URL=
 AUTH_SAML_CLAIM_EMAIL=email
 AUTH_SAML_CLAIM_USERNAME=username
@@ -84,12 +84,12 @@ Deixe `AUTH_SAML_ENTITY_ID`, `AUTH_SAML_ACS_URL` e `AUTH_SAML_LOGOUT_URL` vazios
 
 ## Segredos em runtime
 
-Crie ou atualize `.runtime/<environment>/secrets.yml` com permissão restrita. Exemplo estrutural, sem valores reais:
+Crie ou atualize `.runtime/<environment>/secrets.yml` com permissão restrita. Exemplo preenchido com valores fictícios:
 
 ```yaml
-auth_saml_x509_certificate: "<paste-idp-public-x509-certificate>"
-ldap_bind_password: "<ldap-bind-password-if-used>"
-oidc_client_secret: "<oidc-client-secret-if-used>"
+auth_saml_x509_certificate: "MIIC...EXAMPLE_PUBLIC_CERT...AB"
+ldap_bind_password: "kit-demo-Ldap8@vT2pQ5"
+oidc_client_secret: "kit-demo-Oidc6#nR4xW9"
 ```
 
 Não coloque chave privada SAML, client secret, senha LDAP, token ou certificado privado em `config/<environment>.env`, evidência, log ou Git.

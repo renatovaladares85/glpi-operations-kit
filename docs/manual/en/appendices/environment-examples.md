@@ -1,6 +1,6 @@
 # Environment Examples (EN)
 
-The examples below are fill-in models. Do not commit real passwords to Git. Replace IPs, domains, and names with approved environment values.
+The examples below are fill-in models with non-real values. Keep real credentials out of Git.
 
 ## Example 1 - Single-server staging without SSO
 
@@ -20,15 +20,15 @@ GLPI_DOMAIN=glpi-staging.example.internal
 WEB_SERVER_TYPE=nginx
 DATABASE_NAME=glpi_staging
 DATABASE_USER=nehemiah_glpi
-DATABASE_PASSWORD=<generate-high-entropy-password>
-DATABASE_ROOT_PASSWORD=<generate-high-entropy-password>
+DATABASE_PASSWORD=kit-demo-Db9!vP2qL8x
+DATABASE_ROOT_PASSWORD=kit-demo-Root7#kM4wN1z
 TLS_MODE=none
 SECURITY_REQUIRE_TLS=false
 SECURITY_REQUIRE_HTTPS=false
 AUTH_MODE=local
 AUTH_EXTERNAL_ENABLED=false
 SECURITY_SSO_ENABLED=false
-MONITORING_MYSQLD_EXPORTER_PASSWORD=<generate-high-entropy-password>
+MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 BACKUP_BASE_DIR=/var/backups/glpi
 BACKUP_RETENTION_DAYS=14
 ```
@@ -64,8 +64,8 @@ GLPI_DOMAIN=glpi.company.com
 WEB_SERVER_TYPE=nginx
 DATABASE_NAME=glpi_prod
 DATABASE_USER=nehemiah_glpi
-DATABASE_PASSWORD=<generate-high-entropy-password>
-DATABASE_ROOT_PASSWORD=<generate-high-entropy-password>
+DATABASE_PASSWORD=kit-demo-Db9!vP2qL8x
+DATABASE_ROOT_PASSWORD=kit-demo-Root7#kM4wN1z
 DATABASE_BIND_ADDRESS=0.0.0.0
 TLS_MODE=provided
 TLS_COMMON_NAME=glpi.company.com
@@ -75,7 +75,7 @@ TLS_PROVIDED_LOCAL_CERT_PATH=/secure-transfer/glpi-company-fullchain.pem
 TLS_PROVIDED_LOCAL_KEY_PATH=/secure-transfer/glpi-company.key
 SECURITY_REQUIRE_TLS=true
 SECURITY_REQUIRE_HTTPS=true
-MONITORING_MYSQLD_EXPORTER_PASSWORD=<generate-high-entropy-password>
+MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 BACKUP_RETENTION_DAYS=30
 ```
 
@@ -113,8 +113,8 @@ AUTH_SAML_PLUGIN_NAME=saml
 AUTH_SAML_ENTITY_ID=
 AUTH_SAML_ACS_URL=
 AUTH_SAML_LOGOUT_URL=
-AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/<tenant-id>/
-AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/<tenant-id>/saml2
+AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/11111111-2222-3333-4444-555555555555/
+AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/saml2
 AUTH_SAML_IDP_SLO_URL=
 AUTH_SAML_CLAIM_EMAIL=email
 AUTH_SAML_CLAIM_USERNAME=username
@@ -131,7 +131,7 @@ SECURITY_REQUIRE_SSO=false
 Runtime secret structure:
 
 ```yaml
-auth_saml_x509_certificate: "<paste-idp-public-x509-certificate>"
+auth_saml_x509_certificate: "MIIC...EXAMPLE_PUBLIC_CERT...AB"
 ```
 
 Flow:
@@ -144,3 +144,27 @@ Flow:
 ```
 
 After testing SSO and local fallback in GLPI, set `SECURITY_SSO_ENABLED=true` if policy requires it.
+
+## Example 4 - Open DB access mode (allow any source)
+
+```env
+ENVIRONMENT_NAME=staging
+ENVIRONMENT_STAGE=staging
+EXECUTION_MODE=local
+TOPOLOGY_MODE=dual-server
+TOPOLOGY_APP_HOST=192.0.2.10
+TOPOLOGY_DB_HOST=192.0.2.20
+NETWORK_DATABASE_APP_ACCESS_HOST=192.0.2.10
+NETWORK_DATABASE_ACCESS_MODE=open
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=
+GLPI_VERSION=11.0.7
+GLPI_DOMAIN=glpi-staging.example.internal
+WEB_SERVER_TYPE=nginx
+DATABASE_NAME=glpi_staging
+DATABASE_USER=nehemiah_glpi
+DATABASE_PASSWORD=kit-demo-Db9!vP2qL8x
+DATABASE_ROOT_PASSWORD=kit-demo-Root7#kM4wN1z
+MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
+```
+
+`NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=` stays active and empty when `NETWORK_DATABASE_ACCESS_MODE=open`.

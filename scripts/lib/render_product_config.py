@@ -4,11 +4,15 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
 WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
+AUTH_MODES = {"local", "ldap", "saml", "oidc"}
+TOPOLOGY_MODES = {"single-server", "dual-server"}
+DB_ACCESS_MODES = {"restricted", "open"}
 
 DEFAULT_GLPI_APP_PACKAGES = [
     "php-fpm",
@@ -393,6 +397,82 @@ def ensure_required_keys(values: dict, execution_mode: str) -> None:
             require_value(values, key)
 
 
+def validate_url(value: str, *, https_only: bool = False) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return False
+    parsed = urlparse(raw)
+    if https_only and parsed.scheme != "https":
+        return False
+    if not https_only and parsed.scheme not in {"http", "https"}:
+        return False
+    return bool(parsed.netloc)
+
+
+def validate_feature_contract(values: dict, execution_mode: str) -> None:
+    topology_mode = read_value(values, "TOPOLOGY_MODE", "dual-server").strip().lower() or "dual-server"
+    if topology_mode not in TOPOLOGY_MODES:
+        fail("TOPOLOGY_MODE must be one of: single-server, dual-server.")
+
+    db_access_mode = read_value(values, "NETWORK_DATABASE_ACCESS_MODE", "restricted").strip().lower() or "restricted"
+    if db_access_mode not in DB_ACCESS_MODES:
+        fail("NETWORK_DATABASE_ACCESS_MODE must be one of: restricted, open.")
+
+    tls_mode = require_value(values, "TLS_MODE").strip().lower()
+    if tls_mode not in TLS_MODES:
+        fail("TLS_MODE must be one of: none, self_signed, provided.")
+
+    if execution_mode == "ssh":
+        ssh_key_path = os.path.expanduser(require_value(values, "NETWORK_SSH_PRIVATE_KEY_PATH").strip())
+        if not Path(ssh_key_path).is_file():
+            fail(f"NETWORK_SSH_PRIVATE_KEY_PATH is not available or is not a file: {ssh_key_path}")
+
+    if tls_mode == "provided":
+        local_cert_path = os.path.expanduser(require_value(values, "TLS_PROVIDED_LOCAL_CERT_PATH").strip())
+        local_key_path = os.path.expanduser(require_value(values, "TLS_PROVIDED_LOCAL_KEY_PATH").strip())
+        if not Path(local_cert_path).is_file():
+            fail(f"TLS_PROVIDED_LOCAL_CERT_PATH is not available or is not a file: {local_cert_path}")
+        if not Path(local_key_path).is_file():
+            fail(f"TLS_PROVIDED_LOCAL_KEY_PATH is not available or is not a file: {local_key_path}")
+
+    auth_mode = read_value(values, "AUTH_MODE", "local").strip().lower() or "local"
+    if auth_mode not in AUTH_MODES:
+        fail("AUTH_MODE must be one of: local, ldap, saml, oidc.")
+
+    auth_external_enabled = as_bool(read_value(values, "AUTH_EXTERNAL_ENABLED", "false"), False)
+    auth_ldap_enabled = as_bool(read_value(values, "AUTH_LDAP_ENABLED", "false"), False)
+    auth_saml_enabled = as_bool(read_value(values, "AUTH_SAML_ENABLED", "false"), False)
+    auth_oidc_enabled = as_bool(read_value(values, "AUTH_OIDC_ENABLED", "false"), False)
+    sso_require_public_url = as_bool(read_value(values, "SSO_REQUIRE_PUBLIC_URL", "true"), True)
+
+    auth_requires_external = auth_external_enabled or auth_mode != "local" or auth_ldap_enabled or auth_saml_enabled or auth_oidc_enabled
+    auth_requires_https = auth_mode in {"saml", "oidc"} or auth_saml_enabled or auth_oidc_enabled
+
+    if auth_requires_external:
+        require_value(values, "AUTH_MODE")
+        if sso_require_public_url:
+            sso_public_url = require_value(values, "SSO_PUBLIC_URL").strip()
+            if not validate_url(sso_public_url):
+                fail("SSO_PUBLIC_URL must be a valid http:// or https:// URL when external auth is enabled.")
+
+    if auth_requires_https:
+        sso_public_url = require_value(values, "SSO_PUBLIC_URL").strip()
+        if not validate_url(sso_public_url, https_only=True):
+            fail("SSO_PUBLIC_URL must be a valid https:// URL when SAML/OIDC is enabled.")
+        if tls_mode == "none":
+            fail("TLS_MODE must not be 'none' when SAML/OIDC is enabled.")
+
+    if auth_mode == "saml" or auth_saml_enabled:
+        auth_saml_plugin_expected = as_bool(read_value(values, "AUTH_SAML_PLUGIN_EXPECTED", "true"), True)
+        if auth_saml_plugin_expected:
+            require_value(values, "AUTH_SAML_PLUGIN_NAME")
+
+    security_require_sso = as_bool(read_value(values, "SECURITY_REQUIRE_SSO", "false"), False)
+    security_sso_enabled = as_bool(require_value(values, "SECURITY_SSO_ENABLED"), False)
+    if security_require_sso and not security_sso_enabled:
+        fail("SECURITY_REQUIRE_SSO=true requires SECURITY_SSO_ENABLED=true.")
+
+
 def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> dict:
     active_profile_name = require_value(values, "RESOURCE_PROFILE_ACTIVE").strip().lower()
     if active_profile_name not in {"small", "medium", "large"}:
@@ -416,10 +496,13 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     if db_access_mode not in {"restricted", "open"}:
         fail("NETWORK_DATABASE_ACCESS_MODE must be one of: restricted, open.")
     db_app_access_host = read_value(values, "NETWORK_DATABASE_APP_ACCESS_HOST", app_host).strip() or app_host
+    db_allowed_hosts_raw = read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", "").strip()
     restricted_db_sources = as_list(
-        read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", ""),
+        db_allowed_hosts_raw,
         [app_host],
     )
+    if db_access_mode == "open" and db_allowed_hosts_raw:
+        fail("When NETWORK_DATABASE_ACCESS_MODE=open, use NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS= (empty value).")
     db_grant_host = db_app_access_host if db_access_mode == "restricted" else "%"
     db_firewall_open = db_access_mode == "open"
     db_firewall_sources = [] if db_firewall_open else restricted_db_sources
@@ -668,6 +751,7 @@ def main() -> None:
 
     execution_mode, host_role = resolve_execution_contract(values)
     ensure_required_keys(values, execution_mode)
+    validate_feature_contract(values, execution_mode)
 
     result = build_public_runtime(values, execution_mode, host_role) if args.mode == "public-runtime" else build_inventory(values, execution_mode, host_role)
     yaml.safe_dump(result, sys.stdout, sort_keys=False, default_flow_style=False)

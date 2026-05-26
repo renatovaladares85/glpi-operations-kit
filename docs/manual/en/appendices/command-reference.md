@@ -40,6 +40,19 @@ This creates your environment baseline. The scripts read this file automatically
 ./scripts/glpictl.sh <env> deploy rollback all
 ```
 
+Example with filled values:
+
+```bash
+./scripts/glpictl.sh staging deploy check all
+./scripts/glpictl.sh staging deploy prepare all
+./scripts/glpictl.sh staging deploy apply db
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy apply monitoring
+./scripts/glpictl.sh staging deploy apply backup
+./scripts/glpictl.sh staging deploy post-check all
+./scripts/glpictl.sh staging deploy rollback all
+```
+
 `deploy check all` is the operational gate before mutation. It validates tools, permissions, policy flags, inventory rendering, host role consistency, and runtime baseline materialization. In app-host local flow, it also validates `mariadb-client` and can auto-fix `php-bcmath` for GLPI 11. `deploy apply db` handles MariaDB packages, hardening, schema, user grants, and DB-access restrictions. `deploy apply app` configures GLPI application layout, selected web engine (`nginx`, `apache`, or `lighttpd`), PHP-FPM, mandatory PHP extension checks, and APP->DB connectivity validation (`SELECT 1`). `deploy apply monitoring` applies exporter baseline and monitoring wiring. `deploy apply backup` applies backup baseline and retention-related settings. `deploy post-check all` confirms service validity after mutable stages and prints explicit web-engine summary.
 
 ## Dual-server local flow (no direct SSH between servers)
@@ -78,6 +91,13 @@ Use this only when policy allows remote orchestration from one host. In ssh mode
 ./scripts/glpictl.sh <env> deploy post-check app
 ```
 
+Example with filled values:
+
+```bash
+./scripts/glpictl.sh staging deploy apply app
+./scripts/glpictl.sh staging deploy post-check app
+```
+
 These commands now validate the selected web engine routing contract end-to-end: root access, installer compatibility route (`/install/install.php` when installer is expected), representative `.js/.css` assets discovered from the page, and blocked sensitive paths (`/config`, `/files`, `/vendor`, arbitrary `.php` outside router).
 
 ## TLS lifecycle commands
@@ -92,6 +112,20 @@ These commands now validate the selected web engine routing contract end-to-end:
 ./scripts/glpictl.sh <env> tls self-signed
 ./scripts/glpictl.sh <env> tls install-provided
 ./scripts/glpictl.sh <env> tls reload
+```
+
+Example with filled values:
+
+```bash
+./scripts/glpictl.sh staging tls check
+./scripts/glpictl.sh staging tls prepare self-signed
+./scripts/glpictl.sh staging tls apply self-signed
+./scripts/glpictl.sh staging tls post-check
+./scripts/glpictl.sh staging tls rollback
+./scripts/glpictl.sh staging tls disable
+./scripts/glpictl.sh staging tls self-signed
+./scripts/glpictl.sh staging tls install-provided
+./scripts/glpictl.sh staging tls reload
 ```
 
 `disable` enforces HTTP-only mode, `self-signed` creates and applies local test certificates, `install-provided` installs real cert/key material, and `reload` validates and reloads effective Nginx TLS configuration.
@@ -128,6 +162,24 @@ These commands generate certification and readiness evidence under `.runtime/<en
 ./scripts/glpictl.sh <env> audit rollback
 ```
 
+Example with filled values:
+
+```bash
+./scripts/glpictl.sh staging ops check
+./scripts/glpictl.sh staging ops prepare
+./scripts/glpictl.sh staging ops users add os
+./scripts/glpictl.sh staging ops users disable db
+./scripts/glpictl.sh staging ops users remove os
+./scripts/glpictl.sh staging ops cert check
+./scripts/glpictl.sh staging ops cert renew
+./scripts/glpictl.sh staging ops audit check
+./scripts/glpictl.sh staging ops resume
+./scripts/glpictl.sh staging ops rollback
+./scripts/glpictl.sh staging audit check
+./scripts/glpictl.sh staging audit prepare
+./scripts/glpictl.sh staging audit rollback
+```
+
 These commands support controlled user lifecycle, certificate lifecycle, operational audits, and resumable maintenance.
 
 ## Optional authentication workflow
@@ -138,6 +190,16 @@ These commands support controlled user lifecycle, certificate lifecycle, operati
 ./scripts/glpictl.sh <env> auth apply
 ./scripts/glpictl.sh <env> auth post-check
 ./scripts/glpictl.sh <env> auth rollback
+```
+
+Example with filled values:
+
+```bash
+./scripts/glpictl.sh staging auth check
+./scripts/glpictl.sh staging auth prepare
+./scripts/glpictl.sh staging auth apply
+./scripts/glpictl.sh staging auth post-check
+./scripts/glpictl.sh staging auth rollback
 ```
 
 The auth domain validates and prepares local/LDAP/SAML/OIDC configuration safely, preserves local admin access, and provides evidence + rollback metadata without auto-installing plugins.

@@ -13,6 +13,23 @@ cp config/product.env config/staging.env
 
 Edit public values in the environment copy. Real environment copies should not be committed.
 
+Activation rule:
+
+- Commented key: not used in the current scenario.
+- Uncommented key: active and used in runtime rendering.
+- Conditional key guidance can keep a commented default line as an example for later activation.
+- In `config/product.env`, only mandatory baseline keys stay uncommented by default.
+
+## Conditional checks by enabled feature
+
+Validation does not check only global mandatory keys. It also checks required keys for enabled features:
+
+- `EXECUTION_MODE=ssh`: `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and valid.
+- `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
+- External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): `SSO_PUBLIC_URL` becomes mandatory when URL enforcement is active.
+- SAML/OIDC enabled: `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
+- `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
+
 ## Secret handling
 
 Deployment secrets currently read from `config/<environment>.env` and materialized into `.runtime/<environment>/secrets.yml` are:
@@ -59,6 +76,25 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure`. | Prevents silent risk acceptance. |
 | `RESOURCE_PROFILE_ACTIVE` | `small` until sized by real workload. | Avoids overcommitting small hosts. |
+
+## DB access mode examples
+
+Restricted mode example:
+
+```env
+NETWORK_DATABASE_ACCESS_MODE=restricted
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11
+```
+
+Open mode example:
+
+```env
+NETWORK_DATABASE_ACCESS_MODE=open
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=
+#NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11
+```
+
+In open mode, `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` stays active and empty.
 
 ## Runtime rendering
 
