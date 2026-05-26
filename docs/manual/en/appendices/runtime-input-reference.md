@@ -4,7 +4,7 @@ This appendix explains how configuration and runtime data flow through the proje
 
 ## Public vs secret input
 
-All deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, policy flags, and required secrets. Scripts materialize `.runtime/<environment>/secrets.yml` from this file for Ansible consumption.
+Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment secrets currently read from that file are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets must stay only in `.runtime/<environment>/secrets.yml`.
 
 In practice, you edit public values once in `config/<environment>.env`, run `deploy check`, and let the scripts render the runtime files used by Ansible.
 
@@ -92,6 +92,12 @@ The minimum required keys in `config/<environment>.env` for secret materializati
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD`
 
 If any of them are missing in `config/<environment>.env`, scripts fail early and block mutable operations until the environment file is complete.
+
+External-auth secrets must not be committed and must remain only in `.runtime/<environment>/secrets.yml`:
+
+- `auth_saml_x509_certificate`
+- `ldap_bind_password`
+- `oidc_client_secret`
 
 ## Conditional runtime rules
 

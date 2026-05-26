@@ -19,13 +19,21 @@
     state: started
     enabled: true
 
-- name: Configure firewall for MariaDB access from app servers
+- name: Configure firewall for restricted MariaDB access
   community.general.ufw:
     rule: allow
     src: "{{ item }}"
     port: "{{ mariadb_port }}"
     proto: tcp
-  loop: "{{ [glpi_db_app_access_host] if glpi_db_app_access_host is defined else db_allowed_source_hosts }}"
+  loop: "{{ db_firewall_sources | default(([glpi_db_app_access_host] if glpi_db_app_access_host is defined else db_allowed_source_hosts)) }}"
+  when: not (db_firewall_open | default(false) | bool)
+
+- name: Configure firewall for open MariaDB access
+  community.general.ufw:
+    rule: allow
+    port: "{{ mariadb_port }}"
+    proto: tcp
+  when: db_firewall_open | default(false) | bool
 
 - name: Check if runtime database secrets file is provided
   ansible.builtin.assert:
@@ -118,7 +126,7 @@
   community.mysql.mysql_user:
     name: "{{ glpi_db_user }}"
     password: "{{ glpi_db_password }}"
-    host: "{{ glpi_db_app_access_host | default('%') }}"
+    host: "{{ db_grant_host | default(glpi_db_app_access_host | default('%')) }}"
     priv: "{{ glpi_db_name }}.*:ALL"
     state: present
     login_user: "{{ mariadb_admin_login_user }}"
@@ -127,7 +135,7 @@
 
 - name: Validate GLPI database user grant is present
   community.mysql.mysql_query:
-    query: "SHOW GRANTS FOR '{{ glpi_db_user }}'@'{{ glpi_db_app_access_host | default('%') }}';"
+    query: "SHOW GRANTS FOR '{{ glpi_db_user }}'@'{{ db_grant_host | default(glpi_db_app_access_host | default('%')) }}';"
     login_user: "{{ mariadb_admin_login_user }}"
     login_password: "{{ mariadb_admin_login_password }}"
     login_unix_socket: "{{ mariadb_admin_login_unix_socket }}"

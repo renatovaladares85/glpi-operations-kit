@@ -4,7 +4,7 @@ Este apêndice explica como os dados de configuração e runtime circulam no pro
 
 ## Entrada pública versus segredo
 
-Todos os valores de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes, flags de política e segredos obrigatórios. Os scripts materializam `.runtime/<environment>/secrets.yml` a partir desse arquivo para consumo do Ansible.
+Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos obrigatórios de deploy atualmente lidos desse arquivo são materializados em `.runtime/<environment>/secrets.yml`; segredos de autenticação externa devem permanecer somente em `.runtime/<environment>/secrets.yml`.
 
 Na prática, você ajusta os valores públicos em `config/<environment>.env`, executa `deploy check`, e deixa os scripts renderizarem os arquivos runtime usados pelo Ansible.
 
@@ -92,6 +92,12 @@ As chaves mínimas obrigatórias no `config/<environment>.env` para materializa�
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD`
 
 Se alguma estiver ausente, os scripts falham cedo e bloqueiam operações mutáveis até o `config/<environment>.env` ficar completo.
+
+Segredos de autenticação externa não devem ser colocados no Git e devem permanecer somente em `.runtime/<environment>/secrets.yml`:
+
+- `auth_saml_x509_certificate`
+- `ldap_bind_password`
+- `oidc_client_secret`
 
 ## Regras condicionais de runtime
 

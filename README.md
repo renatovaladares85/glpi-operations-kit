@@ -73,6 +73,8 @@ Dual-server local flow without cross-host SSH:
 
 - [Implementation plan](docs/implementation-plan.md)
 - [Operator manual (EN + PT-BR)](docs/manual/README.md)
+- [Architecture and contribution manual](docs/architecture/README.md)
+- [Open source contribution guide](CONTRIBUTING.md)
 - [Configuration reference](docs/product/configuration-reference.md)
 - [Environment parameters](docs/product/environment-parameters.md)
 - [Prerequisites matrix](docs/product/prerequisites-matrix.md)

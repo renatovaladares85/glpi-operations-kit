@@ -154,6 +154,7 @@ DOTTED_KEY_MAP = {
     "network.ssh.user": "NETWORK_SSH_USER",
     "network.ssh.private_key_path": "NETWORK_SSH_PRIVATE_KEY_PATH",
     "network.database.app_access_host": "NETWORK_DATABASE_APP_ACCESS_HOST",
+    "network.database.access_mode": "NETWORK_DATABASE_ACCESS_MODE",
     "network.database.allowed_source_hosts": "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS",
     "glpi.version": "GLPI_VERSION",
     "glpi.domain": "GLPI_DOMAIN",
@@ -411,6 +412,18 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     ssh_key_path = os.path.expanduser(read_value(values, "NETWORK_SSH_PRIVATE_KEY_PATH", "").strip())
 
     app_host = require_value(values, "TOPOLOGY_APP_HOST")
+    db_access_mode = read_value(values, "NETWORK_DATABASE_ACCESS_MODE", "restricted").strip().lower() or "restricted"
+    if db_access_mode not in {"restricted", "open"}:
+        fail("NETWORK_DATABASE_ACCESS_MODE must be one of: restricted, open.")
+    db_app_access_host = read_value(values, "NETWORK_DATABASE_APP_ACCESS_HOST", app_host).strip() or app_host
+    restricted_db_sources = as_list(
+        read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", ""),
+        [app_host],
+    )
+    db_grant_host = db_app_access_host if db_access_mode == "restricted" else "%"
+    db_firewall_open = db_access_mode == "open"
+    db_firewall_sources = [] if db_firewall_open else restricted_db_sources
+
     app_packages_value = read_value(values, "GLPI_APP_PACKAGES", "").strip()
     if app_packages_value:
         app_packages = as_list(app_packages_value, DEFAULT_GLPI_APP_PACKAGES)
@@ -537,11 +550,12 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "mariadb_slow_query_log": as_int(profile_value(values, active_profile_name, "MARIADB_SLOW_QUERY_LOG", "1"), 1),
         "mariadb_long_query_time": as_int(profile_value(values, active_profile_name, "MARIADB_LONG_QUERY_TIME", "2"), 2),
         "timezone_name": require_value(values, "OPERATIONS_TIMEZONE"),
-        "db_allowed_source_hosts": as_list(
-            read_value(values, "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS", ""),
-            [require_value(values, "TOPOLOGY_APP_HOST")],
-        ),
-        "glpi_db_app_access_host": read_value(values, "NETWORK_DATABASE_APP_ACCESS_HOST", require_value(values, "TOPOLOGY_APP_HOST")),
+        "db_access_mode": db_access_mode,
+        "db_grant_host": db_grant_host,
+        "db_firewall_open": db_firewall_open,
+        "db_firewall_sources": db_firewall_sources,
+        "db_allowed_source_hosts": list(db_firewall_sources),
+        "glpi_db_app_access_host": db_app_access_host,
         "glpi_db_name": require_value(values, "DATABASE_NAME"),
         "glpi_db_user": require_value(values, "DATABASE_USER"),
         "resource_profile_name": active_profile_name,
