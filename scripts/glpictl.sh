@@ -41,6 +41,11 @@ OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
 OPERATION_STATUS="completed"
 OPERATION_LOG_INITIALIZED="false"
 FINAL_STATUS_EMITTED="false"
+declare -a EXECUTION_WARNINGS=()
+MANAGED_DB_HOST=""
+MANAGED_DB_PORT=""
+MANAGED_DB_USER=""
+MANAGED_DB_PASSWORD=""
 
 print_post_execution_checks() {
   echo "Validation commands (run on target host):"
@@ -78,6 +83,38 @@ print_post_execution_checks() {
   fi
 }
 
+summary_escape() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+record_execution_warning() {
+  local warning_message="$1"
+  EXECUTION_WARNINGS+=("$warning_message")
+  echo "WARNING: $warning_message"
+}
+
+append_execution_warnings_to_summary() {
+  local summary_path
+  local warning_line
+  summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
+  if [[ ! -f "$summary_path" || ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
+    return 0
+  fi
+  {
+    echo "warnings:"
+    for warning_line in "${EXECUTION_WARNINGS[@]}"; do
+      echo "  - '$(summary_escape "$warning_line")'"
+    done
+  } >>"$summary_path"
+}
+
+mask_sensitive_stream() {
+  sed -E \
+    -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" \
+    -e "s/(glpi_db_password:[[:space:]]*)'.*'/\1'****'/g" \
+    -e "s/(DATABASE_PASSWORD=)[^[:space:]]+/\1****/g"
+}
+
 print_failure_diagnostics() {
   local summary_path log_path
   summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
@@ -86,19 +123,18 @@ print_failure_diagnostics() {
   echo "Failure diagnostics:" >&2
   if [[ -f "$summary_path" ]]; then
     echo "Execution summary content:" >&2
-    sed -E \
-      -e "s/(password|PASSWORD|MYSQL_PWD)(=|:)[^[:space:]']+/\1\2****/g" \
-      -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" \
-      "$summary_path" >&2 || true
+    if [[ -s "$summary_path" ]]; then
+      mask_sensitive_stream <"$summary_path" >&2 || true
+    else
+      echo "Execution summary file exists but is empty." >&2
+    fi
   else
     echo "Execution summary file was not created." >&2
   fi
 
   if [[ -f "$log_path" ]]; then
     echo "Last 80 log lines:" >&2
-    tail -n 80 "$log_path" | sed -E \
-      -e "s/(password|PASSWORD|MYSQL_PWD)(=|:)[^[:space:]']+/\1\2****/g" \
-      -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" >&2 || true
+    tail -n 80 "$log_path" | mask_sensitive_stream >&2 || true
   else
     echo "Execution log file was not created." >&2
   fi
@@ -118,11 +154,16 @@ finalize_glpictl_operation() {
   fi
   if [[ "$OPERATION_LOG_INITIALIZED" == "true" ]]; then
     complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
+    append_execution_warnings_to_summary
   fi
   if [[ "$exit_code" -eq 0 ]]; then
     echo "FINAL STATUS: SUCCESS"
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml"
+    if [[ ${#EXECUTION_WARNINGS[@]} -gt 0 ]]; then
+      echo "Execution warnings:"
+      printf '%s\n' "${EXECUTION_WARNINGS[@]}"
+    fi
     print_post_execution_checks
     echo "END OF EXECUTION (SUCCESS)"
   else
@@ -139,6 +180,14 @@ handle_signal() {
   echo "Execution interrupted by signal: ${signal_name}" >&2
   finalize_glpictl_operation 130
   exit 130
+}
+
+print_operation_follow_hints() {
+  local log_path summary_path
+  log_path="$(operation_log_path "$ENVIRONMENT" "$OPERATION_ID")"
+  summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
+  echo "Follow this execution live: tail -f $log_path"
+  echo "Execution summary file: $summary_path"
 }
 
 SECURITY_MODE_EFFECTIVE=""
@@ -1413,34 +1462,183 @@ enforce_promotion_gate_policy_if_required() {
   fi
 }
 
-validate_managed_db_connectivity_from_app() {
-  local db_host db_port db_user db_password
+load_managed_db_runtime_contract() {
+  if ! is_managed_database_mode; then
+    return 1
+  fi
+
+  MANAGED_DB_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
+  MANAGED_DB_PORT="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
+  MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
+  MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+
+  [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
+
+  if [[ -z "${MANAGED_DB_HOST// }" ]]; then
+    echo "Managed DB validation cannot run: missing runtime key glpi_db_host." >&2
+    return 1
+  fi
+  if [[ -z "${MANAGED_DB_USER// }" ]]; then
+    echo "Managed DB validation cannot run: missing runtime key glpi_db_user." >&2
+    return 1
+  fi
+  if [[ -z "${MANAGED_DB_PASSWORD// }" ]]; then
+    echo "Managed DB validation cannot run: missing runtime secret glpi_db_password." >&2
+    return 1
+  fi
+  return 0
+}
+
+run_managed_db_select1_check() {
+  local check_label="$1"
   local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+  local output
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$MANAGED_DB_USER")"
+  db_password_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PASSWORD")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o 2>&1)"; then
+    echo "Managed DB connectivity (${check_label}): PASS"
+    return 0
+  fi
+
+  echo "Managed DB connectivity (${check_label}): FAIL"
+  if [[ -n "${output// }" ]]; then
+    echo "  Diagnostic output:"
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+run_managed_db_guided_check() {
+  local check_label="$1"
+  local check_command="$2"
+  local output
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$check_command" -o 2>&1)"; then
+    echo "  - ${check_label}: PASS"
+    return 0
+  fi
+
+  echo "  - ${check_label}: FAIL"
+  if [[ -n "${output// }" ]]; then
+    echo "    diagnostic output:"
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/      /'
+  fi
+  return 1
+}
+
+apply_managed_db_mysql_client_workaround() {
+  if [[ ! -t 0 ]]; then
+    echo "    workaround: non-interactive mode detected; skipping automatic MySQL client installation."
+    return 1
+  fi
+
+  if ! prompt_yes_no "Managed DB check detected missing MySQL client on APP host. Apply workaround now (install default-mysql-client)?"; then
+    echo "    workaround: operator skipped automatic MySQL client installation."
+    return 1
+  fi
+
+  write_step "Applying workaround: installing MySQL client on APP host"
+  if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y default-mysql-client" -o; then
+    echo "Automatic workaround failed: unable to install MySQL client on APP host." >&2
+    return 1
+  fi
+
+  if run_managed_db_guided_check "MySQL client availability on app host (after workaround)" "command -v mysql >/dev/null 2>&1"; then
+    return 0
+  fi
+
+  echo "Automatic workaround completed but MySQL client check is still failing." >&2
+  return 1
+}
+
+run_managed_db_guided_workarounds() {
+  local failures=0
+  local tcp_check_command
+  local dns_check_command
+
+  write_step "Running managed DB guided diagnostics/workarounds"
+  echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
+
+  if ! run_managed_db_guided_check "MySQL client availability on app host" "command -v mysql >/dev/null 2>&1"; then
+    failures=$((failures + 1))
+    if apply_managed_db_mysql_client_workaround; then
+      failures=$((failures - 1))
+    fi
+  fi
+
+  dns_check_command="getent hosts '${MANAGED_DB_HOST}' >/dev/null 2>&1"
+  if ! run_managed_db_guided_check "DNS resolution for managed DB endpoint" "$dns_check_command"; then
+    failures=$((failures + 1))
+  fi
+
+  tcp_check_command="timeout 7 bash -lc '</dev/tcp/${MANAGED_DB_HOST}/${MANAGED_DB_PORT}' >/dev/null 2>&1"
+  if ! run_managed_db_guided_check "TCP reachability to managed DB endpoint" "$tcp_check_command"; then
+    failures=$((failures + 1))
+  fi
+
+  if ((failures == 0)); then
+    echo "Managed DB guided diagnostics/workarounds completed without blocking findings."
+  else
+    echo "Managed DB guided diagnostics/workarounds found ${failures} failing checks."
+  fi
+}
+
+handle_managed_db_validation_after_app_apply() {
+  local continue_message
 
   if ! is_managed_database_mode; then
     return 0
   fi
 
-  db_host="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
-  db_port="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
-  db_user="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
-  db_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
-
-  [[ -z "${db_host// }" ]] && { echo "Missing runtime key: glpi_db_host" >&2; exit 1; }
-  [[ -z "${db_port// }" ]] && db_port="3306"
-  [[ -z "${db_user// }" ]] && { echo "Missing runtime key: glpi_db_user" >&2; exit 1; }
-  [[ -z "${db_password// }" ]] && { echo "Missing runtime secret: glpi_db_password" >&2; exit 1; }
+  if ! load_managed_db_runtime_contract; then
+    continue_message="Managed DB runtime contract is incomplete. App deployment succeeded, but DB validation could not run."
+    if [[ -n "${MANAGED_DB_HOST// }" ]]; then
+      run_managed_db_guided_workarounds || true
+    else
+      echo "Managed DB endpoint is missing; skipping guided network checks."
+    fi
+    if [[ -t 0 ]]; then
+      if prompt_yes_no "${continue_message} Continue deployment as SUCCESS with warning?"; then
+        record_execution_warning "$continue_message"
+        return 0
+      fi
+      echo "Operator selected fail after managed DB runtime contract validation failure." >&2
+      return 1
+    fi
+    record_execution_warning "${continue_message} Continuing as SUCCESS because no interactive terminal is available."
+    return 0
+  fi
 
   write_step "Validating managed DB connectivity from APP host (MySQL TCP)"
-  echo "Managed DB target: host=${db_host} port=${db_port} user=${db_user}"
+  echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
 
-  db_host_escaped="$(shell_escape_single_quotes "$db_host")"
-  db_port_escaped="$(shell_escape_single_quotes "$db_port")"
-  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
-  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+  if run_managed_db_select1_check "initial"; then
+    return 0
+  fi
 
-  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o >/dev/null
-  echo "Managed DB connectivity validation: PASS"
+  run_managed_db_guided_workarounds
+
+  write_step "Re-trying managed DB connectivity after guided checks"
+  if run_managed_db_select1_check "retry"; then
+    return 0
+  fi
+
+  continue_message="Managed DB connectivity validation failed after guided checks/retry. App deployment succeeded."
+  if [[ -t 0 ]]; then
+    if prompt_yes_no "${continue_message} Continue deployment as SUCCESS with warning?"; then
+      record_execution_warning "$continue_message"
+      return 0
+    fi
+    echo "Operator selected fail after managed DB connectivity validation failure." >&2
+    return 1
+  fi
+
+  record_execution_warning "${continue_message} Continuing as SUCCESS because no interactive terminal is available."
+  return 0
 }
 
 print_operation_log_tail() {
@@ -1606,9 +1804,15 @@ run_deploy() {
       if [[ "$run_as_deploy_domain" == "true" ]]; then
         create_remote_domain_backup_snapshot "deploy" "apply" "$target" "$SCOPE"
       fi
+      if is_managed_database_mode && [[ "$target" == "app" ]]; then
+        write_step "Stage 1/2 (managed): applying application deployment (hard gate)"
+      fi
       invoke_ansible_or_fail "deploy ${mode} ${target}" "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
       if is_managed_database_mode && [[ "$target" == "app" || "$target" == "all" ]]; then
-        validate_managed_db_connectivity_from_app
+        write_step "Stage 2/2 (managed): validating managed DB connectivity (controlled gate)"
+        if ! handle_managed_db_validation_after_app_apply; then
+          exit 1
+        fi
       fi
       mark_apply_sequence "$mode" "$target"
       ;;
@@ -2510,6 +2714,7 @@ trap 'handle_signal QUIT' QUIT
 ensure_runtime_foundation "$ENVIRONMENT"
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
 OPERATION_LOG_INITIALIZED="true"
+print_operation_follow_hints
 resolve_security_mode
 resolve_execution_contract
 resolve_execution_overrides
