@@ -44,7 +44,9 @@ FINAL_STATUS_EMITTED="false"
 declare -a EXECUTION_WARNINGS=()
 MANAGED_DB_HOST=""
 MANAGED_DB_PORT=""
+MANAGED_DB_NAME=""
 MANAGED_DB_USER=""
+MANAGED_DB_GRANT_HOST=""
 MANAGED_DB_PASSWORD=""
 MANAGED_DB_ADMIN_PASSWORD=""
 
@@ -1480,11 +1482,14 @@ load_managed_db_runtime_contract() {
 
   MANAGED_DB_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
   MANAGED_DB_PORT="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
+  MANAGED_DB_NAME="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_name" || true)"
   MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
+  MANAGED_DB_GRANT_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "db_grant_host" || true)"
   MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
   MANAGED_DB_ADMIN_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true)"
 
   [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
+  [[ -z "${MANAGED_DB_GRANT_HOST// }" ]] && MANAGED_DB_GRANT_HOST="%"
 
   if [[ -z "${MANAGED_DB_HOST// }" ]]; then
     echo "Managed DB validation cannot run: missing runtime key glpi_db_host." >&2
@@ -1494,10 +1499,94 @@ load_managed_db_runtime_contract() {
     echo "Managed DB validation cannot run: missing runtime key glpi_db_user." >&2
     return 1
   fi
+  if [[ -z "${MANAGED_DB_NAME// }" ]]; then
+    echo "Managed DB validation cannot run: missing runtime key glpi_db_name." >&2
+    return 1
+  fi
   if [[ -z "${MANAGED_DB_PASSWORD// }" ]]; then
     echo "Managed DB validation cannot run: missing runtime secret glpi_db_password." >&2
     return 1
   fi
+  return 0
+}
+
+sql_escape_literal() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+sql_escape_identifier() {
+  printf "%s" "$1" | sed 's/`/``/g'
+}
+
+run_managed_admin_sql_attempt() {
+  local check_label="$1"
+  local db_user="$2"
+  local db_password="$3"
+  local sql_payload="$4"
+  local output
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped sql_escaped
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+  sql_escaped="$(shell_escape_single_quotes "$sql_payload")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --batch --skip-column-names --execute='${sql_escaped}'" -o 2>&1)"; then
+    echo "Managed DB admin command (${check_label}, user=${db_user}): PASS"
+    return 0
+  fi
+
+  echo "Managed DB admin command (${check_label}, user=${db_user}): FAIL"
+  if [[ -n "${output// }" ]]; then
+    echo "  Diagnostic output:"
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+run_managed_admin_sql() {
+  local check_label="$1"
+  local sql_payload="$2"
+
+  if [[ -z "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    echo "Managed DB admin command (${check_label}): missing DATABASE_MANAGED_ADMIN_PASSWORD." >&2
+    return 1
+  fi
+
+  if run_managed_admin_sql_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD" "$sql_payload"; then
+    return 0
+  fi
+  if run_managed_admin_sql_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD" "$sql_payload"; then
+    return 0
+  fi
+  return 1
+}
+
+ensure_managed_db_schema_and_user() {
+  local db_name_sql user_sql host_sql password_sql
+  local provision_sql verify_sql
+
+  db_name_sql="$(sql_escape_identifier "$MANAGED_DB_NAME")"
+  user_sql="$(sql_escape_literal "$MANAGED_DB_USER")"
+  host_sql="$(sql_escape_literal "$MANAGED_DB_GRANT_HOST")"
+  password_sql="$(sql_escape_literal "$MANAGED_DB_PASSWORD")"
+
+  write_step "Ensuring managed DB schema/user/grants for application"
+  echo "Managed DB provisioning target: database=${MANAGED_DB_NAME} user=${MANAGED_DB_USER} host=${MANAGED_DB_GRANT_HOST}"
+
+  provision_sql="CREATE DATABASE IF NOT EXISTS \`${db_name_sql}\`; CREATE USER IF NOT EXISTS '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; ALTER USER '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; GRANT ALL PRIVILEGES ON \`${db_name_sql}\`.* TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
+  if ! run_managed_admin_sql "provision" "$provision_sql"; then
+    echo "Managed DB provisioning failed: unable to create/alter database user and grant permissions." >&2
+    return 1
+  fi
+
+  verify_sql="SHOW GRANTS FOR '${user_sql}'@'${host_sql}';"
+  if ! run_managed_admin_sql "verify-grants" "$verify_sql"; then
+    echo "Managed DB provisioning failed: unable to verify grants for application user." >&2
+    return 1
+  fi
+
   return 0
 }
 
@@ -1513,7 +1602,7 @@ run_managed_db_select1_attempt() {
   db_user_escaped="$(shell_escape_single_quotes "$db_user")"
   db_password_escaped="$(shell_escape_single_quotes "$db_password")"
 
-  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o 2>&1)"; then
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --database='$(shell_escape_single_quotes "$MANAGED_DB_NAME")' --execute='SELECT 1;'" -o 2>&1)"; then
     echo "Managed DB connectivity (${check_label}, user=${db_user}): PASS"
     return 0
   fi
@@ -1655,6 +1744,11 @@ handle_managed_db_validation_after_app_apply() {
 
   write_step "Validating managed DB connectivity from APP host (MySQL TCP)"
   echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
+
+  if ! ensure_managed_db_schema_and_user; then
+    echo "Managed DB provisioning/permission validation failed after app deployment." >&2
+    return 1
+  fi
 
   if run_managed_db_select1_check "initial"; then
     return 0
