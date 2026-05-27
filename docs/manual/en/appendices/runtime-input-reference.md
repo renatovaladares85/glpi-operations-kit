@@ -4,7 +4,7 @@ This appendix explains how configuration and runtime data flow through the proje
 
 ## Public vs secret input
 
-Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. The 3 deployment secrets read from that file (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`) are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets are runtime-only and must stay only in `.runtime/<environment>/secrets.yml`.
+Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment DB secrets read from that file (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`, and optional `DATABASE_MANAGED_ADMIN_PASSWORD`) are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets are runtime-only and must stay only in `.runtime/<environment>/secrets.yml`.
 
 Template baseline behavior:
 
@@ -93,8 +93,12 @@ The operational meaning is straightforward: baseline settings come from `config/
 The minimum required keys in `config/<environment>.env` for secret materialization are:
 
 - `DATABASE_PASSWORD`
-- `DATABASE_ROOT_PASSWORD`
-- `MONITORING_MYSQLD_EXPORTER_PASSWORD`
+- `DATABASE_ROOT_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
+- `MONITORING_MYSQLD_EXPORTER_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
+
+Optional managed-mode fallback key:
+
+- `DATABASE_MANAGED_ADMIN_PASSWORD`
 
 If any of them are missing in `config/<environment>.env`, scripts fail early and block mutable operations until the environment file is complete.
 

@@ -68,23 +68,41 @@ nginx_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "ng
 php_fpm_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "php-fpm8.3 -t" -o; }
 db_connectivity_check() {
   if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
-    local db_host db_port db_user db_password
-    local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+    local db_host db_port db_user db_password db_admin_password
+    local db_host_escaped db_port_escaped
+    local candidate_user candidate_password
     require_runtime_file "$SECRET_PATH" "runtime secret file"
     db_host="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
     db_port="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
     db_user="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
     db_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+    db_admin_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true)"
     [[ -z "${db_host// }" ]] && { echo "Missing runtime key: glpi_db_host" >&2; return 1; }
     [[ -z "${db_port// }" ]] && db_port="3306"
     [[ -z "${db_user// }" ]] && { echo "Missing runtime key: glpi_db_user" >&2; return 1; }
     [[ -z "${db_password// }" ]] && { echo "Missing runtime secret: glpi_db_password" >&2; return 1; }
     db_host_escaped="$(shell_escape_single_quotes "$db_host")"
     db_port_escaped="$(shell_escape_single_quotes "$db_port")"
-    db_user_escaped="$(shell_escape_single_quotes "$db_user")"
-    db_password_escaped="$(shell_escape_single_quotes "$db_password")"
-    ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o
-    return
+
+    for candidate_user in "$db_user" "root" "admin"; do
+      case "$candidate_user" in
+        "$db_user") candidate_password="$db_password" ;;
+        *)
+          if [[ -z "${db_admin_password// }" ]]; then
+            echo "Managed DB connectivity: user=${candidate_user} SKIP (DATABASE_MANAGED_ADMIN_PASSWORD not configured)"
+            continue
+          fi
+          candidate_password="$db_admin_password"
+          ;;
+      esac
+
+      if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='$(shell_escape_single_quotes "$candidate_password")' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='$(shell_escape_single_quotes "$candidate_user")' --execute='SELECT 1;'" -o >/dev/null 2>&1; then
+        echo "Managed DB connectivity: user=${candidate_user} PASS"
+        return 0
+      fi
+      echo "Managed DB connectivity: user=${candidate_user} FAIL"
+    done
+    return 1
   fi
   ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "mysqladmin ping --silent" -o
 }

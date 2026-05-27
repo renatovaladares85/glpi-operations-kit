@@ -106,6 +106,7 @@ Deployment secrets currently required by renderer/precheck from `config/<environ
 - `DATABASE_PASSWORD`
 - `DATABASE_ROOT_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
+- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, only for managed-mode fallback connectivity attempts with `root`/`admin`)
 
 External-auth sensitive values are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
 
