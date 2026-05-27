@@ -98,7 +98,7 @@ Example with filled values:
 ./scripts/glpictl.sh staging deploy post-check app
 ```
 
-These commands now validate the selected web engine routing contract end-to-end: root access, installer compatibility route (`/install/install.php` when installer is expected), representative `.js/.css` assets discovered from the page, and blocked sensitive paths (`/config`, `/files`, `/vendor`, arbitrary `.php` outside router).
+These commands now validate the selected web engine routing contract end-to-end: root access, installer compatibility route (`/install/install.php` when installer is expected), representative `.js/.css` assets discovered from the page, blocked sensitive paths (`/config`, `/files`, `/vendor`), and safe router handling for unknown PHP-like paths.
 
 ## TLS lifecycle commands
 
