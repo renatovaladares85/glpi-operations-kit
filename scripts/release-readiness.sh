@@ -74,11 +74,16 @@ run_check() {
 
 check_secret_keys() {
   require_runtime_file "$SECRET_PATH" "runtime secret file"
-  local keys=(
-    "glpi_db_password"
-    "glpi_db_root_password"
-    "mysqld_exporter_password"
-  )
+  local keys=("glpi_db_password")
+  local db_deployment_mode
+  db_deployment_mode="$(resolve_database_deployment_mode_for_environment "$ENVIRONMENT")"
+  if [[ "$db_deployment_mode" == "invalid" ]]; then
+    echo "Invalid DATABASE_DEPLOYMENT_MODE in config/$ENVIRONMENT.env (expected self_hosted|managed)." >&2
+    return 1
+  fi
+  if [[ "$db_deployment_mode" == "self_hosted" ]]; then
+    keys+=("glpi_db_root_password" "mysqld_exporter_password")
+  fi
   local key value
   for key in "${keys[@]}"; do
     value="$(read_yaml_top_level_value "$SECRET_PATH" "$key" || true)"

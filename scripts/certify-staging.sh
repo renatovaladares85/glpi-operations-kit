@@ -13,6 +13,11 @@ INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
 PUBLIC_RUNTIME_PATH="$RUNTIME_DIR/public.runtime.yml"
 OVERRIDE_RUNTIME_PATH="$RUNTIME_DIR/overrides.runtime.yml"
 SECRET_PATH="$RUNTIME_DIR/secrets.yml"
+DB_DEPLOYMENT_MODE="$(resolve_database_deployment_mode_for_environment "$ENVIRONMENT")"
+if [[ "$DB_DEPLOYMENT_MODE" == "invalid" ]]; then
+  echo "Invalid DATABASE_DEPLOYMENT_MODE in config/$ENVIRONMENT.env (expected self_hosted|managed)." >&2
+  exit 1
+fi
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
@@ -53,9 +58,36 @@ run_check() {
   return 0
 }
 
+shell_escape_single_quotes() {
+  local value="$1"
+  value="${value//\'/\'\"\'\"\'}"
+  printf "%s" "$value"
+}
+
 nginx_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "nginx -t" -o; }
 php_fpm_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "php-fpm8.3 -t" -o; }
-db_connectivity_check() { ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "mysqladmin ping --silent" -o; }
+db_connectivity_check() {
+  if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
+    local db_host db_port db_user db_password
+    local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+    require_runtime_file "$SECRET_PATH" "runtime secret file"
+    db_host="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
+    db_port="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
+    db_user="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
+    db_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+    [[ -z "${db_host// }" ]] && { echo "Missing runtime key: glpi_db_host" >&2; return 1; }
+    [[ -z "${db_port// }" ]] && db_port="3306"
+    [[ -z "${db_user// }" ]] && { echo "Missing runtime key: glpi_db_user" >&2; return 1; }
+    [[ -z "${db_password// }" ]] && { echo "Missing runtime secret: glpi_db_password" >&2; return 1; }
+    db_host_escaped="$(shell_escape_single_quotes "$db_host")"
+    db_port_escaped="$(shell_escape_single_quotes "$db_port")"
+    db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+    db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+    ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o
+    return
+  fi
+  ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "mysqladmin ping --silent" -o
+}
 
 tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
 [[ -z "${tls_mode// }" ]] && tls_mode="$(awk -F'"' '/^glpi_tls_mode:/ {print $2}' "$PUBLIC_RUNTIME_PATH" | head -n1)"

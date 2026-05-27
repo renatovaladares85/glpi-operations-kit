@@ -15,6 +15,15 @@
 - Correção: executar `bash scripts/bootstrap-permissions.sh`
 - Retomada segura: repetir o comando que falhou.
 
+## Solicitação de senha no `sudo` durante validações locais
+
+- Sintoma: `deploy check` ou outro comando pede senha `sudo`.
+- Esclarecimento: essa senha é da conta Linux local da VM/host operacional.
+- Não é: senha do MySQL, senha do RDS, nem chave/senha SSH.
+- Correção:
+  - para ambientes VM (`DATABASE_DEPLOYMENT_MODE=self_hosted`): usar conta com privilégio sudo;
+  - para RDS gerenciado (`DATABASE_DEPLOYMENT_MODE=managed`): usar fluxo de validação/app sem operações de host DB Linux.
+
 ## Ausência de `config/<env>.env` no precheck
 
 - Sintoma: o precheck falha com item obrigatório informando arquivo de configuração do ambiente ausente.
@@ -32,6 +41,15 @@
   - Exemplo: `config/staging.env`
 - Correção: usar role `db` no host DB e role `app` no host APP quando a execução for local.
 - Retomada segura: repetir no host correto com role corrigido.
+
+## `deploy apply db` bloqueado com `DATABASE_DEPLOYMENT_MODE=managed`
+
+- Sintoma: execução falha informando que `deploy apply db` não é suportado em modo gerenciado.
+- Causa: em RDS/DB gerenciado não existe host Linux DB para provisionamento MariaDB via role `db`.
+- Correção:
+  - manter `deploy apply app|monitoring|backup`;
+  - validar conectividade APP->RDS via TCP (`mysql --protocol=TCP --host <rds-endpoint> ...`).
+- Retomada segura: repetir com alvo compatível (`app`, `monitoring`, `backup`).
 
 ## Caminho de chave SSH inválido em `EXECUTION_MODE=ssh`
 

@@ -26,6 +26,7 @@ Validation does not check only global mandatory keys. It also checks required ke
 
 - `EXECUTION_MODE=ssh`: `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and valid.
 - `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
+- `DATABASE_DEPLOYMENT_MODE=managed`: DB host Linux operations are disabled; DB validation uses direct MySQL TCP connectivity.
 - External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): `SSO_PUBLIC_URL` becomes mandatory when URL enforcement is active.
 - SAML/OIDC enabled: `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
 - `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
@@ -35,8 +36,8 @@ Validation does not check only global mandatory keys. It also checks required ke
 Deployment secrets currently read from `config/<environment>.env` and materialized into `.runtime/<environment>/secrets.yml` are:
 
 - `DATABASE_PASSWORD`
-- `DATABASE_ROOT_PASSWORD`
-- `MONITORING_MYSQLD_EXPORTER_PASSWORD`
+- `DATABASE_ROOT_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
+- `MONITORING_MYSQLD_EXPORTER_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
 
 External-auth secrets are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
 
@@ -70,6 +71,7 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 |---|---|---|
 | `EXECUTION_MODE` | `local` unless remote SSH orchestration is approved. | Prevents implicit cross-host assumptions. |
 | `TOPOLOGY_MODE` | Match the real host layout. | Wrong topology can apply DB/app actions to the wrong host. |
+| `DATABASE_DEPLOYMENT_MODE` | `self_hosted` for VM-managed DB, `managed` for AWS RDS/external DB. | Controls whether scripts expect Linux DB host operations or direct DB TCP validation. |
 | `WEB_SERVER_TYPE` | One of `nginx`, `apache`, `lighttpd`. | The Linux kit automates these engines only. |
 | `TLS_MODE` | `provided` for production. | SSO and compliance usually require HTTPS. |
 | `AUTH_MODE` | `local` unless external auth is explicitly approved. | Preserves existing login behavior. |

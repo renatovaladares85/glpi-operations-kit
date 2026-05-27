@@ -70,6 +70,7 @@ The configuration keys are grouped by operational domain:
 | `EXECUTION_MODE` | Defines whether orchestration runs locally on each host or remotely by SSH. | `local`, `ssh` |
 | `EXECUTION_HOST_ROLE_DEFAULT` | Prevents wrong mutable actions on wrong hosts in local mode. | `app`, `db`, `all` |
 | `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
+| `DATABASE_DEPLOYMENT_MODE` | Defines if DB host is managed by this kit or external managed DB (for example AWS RDS). | `self_hosted`, `managed` |
 | `WEB_SERVER_TYPE` | Selects the single Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
 | `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
 | `AUTH_MODE` | Controls optional authentication preparation/validation. | `local`, `ldap`, `saml`, `oidc` |
@@ -92,6 +93,7 @@ Notes for DB access controls:
 Configuration validation is scenario-aware and fails early when a feature is enabled without its required keys.
 
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
+- `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
 - External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): requires coherent auth mode and `SSO_PUBLIC_URL` when URL enforcement is enabled.
 - SAML/OIDC enabled: requires `SSO_PUBLIC_URL` with `https://` and blocks `TLS_MODE=none`.
@@ -102,8 +104,8 @@ Configuration validation is scenario-aware and fails early when a feature is ena
 Deployment secrets currently required by renderer/precheck from `config/<environment>.env` are:
 
 - `DATABASE_PASSWORD`
-- `DATABASE_ROOT_PASSWORD`
-- `MONITORING_MYSQLD_EXPORTER_PASSWORD`
+- `DATABASE_ROOT_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
+- `MONITORING_MYSQLD_EXPORTER_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
 
 External-auth sensitive values are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
 

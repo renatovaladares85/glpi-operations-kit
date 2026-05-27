@@ -21,6 +21,11 @@ INVENTORY_RUNTIME_PATH="$RUNTIME_DIR/inventory.runtime.yml"
 PUBLIC_RUNTIME_PATH="$RUNTIME_DIR/public.runtime.yml"
 OVERRIDE_RUNTIME_PATH="$RUNTIME_DIR/overrides.runtime.yml"
 SECRET_PATH="$RUNTIME_DIR/secrets.yml"
+DB_DEPLOYMENT_MODE="$(resolve_database_deployment_mode_for_environment "$ENVIRONMENT")"
+if [[ "$DB_DEPLOYMENT_MODE" == "invalid" ]]; then
+  echo "Invalid DATABASE_DEPLOYMENT_MODE in config/$ENVIRONMENT.env (expected self_hosted|managed)." >&2
+  exit 1
+fi
 PROTECTED_USERS=("root" "www-data" "mysql")
 
 ensure_runtime_foundation "$ENVIRONMENT"
@@ -350,6 +355,11 @@ users_dispatch() {
       esac
       ;;
     db)
+      if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
+        echo "DB user lifecycle subcommands are not supported when DATABASE_DEPLOYMENT_MODE=managed." >&2
+        echo "RDS/managed DB operations must be executed through the database administration workflow." >&2
+        return 1
+      fi
       case "$users_action" in
         add) users_add_db ;;
         disable) users_disable_db ;;

@@ -113,6 +113,7 @@ EXECUTION_MODE_EFFECTIVE=""
 HOST_ROLE_EFFECTIVE=""
 TOPOLOGY_MODE_EFFECTIVE="dual-server"
 ASSUME_DB_APPLIED="false"
+DB_DEPLOYMENT_MODE_EFFECTIVE="self_hosted"
 AUTH_MODE_EFFECTIVE="local"
 AUTH_EXTERNAL_ENABLED_EFFECTIVE="false"
 AUTH_LDAP_ENABLED_EFFECTIVE="false"
@@ -139,6 +140,10 @@ normalize_bool() {
     true|false) echo "$value" ;;
     *) echo "$default_value" ;;
   esac
+}
+
+is_managed_database_mode() {
+  [[ "$DB_DEPLOYMENT_MODE_EFFECTIVE" == "managed" ]]
 }
 
 yaml_escape() {
@@ -900,8 +905,19 @@ resolve_execution_contract() {
 
 resolve_execution_overrides() {
   local assume_db_applied_value=""
+  local db_deployment_mode_value=""
   assume_db_applied_value="$(read_product_config_value "$ENVIRONMENT" "OPERATIONS_ASSUME_DB_APPLIED" || true)"
   ASSUME_DB_APPLIED="$(normalize_bool "$assume_db_applied_value" "false")"
+  db_deployment_mode_value="$(read_product_config_value "$ENVIRONMENT" "database.deployment_mode" || true)"
+  [[ -z "${db_deployment_mode_value// }" ]] && db_deployment_mode_value="self_hosted"
+  case "$db_deployment_mode_value" in
+    self_hosted|managed) ;;
+    *)
+      echo "Invalid DATABASE_DEPLOYMENT_MODE '$db_deployment_mode_value'. Allowed values: self_hosted|managed." >&2
+      exit 1
+      ;;
+  esac
+  DB_DEPLOYMENT_MODE_EFFECTIVE="$db_deployment_mode_value"
 }
 
 require_env_key() {
@@ -1085,6 +1101,36 @@ enforce_local_target_consistency() {
   esac
 }
 
+enforce_managed_db_target_support() {
+  local domain="$1"
+  local action="$2"
+  local target="$3"
+
+  if ! is_managed_database_mode; then
+    return 0
+  fi
+  if [[ "$domain" != "deploy" ]]; then
+    return 0
+  fi
+
+  if [[ "$action" == "apply" ]]; then
+    case "$target" in
+      db|all)
+        echo "deploy apply ${target} is not supported when DATABASE_DEPLOYMENT_MODE=managed." >&2
+        echo "RDS/managed DB has no Linux DB host for MariaDB provisioning tasks." >&2
+        echo "Use deploy apply app|monitoring|backup and validate DB connectivity over TCP." >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  if [[ "$action" == "post-check" && "$target" == "db" ]]; then
+    echo "deploy post-check db is not supported when DATABASE_DEPLOYMENT_MODE=managed." >&2
+    echo "Use deploy post-check app (or all from APP host) to validate application/runtime checks." >&2
+    exit 1
+  fi
+}
+
 resolve_policy_contract() {
   REQUIRE_TLS="$(read_policy_flag "security.require_tls" "security.require_tls_in_production" "false")"
   REQUIRE_HTTPS="$(read_policy_flag "security.require_https" "security.require_https_in_production" "false")"
@@ -1232,6 +1278,11 @@ enforce_apply_sequence() {
   case "$target" in
     db) ;;
     app)
+      if is_managed_database_mode; then
+        write_step "DATABASE_DEPLOYMENT_MODE=managed: skipping local db_applied prerequisite."
+        write_deploy_flag "db_applied" "true"
+        return 0
+      fi
       if [[ "$EXECUTION_MODE_EFFECTIVE" == "local" && "$TOPOLOGY_MODE_EFFECTIVE" == "dual-server" && "$HOST_ROLE_EFFECTIVE" == "app" && "$ASSUME_DB_APPLIED" == "true" ]]; then
         write_step "Ordered execution override enabled by OPERATIONS_ASSUME_DB_APPLIED=true (local dual-server app host)."
         write_deploy_flag "db_applied" "true"
@@ -1240,6 +1291,12 @@ enforce_apply_sequence() {
       fi
       ;;
     monitoring|backup)
+      if is_managed_database_mode; then
+        write_step "DATABASE_DEPLOYMENT_MODE=managed: skipping local db_applied prerequisite."
+        write_deploy_flag "db_applied" "true"
+        require_deploy_flag "app_applied" "Run apply app before monitoring/backup."
+        return 0
+      fi
       require_deploy_flag "db_applied" "Run apply db before monitoring/backup."
       require_deploy_flag "app_applied" "Run apply app before monitoring/backup."
       ;;
@@ -1347,6 +1404,7 @@ run_deploy() {
   local backup_dir notes
 
   [[ "$DOMAIN" == "deploy" ]] && run_as_deploy_domain="true"
+  enforce_managed_db_target_support "deploy" "$mode" "$target"
   enforce_local_target_consistency "deploy" "$mode" "$target"
 
   case "$mode" in
@@ -1455,17 +1513,24 @@ run_deploy() {
       ;;
     post-check)
       if [[ "$REQUIRE_ORDERED_EXECUTION" == "true" ]]; then
-        require_deploy_flag "db_applied" "Run apply db before post-check."
+        if ! is_managed_database_mode; then
+          require_deploy_flag "db_applied" "Run apply db before post-check."
+        fi
         require_deploy_flag "app_applied" "Run apply app before post-check."
       fi
       case "$target" in
         app|db) post_check_tags="$target" ;;
         all)
+          if is_managed_database_mode; then
+            post_check_tags="app"
+          fi
           if [[ "$EXECUTION_MODE_EFFECTIVE" == "local" && "$TOPOLOGY_MODE_EFFECTIVE" == "dual-server" ]]; then
             if [[ "$HOST_ROLE_EFFECTIVE" == "app" ]]; then
               post_check_tags="app"
             elif [[ "$HOST_ROLE_EFFECTIVE" == "db" ]]; then
-              post_check_tags="db"
+              if ! is_managed_database_mode; then
+                post_check_tags="db"
+              fi
             fi
           fi
           ;;
@@ -1789,6 +1854,11 @@ run_ops() {
       create_domain_backup_snapshot "ops" "users"
       users_action="$TARGET"
       users_scope="${SCOPE:-os}"
+      if is_managed_database_mode && [[ "$users_scope" == "db" ]]; then
+        echo "ops users <action> db is not supported when DATABASE_DEPLOYMENT_MODE=managed." >&2
+        echo "Use the RDS/database administration workflow for DB user lifecycle operations." >&2
+        exit 1
+      fi
       ensure_runtime_inputs_if_missing "true"
       create_remote_domain_backup_snapshot "ops" "users" "$users_action" "$users_scope"
       bash "$SCRIPT_ROOT/ops-maintenance.sh" users "$ENVIRONMENT" "$users_action" "$users_scope"
@@ -1902,6 +1972,7 @@ run_promote() {
     apply)
       create_domain_backup_snapshot "promote" "apply"
       ensure_runtime_inputs_if_missing "true"
+      enforce_managed_db_target_support "deploy" "apply" "$promote_target"
       create_remote_domain_backup_snapshot "promote" "apply" "$promote_target" "$SCOPE"
       run_promote_legacy_apply "$promote_target"
       notes="Promote apply completed using target=${promote_target}."
@@ -2336,7 +2407,11 @@ resolve_execution_overrides
 ensure_runtime_foundation "$ENVIRONMENT"
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
 trap 'finalize_glpictl_operation "$?"' EXIT
-ensure_bootstrap_baseline "$SCRIPT_ROOT"
+bootstrap_require_privileged="true"
+if [[ "$DOMAIN" == "deploy" && "$ACTION" == "check" ]]; then
+  bootstrap_require_privileged="false"
+fi
+ensure_bootstrap_baseline "$SCRIPT_ROOT" "$bootstrap_require_privileged"
 run_preflight_checks "$ENVIRONMENT" "$DOMAIN" "$ACTION" "$TARGET" bash git python3 ansible ansible-playbook ansible-inventory
 
 if is_mutating_operation && [[ "$SECURITY_MODE_EFFECTIVE" == "permissive" ]]; then

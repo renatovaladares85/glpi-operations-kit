@@ -10,7 +10,7 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 - `config/product.env` mantém descomentadas apenas as chaves obrigatórias de baseline.
 - Chaves não usadas no cenário atual ficam comentadas com exemplo default preenchido.
 - Chaves usadas no cenário atual ficam descomentadas com valores reais do ambiente.
-- Segredos obrigatórios de deploy atualmente lidos do ambiente são `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD` e `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
+- Segredos obrigatórios de deploy atualmente lidos do ambiente são `DATABASE_PASSWORD` (sempre), além de `DATABASE_ROOT_PASSWORD` e `MONITORING_MYSQLD_EXPORTER_PASSWORD` somente quando `DATABASE_DEPLOYMENT_MODE=self_hosted`.
 - Segredos de autenticação externa devem permanecer somente em `.runtime/<environment>/secrets.yml`, como `auth_saml_x509_certificate`, `ldap_bind_password` e `oidc_client_secret`.
 - Nunca coloque certificados privados, tokens, senhas reais ou dumps em Git.
 - Exemplo de segredo forte fictício: `DATABASE_PASSWORD=kit-demo-9f4aT2m7Q1x`.
@@ -56,6 +56,7 @@ Use este guia antes de executar `deploy check`, `auth check`, `tls check` ou qua
 | `EXECUTION_MODE` | `local` ou `ssh`. | Use `local` quando cada host executa seus próprios comandos; use `ssh` só se houver orquestração remota permitida. | Em `ssh`, chave e acesso remoto viram obrigatórios. |
 | `EXECUTION_HOST_ROLE_DEFAULT` | `app`, `db` ou `all`. | Em single-server use `all`; em dual-server local use `db` no host DB e `app` no host APP. | Evita aplicar etapa no host errado. |
 | `TOPOLOGY_MODE` | `single-server` ou `dual-server`. | Confirme se APP e DB ficam no mesmo host ou separados. | Deve combinar com os hosts informados. |
+| `DATABASE_DEPLOYMENT_MODE` | `self_hosted` ou `managed`. | Use `self_hosted` quando o host DB é gerenciado por este kit; use `managed` para DB externo como AWS RDS. | `managed` desativa ações de host DB Linux (`deploy apply db`, ops de host DB). |
 | `TOPOLOGY_APP_ALIAS` | Alias Ansible do host app. | Use nome curto, por exemplo `app-node`. | Não precisa resolver DNS. |
 | `TOPOLOGY_APP_HOST` | IP ou FQDN do host app. | Peça à equipe de rede/infra. | Deve ser alcançável pelo executor no modo `ssh`. |
 | `TOPOLOGY_DB_ALIAS` | Alias Ansible do host DB. | Use nome curto, por exemplo `db-node`. | Não precisa resolver DNS. |
@@ -98,7 +99,7 @@ Observação de risco:
 | `DATABASE_NAME` | Nome da base/schema GLPI. | Defina com DBA; exemplo `glpi_operational`. | Use identificador SQL simples. |
 | `DATABASE_USER` | Usuário SQL do GLPI. | Defina com DBA; prefira nome contextual não óbvio, exemplo `nehemiah_glpi`. | Evite `admin`, `root`, `glpi`. |
 | `DATABASE_PASSWORD` | Senha do usuário SQL do GLPI. | Gere segredo aleatório forte. | Secret obrigatório; não commitar. |
-| `DATABASE_ROOT_PASSWORD` | Senha root/provisionamento MariaDB. | Gere ou solicite ao DBA. | Secret obrigatório; não commitar. |
+| `DATABASE_ROOT_PASSWORD` | Senha root/provisionamento MariaDB. | Gere ou solicite ao DBA. | Obrigatório quando `DATABASE_DEPLOYMENT_MODE=self_hosted`; não commitar. |
 | `DATABASE_PORT` | Porta TCP do MariaDB/MySQL. | Normalmente `3306`. | Firewall deve permitir origem APP. |
 | `DATABASE_BIND_ADDRESS` | Endereço de bind do DB. | Use `0.0.0.0` para escutar em todas as interfaces aprovadas ou IP específico do DB. | Deve combinar com política de firewall. |
 | `DATABASE_PACKAGES` | Pacotes DB em CSV. | Mantenha padrão salvo necessidade do SO. | Baseline atual: `mariadb-server,mariadb-client,python3-pymysql`. |
@@ -140,7 +141,7 @@ Para certificado `provided`, solicite um certificado de servidor HTTPS, não de 
 | `MONITORING_NODE_EXPORTER_ENABLED` | `true` ou `false`. | Habilite quando host metrics forem coletadas. | Booleano. |
 | `MONITORING_MYSQLD_EXPORTER_ENABLED` | `true` ou `false`. | Habilite quando métricas MariaDB/MySQL forem coletadas. | Booleano. |
 | `MONITORING_MYSQLD_EXPORTER_USER` | Usuário SQL do exporter. | Use nome contextual, exemplo `issachar_monitor`. | Evite nomes genéricos. |
-| `MONITORING_MYSQLD_EXPORTER_PASSWORD` | Senha do exporter. | Gere segredo aleatório forte. | Secret obrigatório; não commitar. |
+| `MONITORING_MYSQLD_EXPORTER_PASSWORD` | Senha do exporter. | Gere segredo aleatório forte. | Obrigatório quando `DATABASE_DEPLOYMENT_MODE=self_hosted`; não commitar. |
 | `MONITORING_LABELS_JSON` | Labels em JSON de uma linha. | Defina produto, serviço, cliente e ambiente. | Deve ser JSON objeto válido. |
 | `MONITORING_THRESHOLDS_JSON` | Thresholds em JSON de uma linha. | Peça à observabilidade/NOC. | Deve conter números coerentes. |
 | `MONITORING_SCRAPE_PROFILES_JSON` | Perfis de coleta em JSON. | Use intervalo e timeout aprovados. | JSON objeto válido, exemplo `{"default":{"interval":"30s","timeout":"10s"}}`. |
