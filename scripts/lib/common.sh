@@ -1199,46 +1199,133 @@ check_or_install_python_yaml_support() {
   return 1
 }
 
+resolve_php_version_for_environment() {
+  local environment="$1"
+  local configured_fpm_service php_version
+  configured_fpm_service="$(read_product_config_value "$environment" "php_fpm.service_name" || true)"
+  [[ -z "${configured_fpm_service// }" ]] && configured_fpm_service="$(read_product_config_value "$environment" "PHP_FPM_SERVICE_NAME" || true)"
+  if [[ "$configured_fpm_service" =~ php([0-9]+\.[0-9]+)-fpm ]]; then
+    php_version="${BASH_REMATCH[1]}"
+    echo "$php_version"
+    return 0
+  fi
+  echo "8.3"
+}
+
 php_extension_enabled() {
   local extension_name="$1"
-  if ! command -v php >/dev/null 2>&1; then
+  local php_bin="${2:-php}"
+  if ! command -v "$php_bin" >/dev/null 2>&1; then
     return 1
   fi
-  php -m 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -Fx "$extension_name" >/dev/null 2>&1
+  "$php_bin" -m 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -Fx "$extension_name" >/dev/null 2>&1
+}
+
+package_installed() {
+  local package_name="$1"
+  dpkg-query -W -f='${Status}' "$package_name" 2>/dev/null | grep -q "install ok installed"
+}
+
+service_exists() {
+  local service_name="$1"
+  systemctl list-unit-files "$service_name" --no-legend 2>/dev/null | awk 'NF {print $1}' | grep -Fx "$service_name" >/dev/null 2>&1
+}
+
+ensure_php_cli_available() {
+  local php_version="$1"
+  local cli_package="php${php_version}-cli"
+  if command -v php >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "PHP CLI binary not found. Installing ${cli_package} before extension validation." >&2
+  if ! install_command_ubuntu "$cli_package" "$cli_package"; then
+    return 1
+  fi
+  command -v php >/dev/null 2>&1
 }
 
 auto_remediate_php_extension() {
   local extension_name="$1"
-  local phpenmod_cmd restart_cmd
+  local php_version="$2"
+  local fpm_service="$3"
+  local extension_package="php${php_version}-${extension_name}"
+  local cli_package="php${php_version}-cli"
+  local fpm_package="php${php_version}-fpm"
+  local enable_cli_cmd enable_fpm_cmd restart_fpm_cmd
+
+  if ! ensure_php_cli_available "$php_version"; then
+    echo "PHP CLI binary not found and automatic installation failed." >&2
+    return 1
+  fi
+
+  if ! package_installed "$cli_package"; then
+    echo "PHP CLI package ${cli_package} not installed. Installing package." >&2
+    install_command_ubuntu "$cli_package" "$cli_package" || return 1
+  fi
+
+  if ! package_installed "$extension_package"; then
+    echo "PHP extension package ${extension_package} not installed. Installing package." >&2
+    install_command_ubuntu "$extension_package" "$extension_package" || return 1
+  fi
 
   if ! command -v phpenmod >/dev/null 2>&1; then
+    echo "phpenmod command not found; unable to enable PHP extension automatically." >&2
     return 1
   fi
 
   if command -v sudo >/dev/null 2>&1; then
-    phpenmod_cmd="sudo phpenmod '${extension_name}'"
-    restart_cmd="sudo systemctl restart php8.3-fpm"
+    enable_cli_cmd="sudo phpenmod -v '${php_version}' -s cli '${extension_name}'"
+    enable_fpm_cmd="sudo phpenmod -v '${php_version}' -s fpm '${extension_name}'"
+    restart_fpm_cmd="sudo systemctl restart '${fpm_service}'"
   else
-    phpenmod_cmd="phpenmod '${extension_name}'"
-    restart_cmd="systemctl restart php8.3-fpm"
+    enable_cli_cmd="phpenmod -v '${php_version}' -s cli '${extension_name}'"
+    enable_fpm_cmd="phpenmod -v '${php_version}' -s fpm '${extension_name}'"
+    restart_fpm_cmd="systemctl restart '${fpm_service}'"
   fi
 
-  if ! bash -lc "$phpenmod_cmd"; then
-    return 1
+  if ! php_extension_enabled "$extension_name" "php"; then
+    echo "PHP extension ${extension_name} package is installed but not enabled for cli. Enabling with phpenmod." >&2
+    bash -lc "$enable_cli_cmd" || return 1
   fi
-  bash -lc "$restart_cmd" >/dev/null 2>&1 || true
 
-  php_extension_enabled "$extension_name"
+  if service_exists "$fpm_service"; then
+    if ! package_installed "$fpm_package"; then
+      echo "PHP-FPM package ${fpm_package} not installed. Installing package." >&2
+      install_command_ubuntu "$fpm_package" "$fpm_package" || return 1
+    fi
+    if ! bash -lc "$enable_fpm_cmd"; then
+      return 1
+    fi
+    if ! bash -lc "$restart_fpm_cmd"; then
+      echo "Failed to restart ${fpm_service} after enabling ${extension_name}." >&2
+      return 1
+    fi
+  else
+    echo "PHP-FPM service ${fpm_service} not found. Skipping FPM restart." >&2
+  fi
+
+  if ! service_exists "apache2.service"; then
+    echo "Apache service not found. Skipping Apache restart." >&2
+  fi
+
+  php_extension_enabled "$extension_name" "php"
 }
 
 check_or_install_php_extension() {
   local level="$1"
   local extension_name="$2"
-  local package_name="$3"
+  local php_version="$3"
+  local fpm_service="$4"
+  local package_name="php${php_version}-${extension_name}"
   local answer=""
   local remediation_answer=""
 
-  if php_extension_enabled "$extension_name"; then
+  if ! ensure_php_cli_available "$php_version"; then
+    preflight_print_result "$level" "fail" "php cli not found"
+    return 1
+  fi
+
+  if php_extension_enabled "$extension_name" "php"; then
     preflight_print_result "$level" "ok" "php extension '$extension_name' found"
     return 0
   fi
@@ -1260,7 +1347,7 @@ check_or_install_php_extension() {
   fi
 
   if install_command_ubuntu "$package_name" "$package_name"; then
-    if php_extension_enabled "$extension_name"; then
+    if php_extension_enabled "$extension_name" "php"; then
       preflight_print_result "$level" "ok" "php extension '$extension_name' installed successfully"
       return 0
     fi
@@ -1281,11 +1368,11 @@ check_or_install_php_extension() {
       remediation_answer="n"
     fi
     if [[ "$remediation_answer" == "y" ]]; then
-      if auto_remediate_php_extension "$extension_name"; then
+      if auto_remediate_php_extension "$extension_name" "$php_version" "$fpm_service"; then
         preflight_print_result "$level" "ok" "php extension '$extension_name' found after automatic remediation"
         return 0
       fi
-      echo "PHP extension '${extension_name}' is still missing after automatic remediation attempt." >&2
+      echo "PHP extension ${extension_name} is still not loaded after remediation." >&2
     fi
   fi
 
@@ -1383,7 +1470,7 @@ run_preflight_checks() {
   local require_tls require_https require_sso require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
   local execution_mode host_role db_deployment_mode require_privileged_checks
-  local app_stack_expected glpi_major_version glpi_requires_bcmath
+  local app_stack_expected glpi_major_version glpi_requires_bcmath php_version php_fpm_service
   local promotion_gate_path
   marker_file="$(bootstrap_marker_path)"
   items_file="$(preflight_items_file_path "$environment")"
@@ -1555,6 +1642,9 @@ run_preflight_checks() {
     execution_mode="$(resolve_execution_mode_for_environment "$environment")"
     host_role="$(resolve_host_role_for_environment "$environment")"
     db_deployment_mode="$(resolve_database_deployment_mode_for_environment "$environment")"
+    php_version="$(resolve_php_version_for_environment "$environment")"
+    php_fpm_service="$(read_product_config_value "$environment" "php_fpm.service_name" || true)"
+    [[ -z "${php_fpm_service// }" ]] && php_fpm_service="php${php_version}-fpm"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
     [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
@@ -1629,7 +1719,7 @@ run_preflight_checks() {
 
     if [[ "$glpi_requires_bcmath" == "true" ]]; then
       if [[ "$app_stack_expected" == "true" ]]; then
-        if check_or_install_php_extension "mandatory" "bcmath" "php-bcmath"; then
+        if check_or_install_php_extension "mandatory" "bcmath" "$php_version" "$php_fpm_service"; then
           append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
             "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "pass" "none"
         else
