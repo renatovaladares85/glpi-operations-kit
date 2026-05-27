@@ -548,3 +548,4 @@
   register: glpi_app_db_connectivity
   changed_when: false
   no_log: true
+  when: (database_deployment_mode | default('self_hosted')) != 'managed'
