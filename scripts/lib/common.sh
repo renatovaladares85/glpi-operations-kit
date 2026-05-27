@@ -1207,11 +1207,36 @@ php_extension_enabled() {
   php -m 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -Fx "$extension_name" >/dev/null 2>&1
 }
 
+auto_remediate_php_extension() {
+  local extension_name="$1"
+  local phpenmod_cmd restart_cmd
+
+  if ! command -v phpenmod >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    phpenmod_cmd="sudo phpenmod '${extension_name}'"
+    restart_cmd="sudo systemctl restart php8.3-fpm"
+  else
+    phpenmod_cmd="phpenmod '${extension_name}'"
+    restart_cmd="systemctl restart php8.3-fpm"
+  fi
+
+  if ! bash -lc "$phpenmod_cmd"; then
+    return 1
+  fi
+  bash -lc "$restart_cmd" >/dev/null 2>&1 || true
+
+  php_extension_enabled "$extension_name"
+}
+
 check_or_install_php_extension() {
   local level="$1"
   local extension_name="$2"
   local package_name="$3"
   local answer=""
+  local remediation_answer=""
 
   if php_extension_enabled "$extension_name"; then
     preflight_print_result "$level" "ok" "php extension '$extension_name' found"
@@ -1248,6 +1273,22 @@ check_or_install_php_extension() {
   else
     echo "  apt-get update && apt-get install -y ${package_name}" >&2
   fi
+
+  if [[ -t 0 || -r /dev/tty ]]; then
+    if prompt_yes_no "Try automatic remediation now (phpenmod + php-fpm restart) for '${extension_name}'?"; then
+      remediation_answer="y"
+    else
+      remediation_answer="n"
+    fi
+    if [[ "$remediation_answer" == "y" ]]; then
+      if auto_remediate_php_extension "$extension_name"; then
+        preflight_print_result "$level" "ok" "php extension '$extension_name' found after automatic remediation"
+        return 0
+      fi
+      echo "PHP extension '${extension_name}' is still missing after automatic remediation attempt." >&2
+    fi
+  fi
+
   return 1
 }
 
@@ -1361,6 +1402,18 @@ run_preflight_checks() {
     require_privileged_checks="false"
   fi
 
+  register_mandatory_failure() {
+    mandatory_failures=$((mandatory_failures + 1))
+    if [[ "${PREFLIGHT_FAIL_FAST:-true}" == "true" ]]; then
+      finalize_precheck_reports "$environment" "$mandatory_failures" "$optional_failures"
+      echo "Mandatory pre-flight check failed."
+      echo "Stopping immediately because PREFLIGHT_FAIL_FAST=true."
+      echo "Detailed report: $(preflight_report_latest_path "$environment")"
+      echo "Readable summary: $(preflight_report_markdown_path "$environment")"
+      exit 1
+    fi
+  }
+
   preflight_print_result "mandatory" "check" "bash available"
   if command -v bash >/dev/null 2>&1; then
     preflight_print_result "mandatory" "ok" "bash found"
@@ -1370,7 +1423,7 @@ run_preflight_checks() {
     preflight_print_result "mandatory" "fail" "bash not found"
     append_precheck_item "$environment" "bash" "local-tooling" "all" "mandatory" \
       "Script runtime requires bash." "command -v bash" "apt install bash" "true" "fail" "Install bash package."
-    mandatory_failures=$((mandatory_failures + 1))
+    register_mandatory_failure
   fi
 
   if ubuntu_supported; then
@@ -1379,7 +1432,7 @@ run_preflight_checks() {
   else
     append_precheck_item "$environment" "ubuntu-supported" "platform" "all" "mandatory" \
       "Official baseline is Ubuntu 24.04." "cat /etc/os-release" "manual host update" "true" "fail" "Use Ubuntu 24.04 before deployment."
-    mandatory_failures=$((mandatory_failures + 1))
+    register_mandatory_failure
   fi
 
   if command -v df >/dev/null 2>&1; then
@@ -1392,7 +1445,7 @@ run_preflight_checks() {
       preflight_print_result "mandatory" "fail" "less than 1 GB of local free disk space is available"
       append_precheck_item "$environment" "local-free-disk" "local-host" "all" "mandatory" \
         "Runtime artifacts and logs need local disk." "df -Pk ." "manual cleanup" "true" "fail" "Free at least 1 GB locally."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     fi
   else
     preflight_print_result "optional" "warn" "df not found; free disk space was not validated"
@@ -1405,7 +1458,7 @@ run_preflight_checks() {
     if ! check_or_install_command "mandatory" "$cmd" "$(package_for_command "$cmd")"; then
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
         "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "fail" "Install package and rerun precheck."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     else
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
         "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "pass" "none"
@@ -1415,7 +1468,7 @@ run_preflight_checks() {
   if ! check_or_install_python_yaml_support "mandatory"; then
     append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
       "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "fail" "Install python3-yaml and rerun precheck."
-    mandatory_failures=$((mandatory_failures + 1))
+    register_mandatory_failure
   else
     append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
       "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "pass" "none"
@@ -1441,7 +1494,7 @@ run_preflight_checks() {
       preflight_print_result "mandatory" "fail" "sudo/root capability is required"
       append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
         "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "fail" "Grant sudo or run as root."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     else
       preflight_print_result "mandatory" "ok" "sudo/root capability validated"
       append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
@@ -1457,7 +1510,7 @@ run_preflight_checks() {
       preflight_print_result "mandatory" "fail" "operator must belong to group '$GLPI_OPS_GROUP'"
       append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
         "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "fail" "Add user to glpiops and relogin."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     else
       preflight_print_result "mandatory" "ok" "operator belongs to group '$GLPI_OPS_GROUP'"
       append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
@@ -1469,7 +1522,7 @@ run_preflight_checks() {
     preflight_print_result "mandatory" "fail" "runtime base directory permissions are not compliant"
     append_precheck_item "$environment" "runtime-base-permissions" "permissions" "all" "mandatory" \
       "Runtime artifacts include sensitive data and must stay restricted." "stat -c '%a' .runtime" "chmod 700 .runtime" "true" "fail" "Apply secure permissions on .runtime."
-    mandatory_failures=$((mandatory_failures + 1))
+    register_mandatory_failure
   else
     preflight_print_result "mandatory" "ok" "runtime base directory permissions are compliant"
     append_precheck_item "$environment" "runtime-base-permissions" "permissions" "all" "mandatory" \
@@ -1481,7 +1534,7 @@ run_preflight_checks() {
       preflight_print_result "mandatory" "fail" "bootstrap marker permissions are not compliant"
       append_precheck_item "$environment" "bootstrap-marker-permissions" "permissions" "all" "mandatory" \
         "Bootstrap marker must stay restricted to the operator context." "stat -c '%a' .runtime/bootstrap.completed" "chmod 600 .runtime/bootstrap.completed" "true" "fail" "Fix bootstrap marker mode to 600."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     else
       preflight_print_result "mandatory" "ok" "bootstrap marker permissions are compliant"
       append_precheck_item "$environment" "bootstrap-marker-permissions" "permissions" "all" "mandatory" \
@@ -1511,7 +1564,7 @@ run_preflight_checks() {
     if [[ "$execution_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
         "Execution mode must be local or ssh." "GLPI_EXECUTION_MODE env var or EXECUTION_MODE in config/<environment>.env" "set local or ssh" "true" "fail" "Fix EXECUTION_MODE in config or GLPI_EXECUTION_MODE."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
       execution_mode="local"
     else
       append_precheck_item "$environment" "execution-mode-default" "execution-contract" "all" "mandatory" \
@@ -1521,7 +1574,7 @@ run_preflight_checks() {
     if [[ "$host_role" == "invalid" ]]; then
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
         "Host role must be app, db, or all." "GLPI_HOST_ROLE env var or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env" "set app/db/all" "true" "fail" "Fix host role in config or GLPI_HOST_ROLE."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
       host_role="all"
     else
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
@@ -1531,7 +1584,7 @@ run_preflight_checks() {
     if [[ "$db_deployment_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "database-deployment-mode" "execution-contract" "all" "mandatory" \
         "Database deployment mode must be self_hosted or managed." "DATABASE_DEPLOYMENT_MODE in config/<environment>.env" "set self_hosted or managed" "true" "fail" "Fix DATABASE_DEPLOYMENT_MODE in config."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
       db_deployment_mode="self_hosted"
     else
       append_precheck_item "$environment" "database-deployment-mode" "execution-contract" "all" "mandatory" \
@@ -1567,7 +1620,7 @@ run_preflight_checks() {
       else
         append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
           "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "apt install mariadb-client" "true" "fail" "Install mariadb-client and rerun precheck."
-        mandatory_failures=$((mandatory_failures + 1))
+        register_mandatory_failure
       fi
     else
       append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "non-app local target or ssh execution" "not-applicable" \
@@ -1582,7 +1635,7 @@ run_preflight_checks() {
         else
           append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
             "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "fail" "Install php-bcmath and rerun precheck."
-          mandatory_failures=$((mandatory_failures + 1))
+          register_mandatory_failure
         fi
       else
         append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "non-app local target or ssh execution" "not-applicable" \
@@ -1593,7 +1646,7 @@ run_preflight_checks() {
     if [[ "$security_mode" == "invalid" ]]; then
       append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
         "The default security mode must be secure or permissive." "OPERATIONS_SECURITY_MODE_DEFAULT in config/<environment>.env" "set secure or permissive" "true" "fail" "Fix OPERATIONS_SECURITY_MODE_DEFAULT to secure|permissive."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
       security_mode="secure"
     else
       append_precheck_item "$environment" "security-mode-default" "environment-policy" "all" "mandatory" \
@@ -1636,7 +1689,7 @@ run_preflight_checks() {
     else
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
         "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable managed targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
-      mandatory_failures=$((mandatory_failures + 1))
+      register_mandatory_failure
     fi
 
     if [[ "$execution_mode" == "local" ]]; then
@@ -1674,7 +1727,7 @@ run_preflight_checks() {
       append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "EXECUTION_MODE=local" "mandatory" \
         "Local execution enforces host role and mutable command consistency." "GLPI_HOST_ROLE + command target" "set host role and run command on correct host" "true" "$role_status" "$role_remediation"
       if [[ "$role_status" == "fail" ]]; then
-        mandatory_failures=$((mandatory_failures + 1))
+        register_mandatory_failure
       fi
     else
       append_precheck_item "$environment" "host-role-command-consistency" "execution-contract" "EXECUTION_MODE=ssh" "not-applicable" \
@@ -1691,7 +1744,7 @@ run_preflight_checks() {
       else
         append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "TLS_MODE=provided" "conditional-mandatory" \
           "Provided TLS mode requires local certificate and key files." "test -f <cert> && test -f <key>" "set valid local paths in config" "true" "fail" "Provide valid local cert/key paths for provided mode."
-        mandatory_failures=$((mandatory_failures + 1))
+        register_mandatory_failure
       fi
     else
       append_precheck_item "$environment" "tls-provided-local-files" "security-artifact" "TLS_MODE!=provided" "not-applicable" \
@@ -1706,7 +1759,7 @@ run_preflight_checks() {
         append_precheck_item "$environment" "policy-require-tls" "environment-policy" "all" "$policy_obligation" \
           "Secure policy requires provided TLS mode." "TLS_MODE in config/<environment>.env" "set TLS_MODE=provided" "$policy_block" "$policy_status" "Enable provided TLS mode or run in secure mode only after compliance."
         if [[ "$security_mode" == "secure" ]]; then
-          mandatory_failures=$((mandatory_failures + 1))
+          register_mandatory_failure
         else
           optional_failures=$((optional_failures + 1))
         fi
@@ -1721,7 +1774,7 @@ run_preflight_checks() {
         append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
           "Secure policy requires HTTPS/TLS enabled." "TLS_MODE in config/<environment>.env" "set TLS_MODE to self_signed or provided" "$policy_block" "$policy_status" "Enable TLS mode or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
-          mandatory_failures=$((mandatory_failures + 1))
+          register_mandatory_failure
         else
           optional_failures=$((optional_failures + 1))
         fi
@@ -1736,7 +1789,7 @@ run_preflight_checks() {
         append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
           "Secure policy requires SSO enabled." "SECURITY_SSO_ENABLED in config/<environment>.env" "set SECURITY_SSO_ENABLED=true" "$policy_block" "$policy_status" "Enable SSO or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
-          mandatory_failures=$((mandatory_failures + 1))
+          register_mandatory_failure
         else
           optional_failures=$((optional_failures + 1))
         fi
@@ -1751,7 +1804,7 @@ run_preflight_checks() {
         append_precheck_item "$environment" "policy-require-promotion-gate" "environment-policy" "all" "$policy_obligation" \
           "Secure policy may require a valid staging certification gate." "test -f .runtime/promotion/staging-certified.yml" "run staging certification or disable gate requirement" "$policy_block" "$policy_status" "Generate promotion gate or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
-          mandatory_failures=$((mandatory_failures + 1))
+          register_mandatory_failure
         else
           optional_failures=$((optional_failures + 1))
         fi
@@ -1763,7 +1816,7 @@ run_preflight_checks() {
     preflight_print_result "mandatory" "fail" "missing required environment file: config/${environment}.env"
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
       "Runtime and policy checks depend on public environment config." "test -f config/<environment>.env" "$copy_cmd" "true" "fail" "Create config/${environment}.env from config/product.env and adjust values."
-    mandatory_failures=$((mandatory_failures + 1))
+    register_mandatory_failure
   fi
 
   finalize_precheck_reports "$environment" "$mandatory_failures" "$optional_failures"
