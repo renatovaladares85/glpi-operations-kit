@@ -501,7 +501,11 @@ create_remote_domain_backup_snapshot() {
     glpi_log_dir="$(read_effective_runtime_value "glpi_log_dir" "/var/log/glpi")"
 
     app_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php' '/etc/passwd' '/etc/group' '/etc/shadow'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
-    ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_cmd" -o >/dev/null
+    if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_cmd" -o; then
+      echo "Remote snapshot failed on APP hosts before '${domain_name}/${action_name}/${target_name}'." >&2
+      echo "Cannot continue safely without a valid APP pre-change snapshot." >&2
+      exit 1
+    fi
   fi
 
   if [[ "$db_required" == "true" && "$db_has_hosts" == "true" ]]; then
@@ -518,7 +522,11 @@ create_remote_domain_backup_snapshot() {
       exit 1
     fi
     db_cmd="set -euo pipefail; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/db'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '/etc/mysql' '/var/lib/mysql' '/etc/my.cnf' '/etc/my.cnf.d'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\"; mysqldump --single-transaction --routines --events --triggers --databases '$(shell_escape_single_quotes "$glpi_db_name")' -u root -p'${db_root_password_escaped}' > \"\$ROOT/glpi-db.sql\""
-    ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$db_cmd" -o >/dev/null
+    if ! ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$db_cmd" -o; then
+      echo "Remote snapshot failed on DB hosts before '${domain_name}/${action_name}/${target_name}'." >&2
+      echo "Cannot continue safely without a valid DB pre-change snapshot." >&2
+      exit 1
+    fi
   fi
 
   cat >"$remote_backup_file" <<EOF
