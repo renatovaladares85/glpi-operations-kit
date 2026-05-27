@@ -148,7 +148,7 @@
 - Fix:
   - rerun `./scripts/glpictl.sh <env> deploy apply app` to re-render selected engine template;
   - Example: `./scripts/glpictl.sh staging deploy apply app`
-  - for nginx, confirm compatibility route and allowlist PHP locations exist in `nginx-glpi.conf`.
+  - for nginx, confirm official GLPI router pattern in `nginx-glpi.conf`: `root .../public`, `location / { try_files $uri /index.php$is_args$args; }`, and `location ~ ^/index\.php$`.
 - Safe resume: rerun `./scripts/glpictl.sh <env> deploy post-check app`.
   - Example: `./scripts/glpictl.sh staging deploy post-check app`
 

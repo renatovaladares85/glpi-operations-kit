@@ -526,13 +526,13 @@
     - vendor/autoload.php
   changed_when: false
 
-- name: Ensure arbitrary PHP outside router is blocked
+- name: Ensure arbitrary PHP path is handled by router without server error
   ansible.builtin.uri:
     url: "{{ glpi_web_check_base_url }}/should-not-exist.php"
     headers:
       Host: "{{ glpi_web_check_host_header }}"
-    follow_redirects: none
-    status_code: [403, 404]
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303, 404]
     validate_certs: false
   changed_when: false
 
