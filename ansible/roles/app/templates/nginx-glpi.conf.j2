@@ -1,7 +1,7 @@
 {% if glpi_tls_mode == 'none' %}
 server {
-    listen {{ nginx_http_port }} default_server;
-    listen [::]:{{ nginx_http_port }} default_server;
+    listen {{ web_http_port }} default_server;
+    listen [::]:{{ web_http_port }} default_server;
     server_name {{ glpi_domain }} {{ glpi_app_host }};
     root {{ glpi_install_dir }}/public;
 
@@ -47,8 +47,8 @@ server {
 }
 {% else %}
 server {
-    listen {{ nginx_http_port }} default_server;
-    listen [::]:{{ nginx_http_port }} default_server;
+    listen {{ web_http_port }} default_server;
+    listen [::]:{{ web_http_port }} default_server;
     server_name {{ glpi_domain }} {{ glpi_app_host }};
 
     location / {
@@ -57,8 +57,8 @@ server {
 }
 
 server {
-    listen {{ nginx_https_port }} ssl http2;
-    listen [::]:{{ nginx_https_port }} ssl http2;
+    listen {{ web_https_port }} ssl http2;
+    listen [::]:{{ web_https_port }} ssl http2;
     server_name {{ glpi_domain }} {{ glpi_app_host }};
     root {{ glpi_install_dir }}/public;
 

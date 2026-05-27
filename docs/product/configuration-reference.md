@@ -52,7 +52,7 @@ The configuration keys are grouped by operational domain:
 - `PRODUCT_*`, `CUSTOMER_*`, `ENVIRONMENT_*`: product/customer metadata
 - `EXECUTION_*`, `TOPOLOGY_*`: orchestration model and host scope
 - `NETWORK_*`: SSH and DB access policy/source restrictions
-- `GLPI_*`, `PHP_FPM_*`, `NGINX_*`: application stack settings
+- `GLPI_*`, `PHP_FPM_*`, `WEB_*`: application stack settings
 - `DATABASE_*`: database baseline and packages
 - `TLS_*`: TLS mode and certificate paths
 - `BACKUP_*`: backup base directory and retention

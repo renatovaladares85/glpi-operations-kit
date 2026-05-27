@@ -110,8 +110,8 @@ Observação de risco:
 | `PHP_FPM_SERVICE_NAME` | Nome do serviço PHP-FPM. | Confirme versão instalada no host, exemplo `php8.3-fpm`. | Exemplo de validação: `systemctl status php8.3-fpm`. |
 | `PHP_FPM_SOCKET` | Socket Unix do PHP-FPM. | Confirme padrão da distro/PHP. | Deve bater com o template web. |
 | `PHP_FPM_PM` | `static`, `dynamic` ou `ondemand`. | Use `dynamic` salvo requisito específico. | Deve ser aceito pelo PHP-FPM. |
-| `NGINX_HTTP_PORT` | Porta HTTP. | Normalmente `80`. | Usada por template Nginx. |
-| `NGINX_HTTPS_PORT` | Porta HTTPS. | Normalmente `443`. | Usada por template Nginx. |
+| `WEB_HTTP_PORT` | Porta HTTP. | Normalmente `80`. | Usada pelo template do web server selecionado (`nginx`, `apache` ou `lighttpd`). |
+| `WEB_HTTPS_PORT` | Porta HTTPS. | Normalmente `443`. | Usada pelo template do web server selecionado (`nginx`, `apache` ou `lighttpd`). |
 
 ## TLS e certificados
 

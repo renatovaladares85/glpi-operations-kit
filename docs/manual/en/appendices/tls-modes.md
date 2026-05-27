@@ -6,7 +6,7 @@ This appendix explains which TLS mode to choose, what certificate type to reques
 
 | Mode | Allowed in `secure` | Allowed in `permissive` | Behavior |
 |---|---|---|---|
-| `none` | only when `SECURITY_REQUIRE_HTTPS=false` and `SECURITY_REQUIRE_TLS=false` | yes, with warning/evidence if policy requires TLS/HTTPS | HTTP on `NGINX_HTTP_PORT`. |
+| `none` | only when `SECURITY_REQUIRE_HTTPS=false` and `SECURITY_REQUIRE_TLS=false` | yes, with warning/evidence if policy requires TLS/HTTPS | HTTP on `WEB_HTTP_PORT`. |
 | `self_signed` | allowed when `SECURITY_REQUIRE_TLS=false` | yes | HTTPS with locally generated self-signed certificate. |
 | `provided` | yes | yes | HTTPS with operator/CA-provided server certificate. |
 

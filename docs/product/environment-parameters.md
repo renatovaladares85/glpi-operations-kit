@@ -53,7 +53,7 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `PRODUCT_*`, `CUSTOMER_*`, `ENVIRONMENT_*` | Product, customer, and environment identity. | Manual field guide. |
 | `EXECUTION_*`, `TOPOLOGY_*` | Local/SSH execution and single/dual-server topology. | Manual field guide. |
 | `NETWORK_*` | SSH identity and DB source allowlist. | Manual field guide. |
-| `GLPI_*`, `PHP_FPM_*`, `NGINX_*` | GLPI version, web engine, PHP runtime, ports, app packages. | Manual field guide. |
+| `GLPI_*`, `PHP_FPM_*`, `WEB_*` | GLPI version, web engine, PHP runtime, ports, app packages. | Manual field guide. |
 | `DATABASE_*` | MariaDB/MySQL schema, users, bind, port, packages. | Manual field guide. |
 | `TLS_*` | TLS mode, certificate target paths, provided source files. | Manual field guide and TLS appendix. |
 | `BACKUP_*` | Backup base directory and retention. | Manual field guide. |
