@@ -13,6 +13,7 @@ WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
 AUTH_MODES = {"local", "ldap", "saml", "oidc"}
 TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
+DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
 
 DEFAULT_GLPI_APP_PACKAGES = [
     "php-fpm",
@@ -185,6 +186,7 @@ DOTTED_KEY_MAP = {
     "database.port": "DATABASE_PORT",
     "database.bind_address": "DATABASE_BIND_ADDRESS",
     "database.packages": "DATABASE_PACKAGES",
+    "database.deployment_mode": "DATABASE_DEPLOYMENT_MODE",
     "php_fpm.service_name": "PHP_FPM_SERVICE_NAME",
     "php_fpm.socket": "PHP_FPM_SOCKET",
     "php_fpm.pm": "PHP_FPM_PM",
@@ -392,13 +394,22 @@ def resolve_execution_contract(values: dict) -> tuple[str, str]:
     return mode, role
 
 
+def resolve_database_deployment_mode(values: dict) -> str:
+    mode = read_value(values, "DATABASE_DEPLOYMENT_MODE", "self_hosted").strip().lower() or "self_hosted"
+    if mode not in DB_DEPLOYMENT_MODES:
+        fail("DATABASE_DEPLOYMENT_MODE must be one of: self_hosted, managed.")
+    return mode
+
+
 def profile_value(values: dict, profile_name: str, suffix: str, default: str) -> str:
     key = f"RESOURCE_PROFILE_{profile_name.upper()}_{suffix}"
     return read_value(values, key, default)
 
 
-def ensure_required_keys(values: dict, execution_mode: str) -> None:
+def ensure_required_keys(values: dict, execution_mode: str, db_deployment_mode: str) -> None:
     for key in REQUIRED_PUBLIC_KEYS:
+        if db_deployment_mode == "managed" and key in {"DATABASE_ROOT_PASSWORD", "MONITORING_MYSQLD_EXPORTER_PASSWORD"}:
+            continue
         require_value(values, key)
     if execution_mode == "ssh":
         for key in SSH_REQUIRED_KEYS:
@@ -425,7 +436,7 @@ def validate_url(value: str, *, https_only: bool = False) -> bool:
     return bool(parsed.netloc)
 
 
-def validate_feature_contract(values: dict, execution_mode: str) -> None:
+def validate_feature_contract(values: dict, execution_mode: str, db_deployment_mode: str) -> None:
     topology_mode = read_value(values, "TOPOLOGY_MODE", "dual-server").strip().lower() or "dual-server"
     if topology_mode not in TOPOLOGY_MODES:
         fail("TOPOLOGY_MODE must be one of: single-server, dual-server.")
@@ -433,6 +444,9 @@ def validate_feature_contract(values: dict, execution_mode: str) -> None:
     db_access_mode = read_value(values, "NETWORK_DATABASE_ACCESS_MODE", "restricted").strip().lower() or "restricted"
     if db_access_mode not in DB_ACCESS_MODES:
         fail("NETWORK_DATABASE_ACCESS_MODE must be one of: restricted, open.")
+
+    if db_deployment_mode not in DB_DEPLOYMENT_MODES:
+        fail("DATABASE_DEPLOYMENT_MODE must be one of: self_hosted, managed.")
 
     tls_mode = require_value(values, "TLS_MODE").strip().lower()
     if tls_mode not in TLS_MODES:
@@ -489,7 +503,7 @@ def validate_feature_contract(values: dict, execution_mode: str) -> None:
         fail("SECURITY_REQUIRE_SSO=true requires SECURITY_SSO_ENABLED=true.")
 
 
-def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> dict:
+def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_deployment_mode: str) -> dict:
     active_profile_name = require_value(values, "RESOURCE_PROFILE_ACTIVE").strip().lower()
     if active_profile_name not in {"small", "medium", "large"}:
         fail("RESOURCE_PROFILE_ACTIVE must be one of: small, medium, large.")
@@ -542,6 +556,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "execution_mode": execution_mode,
         "execution_host_role": host_role,
         "topology_mode": read_value(values, "TOPOLOGY_MODE", "dual-server"),
+        "database_deployment_mode": db_deployment_mode,
         "glpi_version": glpi_version,
         "glpi_download_url": f"https://github.com/glpi-project/glpi/releases/download/{glpi_version}/glpi-{glpi_version}.tgz",
         "glpi_release_root": release_root,
@@ -663,7 +678,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
     return public_runtime
 
 
-def build_inventory(values: dict, execution_mode: str, host_role: str) -> dict:
+def build_inventory(values: dict, execution_mode: str, host_role: str, db_deployment_mode: str) -> dict:
     environment_name = require_value(values, "ENVIRONMENT_NAME")
     app_alias = require_value(values, "TOPOLOGY_APP_ALIAS")
     app_host = require_value(values, "TOPOLOGY_APP_HOST")
@@ -685,7 +700,7 @@ def build_inventory(values: dict, execution_mode: str, host_role: str) -> dict:
                     }
                 }
             }
-        if include_db:
+        if include_db and db_deployment_mode != "managed":
             children["glpi_db"] = {
                 "hosts": {
                     db_alias: {
@@ -703,6 +718,24 @@ def build_inventory(values: dict, execution_mode: str, host_role: str) -> dict:
             }
         }
 
+    children = {
+        "glpi_app": {
+            "hosts": {
+                app_alias: {
+                    "ansible_host": app_host,
+                }
+            }
+        },
+    }
+    if db_deployment_mode != "managed":
+        children["glpi_db"] = {
+            "hosts": {
+                db_alias: {
+                    "ansible_host": db_host,
+                }
+            }
+        }
+
     return {
         "all": {
             "vars": {
@@ -710,22 +743,7 @@ def build_inventory(values: dict, execution_mode: str, host_role: str) -> dict:
                 "ansible_ssh_private_key_file": os.path.expanduser(require_value(values, "NETWORK_SSH_PRIVATE_KEY_PATH")),
                 "environment_name": environment_name,
             },
-            "children": {
-                "glpi_app": {
-                    "hosts": {
-                        app_alias: {
-                            "ansible_host": app_host,
-                        }
-                    }
-                },
-                "glpi_db": {
-                    "hosts": {
-                        db_alias: {
-                            "ansible_host": db_host,
-                        }
-                    }
-                },
-            },
+            "children": children,
         }
     }
 
@@ -767,10 +785,11 @@ def main() -> None:
         fail("python3-yaml support is required. Install the Ubuntu package python3-yaml.")
 
     execution_mode, host_role = resolve_execution_contract(values)
-    ensure_required_keys(values, execution_mode)
-    validate_feature_contract(values, execution_mode)
+    db_deployment_mode = resolve_database_deployment_mode(values)
+    ensure_required_keys(values, execution_mode, db_deployment_mode)
+    validate_feature_contract(values, execution_mode, db_deployment_mode)
 
-    result = build_public_runtime(values, execution_mode, host_role) if args.mode == "public-runtime" else build_inventory(values, execution_mode, host_role)
+    result = build_public_runtime(values, execution_mode, host_role, db_deployment_mode) if args.mode == "public-runtime" else build_inventory(values, execution_mode, host_role, db_deployment_mode)
     yaml.safe_dump(result, sys.stdout, sort_keys=False, default_flow_style=False)
 
 

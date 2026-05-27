@@ -10,7 +10,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 - `config/product.env` keeps only mandatory baseline keys uncommented.
 - Keys not used in the current scenario stay commented with a filled default example.
 - Keys used in the current scenario stay uncommented with real environment values.
-- Deployment secrets currently read from the environment file are `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, and `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
+- Deployment secrets currently read from the environment file are `DATABASE_PASSWORD` (always), plus `DATABASE_ROOT_PASSWORD` and `MONITORING_MYSQLD_EXPORTER_PASSWORD` only when `DATABASE_DEPLOYMENT_MODE=self_hosted`.
 - External-auth secrets must remain only in `.runtime/<environment>/secrets.yml`, such as `auth_saml_x509_certificate`, `ldap_bind_password`, and `oidc_client_secret`.
 - Never commit private certificates, tokens, passwords, or dumps to Git.
 - Example strong non-real secret value: `DATABASE_PASSWORD=kit-demo-9f4aT2m7Q1x`.
@@ -56,6 +56,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 | `EXECUTION_MODE` | `local` or `ssh`. | Use `local` when each host runs its own commands; use `ssh` only when remote orchestration is allowed. | In `ssh`, key and remote access are mandatory. |
 | `EXECUTION_HOST_ROLE_DEFAULT` | `app`, `db`, or `all`. | In single-server use `all`; in dual-server local use `db` on DB host and `app` on APP host. | Prevents applying steps on the wrong host. |
 | `TOPOLOGY_MODE` | `single-server` or `dual-server`. | Confirm whether APP and DB are colocated or split. | Must match host values. |
+| `DATABASE_DEPLOYMENT_MODE` | `self_hosted` or `managed`. | Use `self_hosted` when DB host is managed by this kit; use `managed` for external DB such as AWS RDS. | `managed` disables Linux DB-host actions (`deploy apply db`, DB-host ops). |
 | `TOPOLOGY_APP_ALIAS` | Ansible alias for app host. | Use a short name such as `app-node`. | Does not need DNS resolution. |
 | `TOPOLOGY_APP_HOST` | App host IP or FQDN. | Ask infrastructure/network. | Must be reachable by executor in `ssh` mode. |
 | `TOPOLOGY_DB_ALIAS` | Ansible alias for DB host. | Use a short name such as `db-node`. | Does not need DNS resolution. |
@@ -98,7 +99,7 @@ Risk note:
 | `DATABASE_NAME` | GLPI schema name. | Define with DBA, e.g. `glpi_operational`. | Simple SQL identifier. |
 | `DATABASE_USER` | GLPI SQL user. | Define with DBA; prefer contextual non-obvious names, e.g. `nehemiah_glpi`. | Avoid `admin`, `root`, `glpi`. |
 | `DATABASE_PASSWORD` | Password for GLPI SQL user. | Generate a strong random secret. | Required secret; do not commit. |
-| `DATABASE_ROOT_PASSWORD` | MariaDB root/provisioning password. | Generate or request from DBA. | Required secret; do not commit. |
+| `DATABASE_ROOT_PASSWORD` | MariaDB root/provisioning password. | Generate or request from DBA. | Required when `DATABASE_DEPLOYMENT_MODE=self_hosted`; do not commit. |
 | `DATABASE_PORT` | MariaDB/MySQL TCP port. | Usually `3306`. | Firewall must allow APP source. |
 | `DATABASE_BIND_ADDRESS` | DB bind address. | Use `0.0.0.0` for all approved interfaces or the specific DB IP. | Must match firewall policy. |
 | `DATABASE_PACKAGES` | CSV DB packages. | Keep default unless OS policy requires a change. | Current baseline: `mariadb-server,mariadb-client,python3-pymysql`. |
@@ -140,7 +141,7 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `MONITORING_NODE_EXPORTER_ENABLED` | `true` or `false`. | Enable when host metrics are collected. | Boolean. |
 | `MONITORING_MYSQLD_EXPORTER_ENABLED` | `true` or `false`. | Enable when MariaDB/MySQL metrics are collected. | Boolean. |
 | `MONITORING_MYSQLD_EXPORTER_USER` | SQL user for exporter. | Use contextual name, e.g. `issachar_monitor`. | Avoid generic names. |
-| `MONITORING_MYSQLD_EXPORTER_PASSWORD` | Exporter password. | Generate a strong random secret. | Required secret; do not commit. |
+| `MONITORING_MYSQLD_EXPORTER_PASSWORD` | Exporter password. | Generate a strong random secret. | Required when `DATABASE_DEPLOYMENT_MODE=self_hosted`; do not commit. |
 | `MONITORING_LABELS_JSON` | One-line JSON labels. | Define product, service, customer, environment. | Must be a valid JSON object. |
 | `MONITORING_THRESHOLDS_JSON` | One-line JSON thresholds. | Ask observability/NOC. | Must contain coherent numbers. |
 | `MONITORING_SCRAPE_PROFILES_JSON` | JSON scrape profiles. | Use approved interval and timeout. | Valid JSON object, e.g. `{"default":{"interval":"30s","timeout":"10s"}}`. |

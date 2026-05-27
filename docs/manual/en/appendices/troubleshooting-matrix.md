@@ -15,6 +15,15 @@
 - Fix: run `bash scripts/bootstrap-permissions.sh`
 - Safe resume: rerun the blocked command
 
+## `sudo` password prompt during local validation
+
+- Symptom: `deploy check` or another command asks for `sudo` password.
+- Clarification: this password is for the local Linux VM/host account.
+- It is not: MySQL password, RDS password, or SSH credential.
+- Fix:
+  - VM-managed DB (`DATABASE_DEPLOYMENT_MODE=self_hosted`): use an operator account with sudo privileges.
+  - Managed RDS (`DATABASE_DEPLOYMENT_MODE=managed`): use app/validation flow without Linux DB-host operations.
+
 ## Missing `config/<env>.env` in precheck
 
 - Symptom: precheck fails with a mandatory message indicating missing environment config file.
@@ -32,6 +41,15 @@
   - Example: `config/staging.env`
 - Fix: use `db` role on DB host and `app` role on APP host for local dual-server.
 - Safe resume: rerun command on the correct host with corrected role.
+
+## `deploy apply db` blocked with `DATABASE_DEPLOYMENT_MODE=managed`
+
+- Symptom: execution fails saying `deploy apply db` is not supported in managed mode.
+- Cause: managed RDS/external DB has no Linux DB host for MariaDB provisioning tasks.
+- Fix:
+  - keep using `deploy apply app|monitoring|backup`;
+  - validate APP->RDS TCP connectivity (`mysql --protocol=TCP --host <rds-endpoint> ...`).
+- Safe resume: rerun with a compatible target (`app`, `monitoring`, `backup`).
 
 ## SSH key path invalid in `EXECUTION_MODE=ssh`
 

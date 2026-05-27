@@ -178,6 +178,8 @@ ensure_sudo_ready() {
     return 0
   fi
   echo "Unable to validate sudo privileges for current user." >&2
+  echo "The password requested by sudo is from the local Linux VM/host user." >&2
+  echo "It is not a MySQL, RDS, or SSH credential." >&2
   return 1
 }
 
@@ -206,9 +208,12 @@ require_bootstrap_marker() {
 
 ensure_bootstrap_baseline() {
   local script_root="$1"
+  local require_privileged="${2:-true}"
   ensure_script_directory_executable "$script_root"
-  ensure_sudo_ready
-  ensure_group_exists_and_membership "$GLPI_OPS_GROUP"
+  if [[ "$require_privileged" == "true" ]]; then
+    ensure_sudo_ready
+    ensure_group_exists_and_membership "$GLPI_OPS_GROUP"
+  fi
   ensure_directory_mode "$script_root/../.runtime" "700"
   if [[ ! -f "$(bootstrap_marker_path)" ]]; then
     write_step "Bootstrap marker not found. Creating baseline automatically."
@@ -770,10 +775,12 @@ PY
 ensure_secret_keys() {
   local environment="$1"
   local secret_path
-  local glpi_db_password glpi_db_root_password mysqld_exporter_password
+  local glpi_db_password glpi_db_root_password mysqld_exporter_password db_deployment_mode
   local auth_saml_x509_certificate ldap_bind_password oidc_client_secret
   secret_path="$(runtime_secret_path "$environment")"
   ensure_runtime_foundation "$environment"
+  db_deployment_mode="$(resolve_database_deployment_mode_for_environment "$environment")"
+  [[ "$db_deployment_mode" == "invalid" ]] && db_deployment_mode="self_hosted"
 
   glpi_db_password="$(read_product_config_value "$environment" "DATABASE_PASSWORD" || true)"
   glpi_db_root_password="$(read_product_config_value "$environment" "DATABASE_ROOT_PASSWORD" || true)"
@@ -795,13 +802,13 @@ ensure_secret_keys() {
     echo "Used by: database provisioning and application connectivity" >&2
     exit 1
   fi
-  if [[ -z "${glpi_db_root_password// }" ]]; then
+  if [[ "$db_deployment_mode" == "self_hosted" && -z "${glpi_db_root_password// }" ]]; then
     echo "Missing required config key: DATABASE_ROOT_PASSWORD" >&2
     echo "Purpose: root password for MariaDB administrative operations" >&2
     echo "Used by: schema creation, grants, and hardening" >&2
     exit 1
   fi
-  if [[ -z "${mysqld_exporter_password// }" ]]; then
+  if [[ "$db_deployment_mode" == "self_hosted" && -z "${mysqld_exporter_password// }" ]]; then
     echo "Missing required config key: MONITORING_MYSQLD_EXPORTER_PASSWORD" >&2
     echo "Purpose: secret password for mysqld exporter account" >&2
     echo "Used by: monitoring role deployment" >&2
@@ -1025,6 +1032,7 @@ ensure_ssh_key_material_for_environment() {
   local ssh_user="$5"
   local app_host="$6"
   local db_host="$7"
+  local db_deployment_mode="${8:-self_hosted}"
 
   local resolved_key_path public_key_path must_check_connectivity
   if [[ "$execution_mode" != "ssh" ]]; then
@@ -1052,8 +1060,10 @@ ensure_ssh_key_material_for_environment() {
     if ! ssh -o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new -i "$resolved_key_path" "${ssh_user}@${app_host}" "echo ok" >/dev/null 2>&1; then
       return 1
     fi
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new -i "$resolved_key_path" "${ssh_user}@${db_host}" "echo ok" >/dev/null 2>&1; then
-      return 1
+    if [[ "$db_deployment_mode" != "managed" ]]; then
+      if ! ssh -o BatchMode=yes -o ConnectTimeout=7 -o StrictHostKeyChecking=accept-new -i "$resolved_key_path" "${ssh_user}@${db_host}" "echo ok" >/dev/null 2>&1; then
+        return 1
+      fi
     fi
   fi
   return 0
@@ -1284,6 +1294,20 @@ resolve_host_role_for_environment() {
   esac
 }
 
+resolve_database_deployment_mode_for_environment() {
+  local environment="$1"
+  local mode=""
+
+  if [[ -f "$(config_file_path "$environment")" ]]; then
+    mode="$(read_product_config_value "$environment" "database.deployment_mode" || true)"
+  fi
+  [[ -z "${mode// }" ]] && mode="self_hosted"
+  case "$mode" in
+    self_hosted|managed) echo "$mode" ;;
+    *) echo "invalid" ;;
+  esac
+}
+
 resolve_security_mode_for_environment() {
   local environment="$1"
   local mode="${SECURITY_MODE:-}"
@@ -1317,7 +1341,7 @@ run_preflight_checks() {
   local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled glpi_version
   local require_tls require_https require_sso require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
-  local execution_mode host_role
+  local execution_mode host_role db_deployment_mode require_privileged_checks
   local app_stack_expected glpi_major_version glpi_requires_bcmath
   local promotion_gate_path
   marker_file="$(bootstrap_marker_path)"
@@ -1332,6 +1356,10 @@ run_preflight_checks() {
   write_step "Running environment pre-flight checks for '$environment'"
   echo "Mandatory items must be fixed before continuing."
   echo "Optional items are recommended but do not block execution."
+  require_privileged_checks="true"
+  if [[ "$command_domain" == "deploy" && "$command_action" == "check" ]]; then
+    require_privileged_checks="false"
+  fi
 
   preflight_print_result "mandatory" "check" "bash available"
   if command -v bash >/dev/null 2>&1; then
@@ -1405,26 +1433,36 @@ run_preflight_checks() {
     fi
   done
 
-  if ! ensure_sudo_ready; then
-    preflight_print_result "mandatory" "fail" "sudo/root capability is required"
-    append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
-      "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "fail" "Grant sudo or run as root."
-    mandatory_failures=$((mandatory_failures + 1))
+  if [[ "$require_privileged_checks" != "true" ]]; then
+    append_precheck_item "$environment" "sudo-ready" "permissions" "deploy check flow" "not-applicable" \
+      "Deploy check performs validation only and does not require sudo/root capability." "sudo -v" "n/a" "false" "skip" "none"
   else
-    preflight_print_result "mandatory" "ok" "sudo/root capability validated"
-    append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
-      "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "pass" "none"
+    if ! ensure_sudo_ready; then
+      preflight_print_result "mandatory" "fail" "sudo/root capability is required"
+      append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
+        "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "fail" "Grant sudo or run as root."
+      mandatory_failures=$((mandatory_failures + 1))
+    else
+      preflight_print_result "mandatory" "ok" "sudo/root capability validated"
+      append_precheck_item "$environment" "sudo-ready" "permissions" "all" "mandatory" \
+        "Package install and permission hardening need sudo/root." "sudo -v" "manual sudo policy update" "true" "pass" "none"
+    fi
   fi
 
-  if ! ensure_group_exists_and_membership "$GLPI_OPS_GROUP"; then
-    preflight_print_result "mandatory" "fail" "operator must belong to group '$GLPI_OPS_GROUP'"
-    append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
-      "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "fail" "Add user to glpiops and relogin."
-    mandatory_failures=$((mandatory_failures + 1))
+  if [[ "$require_privileged_checks" != "true" ]]; then
+    append_precheck_item "$environment" "ops-group-membership" "permissions" "deploy check flow" "not-applicable" \
+      "Deploy check flow does not require mutable privileged operations." "id -nG | grep glpiops" "n/a" "false" "skip" "none"
   else
-    preflight_print_result "mandatory" "ok" "operator belongs to group '$GLPI_OPS_GROUP'"
-    append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
-      "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "pass" "none"
+    if ! ensure_group_exists_and_membership "$GLPI_OPS_GROUP"; then
+      preflight_print_result "mandatory" "fail" "operator must belong to group '$GLPI_OPS_GROUP'"
+      append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
+        "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "fail" "Add user to glpiops and relogin."
+      mandatory_failures=$((mandatory_failures + 1))
+    else
+      preflight_print_result "mandatory" "ok" "operator belongs to group '$GLPI_OPS_GROUP'"
+      append_precheck_item "$environment" "ops-group-membership" "permissions" "all" "mandatory" \
+        "Least-privilege operator model requires glpiops." "id -nG | grep glpiops" "groupadd/usermod" "true" "pass" "none"
+    fi
   fi
 
   if ! ensure_directory_mode "$runtime_base_dir" "700"; then
@@ -1463,9 +1501,11 @@ run_preflight_checks() {
     security_mode="$(resolve_security_mode_for_environment "$environment")"
     execution_mode="$(resolve_execution_mode_for_environment "$environment")"
     host_role="$(resolve_host_role_for_environment "$environment")"
+    db_deployment_mode="$(resolve_database_deployment_mode_for_environment "$environment")"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
     [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
+    [[ -z "${db_deployment_mode// }" ]] && db_deployment_mode="self_hosted"
     promotion_gate_path="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 
     if [[ "$execution_mode" == "invalid" ]]; then
@@ -1486,6 +1526,16 @@ run_preflight_checks() {
     else
       append_precheck_item "$environment" "host-role-default" "execution-contract" "all" "mandatory" \
         "Host role controls allowed mutable actions in local mode." "GLPI_HOST_ROLE env var or EXECUTION_HOST_ROLE_DEFAULT in config/<environment>.env" "set app/db/all" "true" "pass" "role=${host_role}"
+    fi
+
+    if [[ "$db_deployment_mode" == "invalid" ]]; then
+      append_precheck_item "$environment" "database-deployment-mode" "execution-contract" "all" "mandatory" \
+        "Database deployment mode must be self_hosted or managed." "DATABASE_DEPLOYMENT_MODE in config/<environment>.env" "set self_hosted or managed" "true" "fail" "Fix DATABASE_DEPLOYMENT_MODE in config."
+      mandatory_failures=$((mandatory_failures + 1))
+      db_deployment_mode="self_hosted"
+    else
+      append_precheck_item "$environment" "database-deployment-mode" "execution-contract" "all" "mandatory" \
+        "Database deployment mode controls DB-host orchestration behavior." "DATABASE_DEPLOYMENT_MODE in config/<environment>.env" "set self_hosted or managed" "true" "pass" "mode=${db_deployment_mode}"
     fi
 
     app_stack_expected="false"
@@ -1580,12 +1630,12 @@ run_preflight_checks() {
     require_promotion_gate="$(read_product_config_value "$environment" "security.require_promotion_gate" || true)"
     require_promotion_gate="$(normalize_bool_value "$require_promotion_gate" "false")"
 
-    if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$execution_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host"; then
+    if ensure_ssh_key_material_for_environment "$environment" "$topology_mode" "$execution_mode" "$ssh_key_path" "$ssh_user" "$app_host" "$db_host" "$db_deployment_mode"; then
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable managed targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "pass" "none"
     else
       append_precheck_item "$environment" "ssh-key-policy" "security-artifact" "$topology_mode" "conditional-mandatory" \
-        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
+        "Remote execution requires one SSH key pair per environment with private key mode 0600 and reachable managed targets when EXECUTION_MODE=ssh." "ssh -i <key> <user>@<host>" "chmod 600; distribute public key" "true" "fail" "Generate/distribute environment SSH key pair and validate connectivity."
       mandatory_failures=$((mandatory_failures + 1))
     fi
 
