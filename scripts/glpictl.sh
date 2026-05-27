@@ -40,6 +40,7 @@ DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
 OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
 OPERATION_STATUS="completed"
 OPERATION_LOG_INITIALIZED="false"
+FINAL_STATUS_EMITTED="false"
 
 print_post_execution_checks() {
   echo "Validation commands (run on target host):"
@@ -79,6 +80,11 @@ print_post_execution_checks() {
 
 finalize_glpictl_operation() {
   local exit_code="${1:-0}"
+  if [[ "$FINAL_STATUS_EMITTED" == "true" ]]; then
+    return 0
+  fi
+  FINAL_STATUS_EMITTED="true"
+
   local remediation_hint="none"
   if [[ "$exit_code" -ne 0 ]]; then
     OPERATION_STATUS="failed"
@@ -99,6 +105,13 @@ finalize_glpictl_operation() {
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml" >&2
     echo "END OF EXECUTION (FAILED)" >&2
   fi
+}
+
+handle_signal() {
+  local signal_name="$1"
+  echo "Execution interrupted by signal: ${signal_name}" >&2
+  finalize_glpictl_operation 130
+  exit 130
 }
 
 SECURITY_MODE_EFFECTIVE=""
@@ -2405,6 +2418,10 @@ run_auth() {
 }
 
 trap 'finalize_glpictl_operation "$?"' EXIT
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+trap 'handle_signal HUP' HUP
+trap 'handle_signal QUIT' QUIT
 ensure_runtime_foundation "$ENVIRONMENT"
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
 OPERATION_LOG_INITIALIZED="true"
