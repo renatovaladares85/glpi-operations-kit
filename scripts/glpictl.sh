@@ -912,7 +912,7 @@ require_env_key() {
   if [[ -z "${value// }" ]]; then
     echo "Missing required config key: $key" >&2
     echo "Purpose: $purpose" >&2
-    echo "Used by: deploy apply app runtime rendering and nginx/php-fpm configuration" >&2
+    echo "Used by: deploy apply app runtime rendering and web server/php-fpm configuration" >&2
     exit 1
   fi
   echo "$value"
@@ -937,27 +937,27 @@ validate_app_runtime_contract() {
   local env_web_server_type rt_glpi_domain rt_fpm_socket rt_install_dir rt_http_port rt_web_server_type
 
   write_step "Validating app configuration contract from config/$ENVIRONMENT.env and runtime files"
-  env_glpi_domain="$(require_env_key "GLPI_DOMAIN" "public hostname used by nginx server_name and GLPI URL")"
+  env_glpi_domain="$(require_env_key "GLPI_DOMAIN" "public hostname used by web server virtual host and GLPI URL")"
   env_app_host="$(require_env_key "TOPOLOGY_APP_HOST" "application host endpoint used for IP-based access")"
-  env_http_port="$(require_env_key "NGINX_HTTP_PORT" "nginx listen port for HTTP entrypoint")"
-  env_fpm_socket="$(require_env_key "PHP_FPM_SOCKET" "php-fpm socket used by nginx fastcgi_pass")"
-  env_install_dir="$(require_env_key "PATH_GLPI_INSTALL_DIR" "GLPI installation root used by nginx document root")"
+  env_http_port="$(require_env_key "WEB_HTTP_PORT" "web server listen port for HTTP entrypoint")"
+  env_fpm_socket="$(require_env_key "PHP_FPM_SOCKET" "php-fpm socket used by web server fastcgi/handler integration")"
+  env_install_dir="$(require_env_key "PATH_GLPI_INSTALL_DIR" "GLPI installation root used by web server document root")"
   env_web_server_type="$(require_env_key "WEB_SERVER_TYPE" "web server selection for app installation (nginx|apache|lighttpd)")"
 
   rt_glpi_domain="$(require_runtime_key "glpi_domain" "rendered hostname consumed by app role")"
   rt_fpm_socket="$(require_runtime_key "glpi_php_fpm_socket" "rendered php-fpm socket consumed by app role")"
   rt_install_dir="$(require_runtime_key "glpi_install_dir" "rendered GLPI installation root consumed by app role")"
-  rt_http_port="$(require_runtime_key "nginx_http_port" "rendered nginx HTTP listen port consumed by app role")"
+  rt_http_port="$(require_runtime_key "web_http_port" "rendered web HTTP listen port consumed by app role")"
   rt_web_server_type="$(require_runtime_key "glpi_web_server_type" "rendered web server type consumed by app role")"
 
   [[ "$rt_glpi_domain" == "$env_glpi_domain" ]] || { echo "Runtime mismatch: glpi_domain='$rt_glpi_domain' differs from GLPI_DOMAIN='$env_glpi_domain'." >&2; exit 1; }
   [[ "$rt_fpm_socket" == "$env_fpm_socket" ]] || { echo "Runtime mismatch: glpi_php_fpm_socket='$rt_fpm_socket' differs from PHP_FPM_SOCKET='$env_fpm_socket'." >&2; exit 1; }
   [[ "$rt_install_dir" == "$env_install_dir" ]] || { echo "Runtime mismatch: glpi_install_dir='$rt_install_dir' differs from PATH_GLPI_INSTALL_DIR='$env_install_dir'." >&2; exit 1; }
-  [[ "$rt_http_port" == "$env_http_port" ]] || { echo "Runtime mismatch: nginx_http_port='$rt_http_port' differs from NGINX_HTTP_PORT='$env_http_port'." >&2; exit 1; }
+  [[ "$rt_http_port" == "$env_http_port" ]] || { echo "Runtime mismatch: web_http_port='$rt_http_port' differs from WEB_HTTP_PORT='$env_http_port'." >&2; exit 1; }
   [[ "$rt_web_server_type" == "$env_web_server_type" ]] || { echo "Runtime mismatch: glpi_web_server_type='$rt_web_server_type' differs from WEB_SERVER_TYPE='$env_web_server_type'." >&2; exit 1; }
 
-  echo "Config contract loaded: GLPI_DOMAIN=$env_glpi_domain, TOPOLOGY_APP_HOST=$env_app_host, NGINX_HTTP_PORT=$env_http_port, PHP_FPM_SOCKET=$env_fpm_socket, PATH_GLPI_INSTALL_DIR=$env_install_dir, WEB_SERVER_TYPE=$env_web_server_type"
-  echo "Runtime contract loaded: glpi_domain=$rt_glpi_domain, glpi_php_fpm_socket=$rt_fpm_socket, glpi_install_dir=$rt_install_dir, nginx_http_port=$rt_http_port, glpi_web_server_type=$rt_web_server_type"
+  echo "Config contract loaded: GLPI_DOMAIN=$env_glpi_domain, TOPOLOGY_APP_HOST=$env_app_host, WEB_HTTP_PORT=$env_http_port, PHP_FPM_SOCKET=$env_fpm_socket, PATH_GLPI_INSTALL_DIR=$env_install_dir, WEB_SERVER_TYPE=$env_web_server_type"
+  echo "Runtime contract loaded: glpi_domain=$rt_glpi_domain, glpi_php_fpm_socket=$rt_fpm_socket, glpi_install_dir=$rt_install_dir, web_http_port=$rt_http_port, glpi_web_server_type=$rt_web_server_type"
 }
 
 is_service_active() {

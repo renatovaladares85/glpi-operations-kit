@@ -408,7 +408,7 @@
 
 - name: Check GLPI HTTP response by hostname header
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ nginx_http_port }}/"
+    url: "http://127.0.0.1:{{ web_http_port }}/"
     headers:
       Host: "{{ glpi_domain }}"
     return_content: true
@@ -419,7 +419,7 @@
 
 - name: Check GLPI HTTP response by app IP header
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ nginx_http_port }}/"
+    url: "http://127.0.0.1:{{ web_http_port }}/"
     headers:
       Host: "{{ glpi_app_host }}"
     return_content: true
@@ -445,9 +445,9 @@
 - name: Resolve web check base URL for selected engine
   ansible.builtin.set_fact:
     glpi_web_check_scheme: "{{ 'https' if glpi_tls_mode != 'none' else 'http' }}"
-    glpi_web_check_port: "{{ nginx_https_port if glpi_tls_mode != 'none' else nginx_http_port }}"
+    glpi_web_check_port: "{{ web_https_port if glpi_tls_mode != 'none' else web_http_port }}"
     glpi_web_check_host_header: "{{ glpi_domain }}"
-    glpi_web_check_base_url: "{{ ('https' if glpi_tls_mode != 'none' else 'http') ~ '://127.0.0.1:' ~ ((nginx_https_port if glpi_tls_mode != 'none' else nginx_http_port) | string) }}"
+    glpi_web_check_base_url: "{{ ('https' if glpi_tls_mode != 'none' else 'http') ~ '://127.0.0.1:' ~ ((web_https_port if glpi_tls_mode != 'none' else web_http_port) | string) }}"
 
 - name: Check GLPI root endpoint for selected engine
   ansible.builtin.uri:

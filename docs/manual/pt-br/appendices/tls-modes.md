@@ -6,7 +6,7 @@ Este apêndice explica qual modo TLS escolher, que tipo de certificado solicitar
 
 | Modo | Permitido em `secure` | Permitido em `permissive` | Comportamento |
 |---|---|---|---|
-| `none` | somente quando `SECURITY_REQUIRE_HTTPS=false` e `SECURITY_REQUIRE_TLS=false` | sim, com warning/evidência quando política exigir TLS/HTTPS | HTTP na porta `NGINX_HTTP_PORT`. |
+| `none` | somente quando `SECURITY_REQUIRE_HTTPS=false` e `SECURITY_REQUIRE_TLS=false` | sim, com warning/evidência quando política exigir TLS/HTTPS | HTTP na porta `WEB_HTTP_PORT`. |
 | `self_signed` | permitido quando `SECURITY_REQUIRE_TLS=false` | sim | HTTPS com certificado autoassinado gerado localmente. |
 | `provided` | sim | sim | HTTPS com certificado de servidor fornecido pelo operador/CA. |
 

@@ -87,6 +87,14 @@ REQUIRED_PUBLIC_KEYS = {
         "purpose": "Defines which GLPI-compatible web server should be configured.",
         "consumer": "application role web server provisioning and templates",
     },
+    "WEB_HTTP_PORT": {
+        "purpose": "Defines the HTTP listen port for the selected web server.",
+        "consumer": "application role web routing checks and templates",
+    },
+    "WEB_HTTPS_PORT": {
+        "purpose": "Defines the HTTPS listen port for the selected web server.",
+        "consumer": "application role TLS checks and templates",
+    },
     "DATABASE_NAME": {
         "purpose": "Defines the GLPI database name.",
         "consumer": "database role",
@@ -180,8 +188,8 @@ DOTTED_KEY_MAP = {
     "php_fpm.service_name": "PHP_FPM_SERVICE_NAME",
     "php_fpm.socket": "PHP_FPM_SOCKET",
     "php_fpm.pm": "PHP_FPM_PM",
-    "nginx.http_port": "NGINX_HTTP_PORT",
-    "nginx.https_port": "NGINX_HTTPS_PORT",
+    "web.http_port": "WEB_HTTP_PORT",
+    "web.https_port": "WEB_HTTPS_PORT",
     "tls.mode": "TLS_MODE",
     "tls.common_name": "TLS_COMMON_NAME",
     "tls.certificate_path": "TLS_CERTIFICATE_PATH",
@@ -397,6 +405,14 @@ def ensure_required_keys(values: dict, execution_mode: str) -> None:
             require_value(values, key)
 
 
+def validate_no_legacy_web_port_keys(values: dict) -> None:
+    if "NGINX_HTTP_PORT" in values or "NGINX_HTTPS_PORT" in values:
+        fail(
+            "Legacy keys detected: NGINX_HTTP_PORT/NGINX_HTTPS_PORT. "
+            "Migrate to WEB_HTTP_PORT/WEB_HTTPS_PORT."
+        )
+
+
 def validate_url(value: str, *, https_only: bool = False) -> bool:
     raw = (value or "").strip()
     if not raw:
@@ -555,8 +571,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str) -> d
         "glpi_data_group": read_value(values, "GLPI_FILESYSTEM_GROUP", "www-data"),
         "glpi_php_fpm_service": read_value(values, "PHP_FPM_SERVICE_NAME", "php8.3-fpm"),
         "glpi_php_fpm_socket": read_value(values, "PHP_FPM_SOCKET", "/run/php/php8.3-fpm.sock"),
-        "nginx_http_port": as_int(read_value(values, "NGINX_HTTP_PORT", "80"), 80),
-        "nginx_https_port": as_int(read_value(values, "NGINX_HTTPS_PORT", "443"), 443),
+        "web_http_port": as_int(require_value(values, "WEB_HTTP_PORT"), 80),
+        "web_https_port": as_int(require_value(values, "WEB_HTTPS_PORT"), 443),
         "glpi_app_packages": app_packages,
         "glpi_upload_max_filesize": read_value(values, "GLPI_UPLOAD_MAX_FILESIZE", "32M"),
         "glpi_post_max_size": read_value(values, "GLPI_POST_MAX_SIZE", "32M"),
@@ -737,6 +753,7 @@ def main() -> None:
 
     config_path = Path(args.config)
     values = parse_env_file(config_path)
+    validate_no_legacy_web_port_keys(values)
 
     if args.mode == "get":
         if not args.key:
