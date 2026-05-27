@@ -78,6 +78,32 @@ print_post_execution_checks() {
   fi
 }
 
+print_failure_diagnostics() {
+  local summary_path log_path
+  summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
+  log_path="$(operation_log_path "$ENVIRONMENT" "$OPERATION_ID")"
+
+  echo "Failure diagnostics:" >&2
+  if [[ -f "$summary_path" ]]; then
+    echo "Execution summary content:" >&2
+    sed -E \
+      -e "s/(password|PASSWORD|MYSQL_PWD)(=|:)[^[:space:]']+/\1\2****/g" \
+      -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" \
+      "$summary_path" >&2 || true
+  else
+    echo "Execution summary file was not created." >&2
+  fi
+
+  if [[ -f "$log_path" ]]; then
+    echo "Last 80 log lines:" >&2
+    tail -n 80 "$log_path" | sed -E \
+      -e "s/(password|PASSWORD|MYSQL_PWD)(=|:)[^[:space:]']+/\1\2****/g" \
+      -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" >&2 || true
+  else
+    echo "Execution log file was not created." >&2
+  fi
+}
+
 finalize_glpictl_operation() {
   local exit_code="${1:-0}"
   if [[ "$FINAL_STATUS_EMITTED" == "true" ]]; then
@@ -103,6 +129,7 @@ finalize_glpictl_operation() {
     echo "FINAL STATUS: FAILED" >&2
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml" >&2
+    print_failure_diagnostics
     echo "END OF EXECUTION (FAILED)" >&2
   fi
 }
