@@ -39,11 +39,16 @@ bash scripts/bootstrap-permissions.sh
 | File | Purpose | Commit to Git? |
 |---|---|---|
 | `config/product.env` | Versioned product template. | Yes. Do not put real sensitive values. |
-| `config/<environment>.env` | Environment public config and some required deployment secrets. | Do not commit real environment copies. |
+| `config/<environment>.env` | Environment public config plus 3 deployment secrets (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`). | Do not commit real environment copies. |
 | `.runtime/<environment>/secrets.yml` | Runtime secrets, especially external auth. | Never. |
 | `.runtime/<environment>/public.runtime.yml` | Public runtime rendered by scripts. | Never. |
 | `.runtime/<environment>/evidence/` | Execution evidence. | Never, except sanitized audit packages outside Git. |
 | `.runtime/<environment>/backups/` | Domain snapshots/backups. | Never. |
+
+Secret flow note:
+
+- The 3 deployment secrets stored in `config/<environment>.env` are materialized by automation into `.runtime/<environment>/secrets.yml`.
+- External-auth secrets (`auth_saml_x509_certificate`, `ldap_bind_password`, `oidc_client_secret`) are runtime-only and must never be sourced from `config/<environment>.env`.
 
 To fill each `.env` key, use [Environment Configuration Field Guide](appendices/configuration-field-guide.md).
 

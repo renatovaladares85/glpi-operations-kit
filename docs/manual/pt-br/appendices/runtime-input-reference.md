@@ -4,7 +4,7 @@ Este apêndice explica como os dados de configuração e runtime circulam no pro
 
 ## Entrada pública versus segredo
 
-Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos obrigatórios de deploy atualmente lidos desse arquivo são materializados em `.runtime/<environment>/secrets.yml`; segredos de autenticação externa devem permanecer somente em `.runtime/<environment>/secrets.yml`.
+Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os 3 segredos de deploy lidos desse arquivo (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`) são materializados em `.runtime/<environment>/secrets.yml`; segredos de autenticação externa são runtime-only e devem permanecer somente em `.runtime/<environment>/secrets.yml`.
 
 Comportamento baseline do template:
 

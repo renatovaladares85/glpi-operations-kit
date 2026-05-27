@@ -39,11 +39,16 @@ bash scripts/bootstrap-permissions.sh
 | Arquivo | Finalidade | Deve ir para Git? |
 |---|---|---|
 | `config/product.env` | Template versionado do produto. | Sim. Não coloque valores reais sensíveis. |
-| `config/<environment>.env` | Configuração pública e alguns segredos obrigatórios do ambiente. | Não commitar cópias reais de ambiente. |
+| `config/<environment>.env` | Configuração pública do ambiente mais 3 segredos de deploy (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`). | Não commitar cópias reais de ambiente. |
 | `.runtime/<environment>/secrets.yml` | Segredos runtime, principalmente auth externa. | Nunca. |
 | `.runtime/<environment>/public.runtime.yml` | Renderização pública gerada pelos scripts. | Nunca. |
 | `.runtime/<environment>/evidence/` | Evidências de execução. | Nunca, salvo pacote auditado e sanitizado fora do Git. |
 | `.runtime/<environment>/backups/` | Snapshots/backup por domínio. | Nunca. |
+
+Nota de fluxo de segredos:
+
+- Os 3 segredos de deploy armazenados em `config/<environment>.env` são materializados automaticamente em `.runtime/<environment>/secrets.yml`.
+- Segredos de auth externa (`auth_saml_x509_certificate`, `ldap_bind_password`, `oidc_client_secret`) são runtime-only e nunca devem ser lidos de `config/<environment>.env`.
 
 Para preencher cada chave do `.env`, use [Guia de Preenchimento do Ambiente](appendices/configuration-field-guide.md).
 

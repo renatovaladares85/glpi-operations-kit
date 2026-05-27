@@ -4,7 +4,7 @@ This appendix explains how configuration and runtime data flow through the proje
 
 ## Public vs secret input
 
-Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment secrets currently read from that file are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets must stay only in `.runtime/<environment>/secrets.yml`.
+Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. The 3 deployment secrets read from that file (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`) are materialized into `.runtime/<environment>/secrets.yml`; external-auth secrets are runtime-only and must stay only in `.runtime/<environment>/secrets.yml`.
 
 Template baseline behavior:
 
