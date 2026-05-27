@@ -536,6 +536,20 @@
     validate_certs: false
   changed_when: false
 
+- name: Validate PHP timezone default when timezone support is enabled
+  ansible.builtin.command: php -r 'echo date_default_timezone_get();'
+  register: glpi_php_timezone_default
+  changed_when: false
+  when: glpi_timezone_support_enabled | default(false) | bool
+
+- name: Assert PHP timezone matches OPERATIONS_TIMEZONE when timezone support is enabled
+  ansible.builtin.assert:
+    that:
+      - (glpi_php_timezone_default.stdout | trim) == timezone_name
+    fail_msg: "PHP timezone mismatch. Expected '{{ timezone_name }}' but got '{{ glpi_php_timezone_default.stdout | trim }}'."
+  changed_when: false
+  when: glpi_timezone_support_enabled | default(false) | bool
+
 - name: Validate APP to DB connectivity using GLPI DB user
   ansible.builtin.command: >-
     mysql --protocol=TCP

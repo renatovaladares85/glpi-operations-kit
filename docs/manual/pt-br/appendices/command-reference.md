@@ -149,6 +149,8 @@ bash scripts/release-readiness.sh staging
 ./scripts/glpictl.sh <env> ops cert check
 ./scripts/glpictl.sh <env> ops cert renew
 ./scripts/glpictl.sh <env> ops audit check
+./scripts/glpictl.sh <env> ops timezone check
+./scripts/glpictl.sh <env> ops timezone apply
 ./scripts/glpictl.sh <env> ops resume
 ./scripts/glpictl.sh <env> ops rollback
 ./scripts/glpictl.sh <env> audit check
@@ -167,6 +169,8 @@ Exemplo com valores preenchidos:
 ./scripts/glpictl.sh staging ops cert check
 ./scripts/glpictl.sh staging ops cert renew
 ./scripts/glpictl.sh staging ops audit check
+./scripts/glpictl.sh staging ops timezone check
+./scripts/glpictl.sh staging ops timezone apply
 ./scripts/glpictl.sh staging ops resume
 ./scripts/glpictl.sh staging ops rollback
 ./scripts/glpictl.sh staging audit check

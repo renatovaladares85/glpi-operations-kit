@@ -27,6 +27,7 @@ Validation does not check only global mandatory keys. It also checks required ke
 - `EXECUTION_MODE=ssh`: `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and valid.
 - `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB host Linux operations are disabled; DB validation uses direct MySQL TCP connectivity.
+- `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates PHP/system timezone and DB timezone readiness according to `GLPI_TIMEZONE_DB_MODE`.
 - External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): `SSO_PUBLIC_URL` becomes mandatory when URL enforcement is active.
 - SAML/OIDC enabled: `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
 - `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
@@ -64,6 +65,7 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `SECURITY_*` | Secure/permissive policy gates. | Manual field guide. |
 | `PATH_*` | Secure GLPI filesystem layout outside webroot. | Manual field guide. |
 | `OPERATIONS_*` | Timezone, cron, operator group, default security mode. | Manual field guide. |
+| `GLPI_TIMEZONE_*` | Optional GLPI timezone support and DB timezone workflow. | Manual field guide. |
 | `RESOURCE_PROFILE_*` | PHP-FPM and MariaDB tuning profiles for `small`, `medium`, `large`. | Manual field guide. |
 
 ## High-risk decisions

@@ -2,6 +2,9 @@ memory_limit = {{ glpi_memory_limit }}
 max_execution_time = {{ glpi_max_execution_time }}
 upload_max_filesize = {{ glpi_upload_max_filesize }}
 post_max_size = {{ glpi_post_max_size }}
+{% if glpi_timezone_support_enabled | default(false) | bool %}
+date.timezone = {{ timezone_name }}
+{% endif %}
 session.cookie_secure = {{ 'On' if glpi_tls_mode != 'none' else 'Off' }}
 session.cookie_httponly = On
 session.cookie_samesite = Lax

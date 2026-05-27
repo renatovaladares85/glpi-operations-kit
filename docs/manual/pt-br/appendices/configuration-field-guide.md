@@ -213,6 +213,9 @@ Para certificado `provided`, solicite um certificado de servidor HTTPS, não de 
 | Chave | O que colocar | Como obter ou definir | Validação comum |
 |---|---|---|---|
 | `OPERATIONS_TIMEZONE` | Timezone IANA. | Exemplo `America/Sao_Paulo`. | Use valor de `timedatectl list-timezones`. |
+| `GLPI_TIMEZONE_SUPPORT_ENABLED` | Habilita o fluxo de readiness de timezone do GLPI. | `true` para habilitar checks/aplicação de timezone em PHP + BD. | Padrão `false`. |
+| `GLPI_TIMEZONE_DB_MODE` | Controla o fluxo de timezone na camada de BD. | `disabled`, `validate`, `apply`. | Em BD gerenciado, padrão efetivo é validate quando o suporte está habilitado. |
+| `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Grant legado opcional para listagem de timezone no BD. | `true` apenas para compatibilidade antiga. | Padrão `false` (recomendado para GLPI moderno). |
 | `OPERATIONS_GLPI_CRON_SCHEDULE` | Agenda cron operacional. | Normalmente igual a `GLPI_CRON_SCHEDULE`. | Precisa estar entre aspas. |
 | `OPERATIONS_REQUIRED_OPS_GROUP` | Grupo Linux dos operadores. | Padrão `glpiops`. | Operador deve pertencer ao grupo. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure` ou `permissive`. | Use `secure` por padrão. | `permissive` exige justificativa. |

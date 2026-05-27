@@ -14,6 +14,7 @@ AUTH_MODES = {"local", "ldap", "saml", "oidc"}
 TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
+GLPI_TIMEZONE_DB_MODES = {"disabled", "validate", "apply"}
 
 DEFAULT_GLPI_APP_PACKAGES = [
     "php-fpm",
@@ -256,6 +257,9 @@ DOTTED_KEY_MAP = {
     "paths.glpi_plugin_dir": "PATH_GLPI_PLUGIN_DIR",
     "paths.glpi_log_dir": "PATH_GLPI_LOG_DIR",
     "operations.timezone": "OPERATIONS_TIMEZONE",
+    "operations.glpi_timezone_support_enabled": "GLPI_TIMEZONE_SUPPORT_ENABLED",
+    "operations.glpi_timezone_db_mode": "GLPI_TIMEZONE_DB_MODE",
+    "operations.glpi_timezone_db_legacy_grant": "GLPI_TIMEZONE_DB_LEGACY_GRANT",
     "operations.glpi_cron_schedule": "OPERATIONS_GLPI_CRON_SCHEDULE",
     "operations.required_ops_group": "OPERATIONS_REQUIRED_OPS_GROUP",
     "operations.security_mode_default": "OPERATIONS_SECURITY_MODE_DEFAULT",
@@ -281,6 +285,8 @@ BOOL_KEYS = {
     "SECURITY_REQUIRE_SSO",
     "SECURITY_REQUIRE_PROMOTION_GATE",
     "SECURITY_REQUIRE_ORDERED_EXECUTION",
+    "GLPI_TIMEZONE_SUPPORT_ENABLED",
+    "GLPI_TIMEZONE_DB_LEGACY_GRANT",
 }
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -447,6 +453,9 @@ def validate_feature_contract(values: dict, execution_mode: str, db_deployment_m
 
     if db_deployment_mode not in DB_DEPLOYMENT_MODES:
         fail("DATABASE_DEPLOYMENT_MODE must be one of: self_hosted, managed.")
+    timezone_db_mode = read_value(values, "GLPI_TIMEZONE_DB_MODE", "disabled").strip().lower() or "disabled"
+    if timezone_db_mode not in GLPI_TIMEZONE_DB_MODES:
+        fail("GLPI_TIMEZONE_DB_MODE must be one of: disabled, validate, apply.")
 
     tls_mode = require_value(values, "TLS_MODE").strip().lower()
     if tls_mode not in TLS_MODES:
@@ -664,6 +673,9 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "mariadb_slow_query_log": as_int(profile_value(values, active_profile_name, "MARIADB_SLOW_QUERY_LOG", "1"), 1),
         "mariadb_long_query_time": as_int(profile_value(values, active_profile_name, "MARIADB_LONG_QUERY_TIME", "2"), 2),
         "timezone_name": require_value(values, "OPERATIONS_TIMEZONE"),
+        "glpi_timezone_support_enabled": as_bool(read_value(values, "GLPI_TIMEZONE_SUPPORT_ENABLED", "false"), False),
+        "glpi_timezone_db_mode": read_value(values, "GLPI_TIMEZONE_DB_MODE", "disabled").strip().lower() or "disabled",
+        "glpi_timezone_db_legacy_grant": as_bool(read_value(values, "GLPI_TIMEZONE_DB_LEGACY_GRANT", "false"), False),
         "db_access_mode": db_access_mode,
         "db_grant_host": db_grant_host,
         "db_firewall_open": db_firewall_open,

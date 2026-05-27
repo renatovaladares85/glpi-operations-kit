@@ -213,6 +213,9 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
 | `OPERATIONS_TIMEZONE` | IANA timezone. | Example `America/Sao_Paulo`. | Use `timedatectl list-timezones`. |
+| `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables GLPI timezone readiness workflow. | `true` to enable checks/apply logic for PHP + DB timezone readiness. | Default `false`. |
+| `GLPI_TIMEZONE_DB_MODE` | Controls DB timezone workflow. | `disabled`, `validate`, `apply`. | For managed DB, effective default is validate when support is enabled. |
+| `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Optional legacy DB grant for timezone table listing. | `true` only for old compatibility requirements. | Default `false` (recommended for modern GLPI). |
 | `OPERATIONS_GLPI_CRON_SCHEDULE` | Operational cron schedule. | Usually same as `GLPI_CRON_SCHEDULE`. | Must be quoted. |
 | `OPERATIONS_REQUIRED_OPS_GROUP` | Linux operator group. | Default `glpiops`. | Operator must belong to this group. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure` or `permissive`. | Use `secure` by default. | `permissive` requires justification. |

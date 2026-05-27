@@ -49,6 +49,10 @@ MANAGED_DB_USER=""
 MANAGED_DB_GRANT_HOST=""
 MANAGED_DB_PASSWORD=""
 MANAGED_DB_ADMIN_PASSWORD=""
+MANAGED_DB_TIMEZONE=""
+MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="false"
+MANAGED_DB_TIMEZONE_MODE="disabled"
+MANAGED_DB_TIMEZONE_LEGACY_GRANT="false"
 
 print_post_execution_checks() {
   echo "Validation commands (run on target host):"
@@ -407,6 +411,11 @@ domain_action_requires_remote_app_snapshot() {
       esac
       ;;
     ops/cert|ops/resume) return 0 ;;
+    ops/timezone)
+      if [[ "$target_name" == "apply" ]]; then
+        return 0
+      fi
+      ;;
   esac
   return 1
 }
@@ -429,6 +438,11 @@ domain_action_requires_remote_db_snapshot() {
       ;;
     ops/users)
       if [[ "$scope_name" == "db" ]]; then
+        return 0
+      fi
+      ;;
+    ops/timezone)
+      if [[ "$target_name" == "apply" ]] && ! is_managed_database_mode; then
         return 0
       fi
       ;;
@@ -1250,7 +1264,7 @@ is_mutating_operation() {
     certify/check|certify/prepare|certify/apply|certify/post-check|certify/rollback|certify/run|\
     tls/check|tls/prepare|tls/apply|tls/post-check|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
     promote/check|promote/prepare|promote/apply|promote/post-check|promote/rollback|promote/base|promote/app|promote/db|promote/monitoring|promote/backup|promote/all|\
-    ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|\
+    ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|ops/timezone|\
     audit/check|audit/prepare|audit/rollback|\
     auth/check|auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
     *) return 1 ;;
@@ -1485,11 +1499,25 @@ load_managed_db_runtime_contract() {
   MANAGED_DB_NAME="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_name" || true)"
   MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
   MANAGED_DB_GRANT_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "db_grant_host" || true)"
+  MANAGED_DB_TIMEZONE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "timezone_name" || true)"
   MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
   MANAGED_DB_ADMIN_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true)"
+  MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_support_enabled" || true)" "false")"
+  MANAGED_DB_TIMEZONE_MODE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_mode" || true)"
+  MANAGED_DB_TIMEZONE_LEGACY_GRANT="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_legacy_grant" || true)" "false")"
 
   [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
   [[ -z "${MANAGED_DB_GRANT_HOST// }" ]] && MANAGED_DB_GRANT_HOST="%"
+  [[ -z "${MANAGED_DB_TIMEZONE// }" ]] && MANAGED_DB_TIMEZONE="UTC"
+  [[ -z "${MANAGED_DB_TIMEZONE_MODE// }" ]] && MANAGED_DB_TIMEZONE_MODE="disabled"
+  MANAGED_DB_TIMEZONE_MODE="${MANAGED_DB_TIMEZONE_MODE,,}"
+  case "$MANAGED_DB_TIMEZONE_MODE" in
+    disabled|validate|apply) ;;
+    *)
+      echo "Managed DB validation cannot run: invalid glpi_timezone_db_mode='${MANAGED_DB_TIMEZONE_MODE}'." >&2
+      return 1
+      ;;
+  esac
 
   if [[ -z "${MANAGED_DB_HOST// }" ]]; then
     echo "Managed DB validation cannot run: missing runtime key glpi_db_host." >&2
@@ -1508,6 +1536,15 @@ load_managed_db_runtime_contract() {
     return 1
   fi
   return 0
+}
+
+effective_managed_timezone_db_mode() {
+  local mode="$MANAGED_DB_TIMEZONE_MODE"
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" == "true" && "$mode" == "disabled" ]]; then
+    echo "validate"
+    return 0
+  fi
+  echo "$mode"
 }
 
 sql_escape_literal() {
@@ -1641,6 +1678,146 @@ run_managed_db_select1_check() {
   return 1
 }
 
+run_managed_db_timezone_check_attempt() {
+  local check_label="$1"
+  local db_user="$2"
+  local db_password="$3"
+  local sql_query output
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped sql_escaped
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+  sql_query="SELECT CASE WHEN CONVERT_TZ('2000-01-01 00:00:00','UTC','${MANAGED_DB_TIMEZONE}') IS NULL THEN 0 ELSE 1 END AS tz_ready;"
+  sql_escaped="$(shell_escape_single_quotes "$sql_query")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --database='$(shell_escape_single_quotes "$MANAGED_DB_NAME")' --batch --skip-column-names --silent --execute='${sql_escaped}' | grep -qx '1'" -o 2>&1)"; then
+    echo "Managed DB timezone readiness (${check_label}, user=${db_user}): PASS"
+    return 0
+  fi
+
+  echo "Managed DB timezone readiness (${check_label}, user=${db_user}): FAIL"
+  if [[ -n "${output// }" ]]; then
+    echo "  Diagnostic output:"
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+run_managed_db_timezone_check() {
+  local check_label="$1"
+
+  if run_managed_db_timezone_check_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"; then
+    return 0
+  fi
+  if [[ -n "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    if run_managed_db_timezone_check_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+    if run_managed_db_timezone_check_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+apply_managed_db_timezone_tables_attempt() {
+  local db_user="$1"
+  local db_password="$2"
+  local output
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; tz_loader=\$(command -v mariadb-tzinfo-to-sql || command -v mysql_tzinfo_to_sql || true); if [[ -z \"\$tz_loader\" ]]; then exit 2; fi; \"\$tz_loader\" /usr/share/zoneinfo | MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' mysql" -o 2>&1)"; then
+    return 0
+  fi
+  if [[ -n "${output// }" ]]; then
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+apply_managed_db_timezone_tables_if_configured() {
+  local tz_mode
+  tz_mode="$(effective_managed_timezone_db_mode)"
+
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" != "true" ]]; then
+    return 0
+  fi
+  if [[ "$tz_mode" != "apply" ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    record_execution_warning "Managed DB timezone apply mode requested but no interactive terminal is available; DB timezone mutation was skipped."
+    return 0
+  fi
+  if [[ -z "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    record_execution_warning "Managed DB timezone apply mode requested but DATABASE_MANAGED_ADMIN_PASSWORD is missing; DB timezone mutation was skipped."
+    return 0
+  fi
+  if ! prompt_yes_no "Managed DB timezone mode is apply. Execute timezone-table load on managed DB now (this may affect other databases in the same instance)?"; then
+    record_execution_warning "Operator skipped managed DB timezone-table load."
+    return 0
+  fi
+
+  write_step "Applying managed DB timezone tables from APP host context"
+  if apply_managed_db_timezone_tables_attempt "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
+    echo "Managed DB timezone-table load applied using admin user=root."
+  elif apply_managed_db_timezone_tables_attempt "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
+    echo "Managed DB timezone-table load applied using admin user=admin."
+  else
+    record_execution_warning "Managed DB timezone-table load failed for users root/admin."
+    return 0
+  fi
+
+  if [[ "$MANAGED_DB_TIMEZONE_LEGACY_GRANT" == "true" ]]; then
+    local user_sql host_sql grant_sql
+    user_sql="$(sql_escape_literal "$MANAGED_DB_USER")"
+    host_sql="$(sql_escape_literal "$MANAGED_DB_GRANT_HOST")"
+    grant_sql="GRANT SELECT ON mysql.time_zone_name TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
+    if run_managed_admin_sql "timezone-legacy-grant" "$grant_sql"; then
+      echo "Managed DB timezone legacy grant applied for '${MANAGED_DB_USER}'@'${MANAGED_DB_GRANT_HOST}'."
+    else
+      record_execution_warning "Managed DB timezone legacy grant failed for '${MANAGED_DB_USER}'@'${MANAGED_DB_GRANT_HOST}'."
+    fi
+  fi
+}
+
+run_managed_db_timezone_validation_gate() {
+  local tz_mode
+  tz_mode="$(effective_managed_timezone_db_mode)"
+
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" != "true" ]]; then
+    echo "Managed DB timezone gate: skipped (GLPI_TIMEZONE_SUPPORT_ENABLED=false)."
+    return 0
+  fi
+  if [[ "$tz_mode" == "disabled" ]]; then
+    echo "Managed DB timezone gate: skipped (GLPI_TIMEZONE_DB_MODE=disabled)."
+    return 0
+  fi
+
+  write_step "Validating managed DB timezone readiness"
+  echo "Managed DB timezone mode (effective): ${tz_mode}"
+  echo "Managed DB timezone target: ${MANAGED_DB_TIMEZONE}"
+  if run_managed_db_timezone_check "initial"; then
+    return 0
+  fi
+
+  apply_managed_db_timezone_tables_if_configured || true
+  write_step "Re-trying managed DB timezone readiness validation"
+  if run_managed_db_timezone_check "retry"; then
+    return 0
+  fi
+
+  record_execution_warning "Managed DB timezone readiness validation failed. Timezone support may be incomplete in the database layer."
+  return 0
+}
+
 run_managed_db_guided_check() {
   local check_label="$1"
   local check_command="$2"
@@ -1751,6 +1928,7 @@ handle_managed_db_validation_after_app_apply() {
   fi
 
   if run_managed_db_select1_check "initial"; then
+    run_managed_db_timezone_validation_gate
     return 0
   fi
 
@@ -1758,6 +1936,7 @@ handle_managed_db_validation_after_app_apply() {
 
   write_step "Re-trying managed DB connectivity after guided checks"
   if run_managed_db_select1_check "retry"; then
+    run_managed_db_timezone_validation_gate
     return 0
   fi
 
@@ -2322,8 +2501,26 @@ run_ops() {
       bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
       return
       ;;
+    timezone)
+      create_domain_backup_snapshot "ops" "timezone"
+      local timezone_action
+      timezone_action="${TARGET:-check}"
+      case "$timezone_action" in
+        check|apply) ;;
+        *)
+          echo "Unsupported ops timezone action: ${timezone_action} (expected check|apply)" >&2
+          exit 1
+          ;;
+      esac
+      ensure_runtime_inputs_if_missing "true"
+      if [[ "$timezone_action" == "apply" ]]; then
+        create_remote_domain_backup_snapshot "ops" "timezone" "$timezone_action" "$SCOPE"
+      fi
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" timezone "$ENVIRONMENT" "$timezone_action"
+      return
+      ;;
     *)
-      echo "Unsupported ops action: $ACTION (expected check|prepare|rollback|users|cert|audit|resume)" >&2
+      echo "Unsupported ops action: $ACTION (expected check|prepare|rollback|users|cert|audit|resume|timezone)" >&2
       exit 1
       ;;
   esac

@@ -61,6 +61,7 @@ The configuration keys are grouped by operational domain:
 - `SECURITY_*`: policy flags and controls
 - `PATH_*`: secure filesystem layout
 - `OPERATIONS_*`: timezone, cron, ops group, security mode default
+- `GLPI_TIMEZONE_*`: optional GLPI timezone support controls (PHP + DB readiness workflow)
 - `RESOURCE_PROFILE_*`: size profile selection and tuning for `small|medium|large`
 
 ## High-impact keys
@@ -79,6 +80,9 @@ The configuration keys are grouped by operational domain:
 | `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile used by runtime rendering. | `small`, `medium`, `large` |
 | `NETWORK_DATABASE_ACCESS_MODE` | Selects restricted or open DB access behavior. | `restricted`, `open` |
 | `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Stores DB source hosts for restricted mode. | CSV host list or empty |
+| `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables timezone readiness workflow (PHP + DB checks). | `true`, `false` |
+| `GLPI_TIMEZONE_DB_MODE` | Defines DB timezone behavior for GLPI timezone support. | `disabled`, `validate`, `apply` |
+| `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Enables optional legacy grant on `mysql.time_zone_name`. | `true`, `false` |
 | `MONITORING_*_JSON` | Centralizes labels, thresholds, scrape profiles, alert routes. | one-line JSON objects |
 
 Notes for DB access controls:
@@ -94,6 +98,7 @@ Configuration validation is scenario-aware and fails early when a feature is ena
 
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
+- `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
 - External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): requires coherent auth mode and `SSO_PUBLIC_URL` when URL enforcement is enabled.
 - SAML/OIDC enabled: requires `SSO_PUBLIC_URL` with `https://` and blocks `TLS_MODE=none`.
