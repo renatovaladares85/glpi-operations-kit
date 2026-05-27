@@ -46,6 +46,7 @@ MANAGED_DB_HOST=""
 MANAGED_DB_PORT=""
 MANAGED_DB_USER=""
 MANAGED_DB_PASSWORD=""
+MANAGED_DB_ADMIN_PASSWORD=""
 
 print_post_execution_checks() {
   echo "Validation commands (run on target host):"
@@ -112,6 +113,8 @@ mask_sensitive_stream() {
   sed -E \
     -e "s/(MYSQL_PWD=)'[^']*'/\1'****'/g" \
     -e "s/(glpi_db_password:[[:space:]]*)'.*'/\1'****'/g" \
+    -e "s/(glpi_db_managed_admin_password:[[:space:]]*)'.*'/\1'****'/g" \
+    -e "s/(DATABASE_MANAGED_ADMIN_PASSWORD=)[^[:space:]]+/\1****/g" \
     -e "s/(DATABASE_PASSWORD=)[^[:space:]]+/\1****/g"
 }
 
@@ -1471,6 +1474,7 @@ load_managed_db_runtime_contract() {
   MANAGED_DB_PORT="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
   MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
   MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+  MANAGED_DB_ADMIN_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true)"
 
   [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
 
@@ -1489,26 +1493,54 @@ load_managed_db_runtime_contract() {
   return 0
 }
 
-run_managed_db_select1_check() {
+run_managed_db_select1_attempt() {
   local check_label="$1"
+  local db_user="$2"
+  local db_password="$3"
   local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
   local output
 
   db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
   db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
-  db_user_escaped="$(shell_escape_single_quotes "$MANAGED_DB_USER")"
-  db_password_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PASSWORD")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
 
   if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o 2>&1)"; then
-    echo "Managed DB connectivity (${check_label}): PASS"
+    echo "Managed DB connectivity (${check_label}, user=${db_user}): PASS"
     return 0
   fi
 
-  echo "Managed DB connectivity (${check_label}): FAIL"
+  echo "Managed DB connectivity (${check_label}, user=${db_user}): FAIL"
   if [[ -n "${output// }" ]]; then
     echo "  Diagnostic output:"
     printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
   fi
+  return 1
+}
+
+run_managed_db_select1_check() {
+  local check_label="$1"
+  local fallback_password_available="false"
+
+  if [[ -n "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    fallback_password_available="true"
+  fi
+
+  if run_managed_db_select1_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"; then
+    return 0
+  fi
+
+  if [[ "$fallback_password_available" == "true" ]]; then
+    if run_managed_db_select1_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+    if run_managed_db_select1_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+  else
+    echo "Managed DB connectivity (${check_label}): skipping root/admin fallback (DATABASE_MANAGED_ADMIN_PASSWORD not configured)."
+  fi
+
   return 1
 }
 

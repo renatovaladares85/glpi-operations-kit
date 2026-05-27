@@ -38,6 +38,7 @@ Deployment secrets currently read from `config/<environment>.env` and materializ
 - `DATABASE_PASSWORD`
 - `DATABASE_ROOT_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
+- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, used as managed-mode fallback credential for `root`/`admin` connectivity checks)
 
 External-auth secrets are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
 
