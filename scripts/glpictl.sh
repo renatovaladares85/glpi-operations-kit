@@ -39,6 +39,7 @@ PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
 OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
 OPERATION_STATUS="completed"
+OPERATION_LOG_INITIALIZED="false"
 
 print_post_execution_checks() {
   echo "Validation commands (run on target host):"
@@ -83,7 +84,9 @@ finalize_glpictl_operation() {
     OPERATION_STATUS="failed"
     remediation_hint="Review console output and .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
   fi
-  complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
+  if [[ "$OPERATION_LOG_INITIALIZED" == "true" ]]; then
+    complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
+  fi
   if [[ "$exit_code" -eq 0 ]]; then
     echo "FINAL STATUS: SUCCESS"
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
@@ -2401,12 +2404,13 @@ run_auth() {
   echo "Auth action '$auth_action' completed."
 }
 
+trap 'finalize_glpictl_operation "$?"' EXIT
+ensure_runtime_foundation "$ENVIRONMENT"
+begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
+OPERATION_LOG_INITIALIZED="true"
 resolve_security_mode
 resolve_execution_contract
 resolve_execution_overrides
-ensure_runtime_foundation "$ENVIRONMENT"
-begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$0 $*"
-trap 'finalize_glpictl_operation "$?"' EXIT
 bootstrap_require_privileged="true"
 if [[ "$DOMAIN" == "deploy" && "$ACTION" == "check" ]]; then
   bootstrap_require_privileged="false"
