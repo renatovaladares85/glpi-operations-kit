@@ -1416,6 +1416,31 @@ validate_managed_db_connectivity_from_app() {
   echo "Managed DB connectivity validation: PASS"
 }
 
+print_operation_log_tail() {
+  local log_path
+  log_path="$(operation_log_path "$ENVIRONMENT" "$OPERATION_ID")"
+  if [[ -f "$log_path" ]]; then
+    echo "Last log lines for this execution:" >&2
+    tail -n 60 "$log_path" >&2 || true
+  fi
+}
+
+invoke_ansible_or_fail() {
+  local failure_context="$1"
+  local environment="$2"
+  local tags="$3"
+  shift 3
+
+  if invoke_ansible "$environment" "$tags" "$@"; then
+    return 0
+  fi
+
+  echo "Ansible execution failed during: ${failure_context}" >&2
+  echo "Ansible tags: ${tags:-all}" >&2
+  print_operation_log_tail
+  exit 1
+}
+
 ensure_runtime_inputs_if_missing() {
   local include_secrets="${1:-true}"
   write_step "Loading environment config from $CONFIG_PATH"
@@ -1554,7 +1579,7 @@ run_deploy() {
       if [[ "$run_as_deploy_domain" == "true" ]]; then
         create_remote_domain_backup_snapshot "deploy" "apply" "$target" "$SCOPE"
       fi
-      invoke_ansible "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
+      invoke_ansible_or_fail "deploy ${mode} ${target}" "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
       if is_managed_database_mode && [[ "$target" == "app" || "$target" == "all" ]]; then
         validate_managed_db_connectivity_from_app
       fi
@@ -1588,7 +1613,7 @@ run_deploy() {
           exit 1
           ;;
       esac
-      invoke_ansible "$ENVIRONMENT" "$post_check_tags" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
+      invoke_ansible_or_fail "deploy ${mode} ${target}" "$ENVIRONMENT" "$post_check_tags" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
       if [[ "$target" == "app" || "$target" == "all" ]]; then
         print_web_engine_postcheck_summary
       fi
