@@ -1386,6 +1386,36 @@ enforce_promotion_gate_policy_if_required() {
   fi
 }
 
+validate_managed_db_connectivity_from_app() {
+  local db_host db_port db_user db_password
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+
+  if ! is_managed_database_mode; then
+    return 0
+  fi
+
+  db_host="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
+  db_port="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
+  db_user="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
+  db_password="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+
+  [[ -z "${db_host// }" ]] && { echo "Missing runtime key: glpi_db_host" >&2; exit 1; }
+  [[ -z "${db_port// }" ]] && db_port="3306"
+  [[ -z "${db_user// }" ]] && { echo "Missing runtime key: glpi_db_user" >&2; exit 1; }
+  [[ -z "${db_password// }" ]] && { echo "Missing runtime secret: glpi_db_password" >&2; exit 1; }
+
+  write_step "Validating managed DB connectivity from APP host (MySQL TCP)"
+  echo "Managed DB target: host=${db_host} port=${db_port} user=${db_user}"
+
+  db_host_escaped="$(shell_escape_single_quotes "$db_host")"
+  db_port_escaped="$(shell_escape_single_quotes "$db_port")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --execute='SELECT 1;'" -o >/dev/null
+  echo "Managed DB connectivity validation: PASS"
+}
+
 ensure_runtime_inputs_if_missing() {
   local include_secrets="${1:-true}"
   write_step "Loading environment config from $CONFIG_PATH"
@@ -1525,6 +1555,9 @@ run_deploy() {
         create_remote_domain_backup_snapshot "deploy" "apply" "$target" "$SCOPE"
       fi
       invoke_ansible "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
+      if is_managed_database_mode && [[ "$target" == "app" || "$target" == "all" ]]; then
+        validate_managed_db_connectivity_from_app
+      fi
       mark_apply_sequence "$mode" "$target"
       ;;
     post-check)
