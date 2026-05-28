@@ -26,9 +26,8 @@ For operator-oriented field-by-field guidance, use:
 1. Operator creates `config/<environment>.env` from `config/product.env`.
 2. Scripts load `config/<environment>.env` automatically.
 3. Scripts render `.runtime/<environment>/public.runtime.yml` and `.runtime/<environment>/inventory.runtime.yml`.
-4. Deployment secrets currently read from the environment file are materialized into `.runtime/<environment>/secrets.yml` with restricted permissions.
-5. External-auth secrets must be provided only in `.runtime/<environment>/secrets.yml`.
-6. Ansible consumes `public.runtime.yml`, `overrides.runtime.yml`, and `secrets.yml`.
+4. Deployment secrets read from the environment file are materialized into `.runtime/<environment>/secrets.yml` with restricted permissions.
+5. Ansible consumes `public.runtime.yml`, `overrides.runtime.yml`, and `secrets.yml`.
 
 ## Runtime precedence
 
@@ -38,16 +37,7 @@ Runtime values are merged in this order:
 2. `overrides.runtime.yml`
 3. `secrets.yml`
 
-Operationally:
-
-- public defaults and customer values stay in `config/<environment>.env`;
-- mutable runtime adjustments stay in `.runtime/<environment>/overrides.runtime.yml`;
-- secrets stay in `.runtime/<environment>/secrets.yml` at execution time;
-- `.runtime/` is never versioned.
-
 ## Contract groups
-
-The configuration keys are grouped by operational domain:
 
 - `PRODUCT_*`, `CUSTOMER_*`, `ENVIRONMENT_*`: product/customer metadata
 - `EXECUTION_*`, `TOPOLOGY_*`: orchestration model and host scope
@@ -57,62 +47,48 @@ The configuration keys are grouped by operational domain:
 - `TLS_*`: TLS mode and certificate paths
 - `BACKUP_*`: backup base directory and retention
 - `MONITORING_*`, `ALERTING_*`: exporter toggles, labels, thresholds, routes
-- `AUTH_*`, `SSO_*`: optional authentication and SSO preparation/validation
 - `SECURITY_*`: policy flags and controls
 - `PATH_*`: secure filesystem layout
 - `OPERATIONS_*`: timezone, cron, ops group, security mode default
+- `GLPI_TIMEZONE_*`: optional GLPI timezone support controls (PHP + DB readiness workflow)
 - `RESOURCE_PROFILE_*`: size profile selection and tuning for `small|medium|large`
+
+Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ignored by execution flows.
 
 ## High-impact keys
 
 | Key | Why it matters | Typical values |
 |---|---|---|
-| `EXECUTION_MODE` | Defines whether orchestration runs locally on each host or remotely by SSH. | `local`, `ssh` |
+| `EXECUTION_MODE` | Defines local or SSH orchestration model. | `local`, `ssh` |
 | `EXECUTION_HOST_ROLE_DEFAULT` | Prevents wrong mutable actions on wrong hosts in local mode. | `app`, `db`, `all` |
 | `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
-| `DATABASE_DEPLOYMENT_MODE` | Defines if DB host is managed by this kit or external managed DB (for example AWS RDS). | `self_hosted`, `managed` |
-| `WEB_SERVER_TYPE` | Selects the single Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
+| `DATABASE_DEPLOYMENT_MODE` | Defines self-hosted DB vs external managed DB flow. | `self_hosted`, `managed` |
+| `WEB_SERVER_TYPE` | Selects the Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
 | `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
-| `AUTH_MODE` | Controls optional authentication preparation/validation. | `local`, `ldap`, `saml`, `oidc` |
-| `SECURITY_REQUIRE_*` | Enables policy checks for TLS, HTTPS, SSO, promotion gate, and ordered execution. | `true`, `false` |
+| `SECURITY_REQUIRE_*` | Enables policy checks for TLS/HTTPS/promotion/ordered execution. | `true`, `false` |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | Defines default enforcement mode when `SECURITY_MODE` is not passed. | `secure`, `permissive` |
-| `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile used by runtime rendering. | `small`, `medium`, `large` |
+| `RESOURCE_PROFILE_ACTIVE` | Selects the active tuning profile. | `small`, `medium`, `large` |
 | `NETWORK_DATABASE_ACCESS_MODE` | Selects restricted or open DB access behavior. | `restricted`, `open` |
 | `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS` | Stores DB source hosts for restricted mode. | CSV host list or empty |
-| `MONITORING_*_JSON` | Centralizes labels, thresholds, scrape profiles, alert routes. | one-line JSON objects |
-
-Notes for DB access controls:
-
-- `NETWORK_DATABASE_ACCESS_MODE` defaults to `restricted` when omitted.
-- `restricted` uses a comma-separated allowlist such as `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11`.
-- `open` uses `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=` (active and empty).
-- Commented keys are considered not used; uncommented keys are active configuration.
+| `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables timezone readiness workflow. | `true`, `false` |
+| `GLPI_TIMEZONE_DB_MODE` | Defines DB timezone behavior. | `disabled`, `validate`, `apply` |
+| `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Enables optional legacy grant on `mysql.time_zone_name`. | `true`, `false` |
 
 ## Conditional activation and validation contract
 
-Configuration validation is scenario-aware and fails early when a feature is enabled without its required keys.
-
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
+- `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
-- External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): requires coherent auth mode and `SSO_PUBLIC_URL` when URL enforcement is enabled.
-- SAML/OIDC enabled: requires `SSO_PUBLIC_URL` with `https://` and blocks `TLS_MODE=none`.
-- `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
 
 ## Secret contract
 
-Deployment secrets currently required by renderer/precheck from `config/<environment>.env` are:
+Deployment secrets required by renderer/precheck from `config/<environment>.env` are:
 
 - `DATABASE_PASSWORD`
 - `DATABASE_ROOT_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
-- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, only for managed-mode fallback connectivity attempts with `root`/`admin`)
-
-External-auth sensitive values are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
-
-- `auth_saml_x509_certificate`
-- `ldap_bind_password`
-- `oidc_client_secret`
+- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, managed-mode fallback for connectivity checks)
 
 Do not commit real environment files, `.runtime/`, private keys, tokens, passwords, certificates with private material, or customer-sensitive evidence.
 
@@ -123,8 +99,6 @@ Do not commit real environment files, `.runtime/`, private keys, tokens, passwor
 - `nginx`
 - `apache`
 - `lighttpd`
-
-IIS is supported by upstream GLPI as a possible web server technology, but this Linux automation kit does not automate IIS.
 
 `GLPI_APP_PACKAGES` behavior:
 

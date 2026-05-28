@@ -18,7 +18,7 @@ TARGET="${4:-all}"
 SCOPE="${5:-}"
 
 if [[ -z "$ENVIRONMENT" || -z "$DOMAIN" || -z "$ACTION" ]]; then
-  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit|auth> <action> [target] [scope]" >&2
+  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
   echo "Execution contract: GLPI_ENVIRONMENT, GLPI_EXECUTION_MODE=local|ssh, GLPI_HOST_ROLE=app|db|all, SECURITY_MODE=secure|permissive" >&2
   exit 1
 fi
@@ -27,6 +27,14 @@ if [[ ! "$ENVIRONMENT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
   echo "Unsupported environment name: $ENVIRONMENT (allowed: letters, numbers, '.', '-', '_')." >&2
   exit 1
 fi
+
+case "$DOMAIN" in
+  deploy|certify|promote|tls|ops|audit) ;;
+  *)
+    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit)" >&2
+    exit 1
+    ;;
+esac
 export GLPI_ENVIRONMENT="$ENVIRONMENT"
 
 RUNTIME_DIR="$(runtime_env_dir "$ENVIRONMENT")"
@@ -42,6 +50,12 @@ OPERATION_STATUS="completed"
 OPERATION_LOG_INITIALIZED="false"
 FINAL_STATUS_EMITTED="false"
 declare -a EXECUTION_WARNINGS=()
+EXECUTION_ACCESS_SCHEME="unknown"
+EXECUTION_ACCESS_HOST="unknown"
+EXECUTION_ACCESS_PORT="0"
+EXECUTION_ACCESS_URL="unknown"
+EXECUTION_TLS_MODE_EFFECTIVE="unknown"
+declare -a EXECUTION_TEST_COMMANDS=()
 MANAGED_DB_HOST=""
 MANAGED_DB_PORT=""
 MANAGED_DB_NAME=""
@@ -49,41 +63,113 @@ MANAGED_DB_USER=""
 MANAGED_DB_GRANT_HOST=""
 MANAGED_DB_PASSWORD=""
 MANAGED_DB_ADMIN_PASSWORD=""
+MANAGED_DB_TIMEZONE=""
+MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="false"
+MANAGED_DB_TIMEZONE_MODE="disabled"
+MANAGED_DB_TIMEZONE_LEGACY_GRANT="false"
 
-print_post_execution_checks() {
-  echo "Validation commands (run on target host):"
-  if [[ "$DOMAIN" == "deploy" && "$ACTION" == "apply" ]]; then
-    case "$TARGET" in
-      db|all)
-        echo "  - sudo systemctl status mariadb --no-pager"
-        echo "  - sudo systemctl is-active mariadb"
-        echo "  - mysql -h <db-host> -u <glpi-db-user> -p -e \"SELECT 1;\""
-        ;;
-    esac
-    case "$TARGET" in
-      app|all)
-        echo "  - sudo systemctl status nginx --no-pager"
-        echo "  - sudo systemctl status php8.3-fpm --no-pager"
-        echo "  - sudo systemctl is-active nginx php8.3-fpm"
-        echo "  - curl -I http://<app-host>/"
-        ;;
-    esac
-    case "$TARGET" in
-      monitoring|all)
-        echo "  - sudo systemctl status prometheus-node-exporter --no-pager || true"
-        echo "  - sudo systemctl status mysqld-exporter --no-pager || true"
-        ;;
-    esac
+build_execution_test_commands() {
+  EXECUTION_TEST_COMMANDS=()
+  EXECUTION_TEST_COMMANDS+=("curl -k -I ${EXECUTION_ACCESS_URL}")
+  EXECUTION_TEST_COMMANDS+=("sudo nginx -t")
+  EXECUTION_TEST_COMMANDS+=("sudo systemctl is-active nginx php8.3-fpm")
+  EXECUTION_TEST_COMMANDS+=("tail -n 50 .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log")
+  if [[ "$EXECUTION_ACCESS_SCHEME" == "https" ]]; then
+    EXECUTION_TEST_COMMANDS+=("openssl s_client -connect ${EXECUTION_ACCESS_HOST}:${EXECUTION_ACCESS_PORT} -servername ${EXECUTION_ACCESS_HOST} </dev/null 2>/dev/null | openssl x509 -noout -dates")
   fi
-  if [[ "$DOMAIN" == "deploy" && "$ACTION" == "post-check" ]]; then
-    echo "  - cat .runtime/${ENVIRONMENT}/evidence/precheck-report-latest.md"
-    echo "  - ls -l .runtime/${ENVIRONMENT}/logs/"
+}
+
+resolve_execution_access_context() {
+  local tls_mode glpi_domain http_port https_port selected_port access_host access_scheme access_url
+  tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "")"
+  [[ -z "${tls_mode// }" ]] && tls_mode="$(read_product_config_value "$ENVIRONMENT" "tls.mode" || true)"
+  [[ -z "${tls_mode// }" ]] && tls_mode="none"
+
+  glpi_domain="$(read_effective_runtime_value "glpi_domain" "")"
+  [[ -z "${glpi_domain// }" ]] && glpi_domain="$(read_product_config_value "$ENVIRONMENT" "glpi.domain" || true)"
+  [[ -z "${glpi_domain// }" ]] && glpi_domain="unknown-host"
+
+  http_port="$(read_effective_runtime_value "web_http_port" "")"
+  [[ -z "${http_port// }" ]] && http_port="$(read_product_config_value "$ENVIRONMENT" "web.http_port" || true)"
+  [[ -z "${http_port// }" ]] && http_port="80"
+
+  https_port="$(read_effective_runtime_value "web_https_port" "")"
+  [[ -z "${https_port// }" ]] && https_port="$(read_product_config_value "$ENVIRONMENT" "web.https_port" || true)"
+  [[ -z "${https_port// }" ]] && https_port="443"
+
+  access_host="$glpi_domain"
+  if [[ "$tls_mode" == "none" ]]; then
+    access_scheme="http"
+    selected_port="$http_port"
+  else
+    access_scheme="https"
+    selected_port="$https_port"
   fi
-  if [[ "$DOMAIN" == "tls" ]]; then
-    echo "  - sudo nginx -t"
-    echo "  - sudo systemctl reload nginx"
-    echo "  - openssl s_client -connect <app-host>:443 -servername <app-host> </dev/null 2>/dev/null | openssl x509 -noout -dates"
+
+  access_url="${access_scheme}://${access_host}"
+  if [[ "$access_scheme" == "http" && "$selected_port" != "80" ]]; then
+    access_url="${access_url}:${selected_port}"
   fi
+  if [[ "$access_scheme" == "https" && "$selected_port" != "443" ]]; then
+    access_url="${access_url}:${selected_port}"
+  fi
+
+  EXECUTION_TLS_MODE_EFFECTIVE="$tls_mode"
+  EXECUTION_ACCESS_SCHEME="$access_scheme"
+  EXECUTION_ACCESS_HOST="$access_host"
+  EXECUTION_ACCESS_PORT="$selected_port"
+  EXECUTION_ACCESS_URL="$access_url"
+  build_execution_test_commands
+}
+
+emit_execution_alert_if_self_signed() {
+  if [[ "$EXECUTION_TLS_MODE_EFFECTIVE" == "self_signed" ]]; then
+    record_execution_warning "Self-signed TLS certificate in use. Certificate trust warning (certificate not recognized by client trust chain) is expected in staging/lab."
+  fi
+}
+
+print_execution_final_summary() {
+  local status_label="$1"
+  local stream="${2:-stdout}"
+  local alert_line=""
+  local test_cmd=""
+
+  if [[ "$stream" == "stderr" ]]; then
+    echo "Execution final summary:" >&2
+    echo "  status: ${status_label}" >&2
+    echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}" >&2
+    echo "  access_url: ${EXECUTION_ACCESS_URL}" >&2
+    if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
+      echo "  alerts: none" >&2
+    else
+      echo "  alerts:" >&2
+      for alert_line in "${EXECUTION_WARNINGS[@]}"; do
+        echo "    - ${alert_line}" >&2
+      done
+    fi
+    echo "  test_commands:" >&2
+    for test_cmd in "${EXECUTION_TEST_COMMANDS[@]}"; do
+      echo "    - ${test_cmd}" >&2
+    done
+    return
+  fi
+
+  echo "Execution final summary:"
+  echo "  status: ${status_label}"
+  echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}"
+  echo "  access_url: ${EXECUTION_ACCESS_URL}"
+  if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
+    echo "  alerts: none"
+  else
+    echo "  alerts:"
+    for alert_line in "${EXECUTION_WARNINGS[@]}"; do
+      echo "    - ${alert_line}"
+    done
+  fi
+  echo "  test_commands:"
+  for test_cmd in "${EXECUTION_TEST_COMMANDS[@]}"; do
+    echo "    - ${test_cmd}"
+  done
 }
 
 summary_escape() {
@@ -96,17 +182,31 @@ record_execution_warning() {
   echo "WARNING: $warning_message"
 }
 
-append_execution_warnings_to_summary() {
+append_execution_summary_to_file() {
   local summary_path
   local warning_line
+  local test_cmd
   summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
-  if [[ ! -f "$summary_path" || ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
+  if [[ ! -f "$summary_path" ]]; then
     return 0
   fi
   {
-    echo "warnings:"
+    echo "tls_mode_effective: '$(summary_escape "$EXECUTION_TLS_MODE_EFFECTIVE")'"
+    echo "access_scheme: '$(summary_escape "$EXECUTION_ACCESS_SCHEME")'"
+    echo "access_host: '$(summary_escape "$EXECUTION_ACCESS_HOST")'"
+    echo "access_port: '$(summary_escape "$EXECUTION_ACCESS_PORT")'"
+    echo "access_url: '$(summary_escape "$EXECUTION_ACCESS_URL")'"
+    echo "alerts_count: ${#EXECUTION_WARNINGS[@]}"
+    echo "alerts:"
+    if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
+      echo "  - 'none'"
+    fi
     for warning_line in "${EXECUTION_WARNINGS[@]}"; do
       echo "  - '$(summary_escape "$warning_line")'"
+    done
+    echo "test_commands:"
+    for test_cmd in "${EXECUTION_TEST_COMMANDS[@]}"; do
+      echo "  - '$(summary_escape "$test_cmd")'"
     done
   } >>"$summary_path"
 }
@@ -157,9 +257,12 @@ finalize_glpictl_operation() {
     OPERATION_STATUS="failed"
     remediation_hint="Review console output and .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
   fi
+  resolve_execution_access_context
+  emit_execution_alert_if_self_signed
+
   if [[ "$OPERATION_LOG_INITIALIZED" == "true" ]]; then
     complete_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$OPERATION_STATUS" "${DOMAIN}/${ACTION}/${TARGET}" "$remediation_hint"
-    append_execution_warnings_to_summary
+    append_execution_summary_to_file
   fi
   if [[ "$exit_code" -eq 0 ]]; then
     echo "FINAL STATUS: SUCCESS"
@@ -169,12 +272,13 @@ finalize_glpictl_operation() {
       echo "Execution warnings:"
       printf '%s\n' "${EXECUTION_WARNINGS[@]}"
     fi
-    print_post_execution_checks
+    print_execution_final_summary "SUCCESS"
     echo "END OF EXECUTION (SUCCESS)"
   else
     echo "FINAL STATUS: FAILED" >&2
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml" >&2
+    print_execution_final_summary "FAILED" "stderr"
     print_failure_diagnostics
     echo "END OF EXECUTION (FAILED)" >&2
   fi
@@ -198,7 +302,6 @@ print_operation_follow_hints() {
 SECURITY_MODE_EFFECTIVE=""
 REQUIRE_TLS="false"
 REQUIRE_HTTPS="false"
-REQUIRE_SSO="false"
 REQUIRE_PROMOTION_GATE="false"
 REQUIRE_ORDERED_EXECUTION="true"
 PERMISSIVE_JUSTIFICATION="${SECURITY_JUSTIFICATION:-}"
@@ -211,25 +314,6 @@ HOST_ROLE_EFFECTIVE=""
 TOPOLOGY_MODE_EFFECTIVE="dual-server"
 ASSUME_DB_APPLIED="false"
 DB_DEPLOYMENT_MODE_EFFECTIVE="self_hosted"
-AUTH_MODE_EFFECTIVE="local"
-AUTH_EXTERNAL_ENABLED_EFFECTIVE="false"
-AUTH_LDAP_ENABLED_EFFECTIVE="false"
-AUTH_SAML_ENABLED_EFFECTIVE="false"
-AUTH_OIDC_ENABLED_EFFECTIVE="false"
-AUTH_PROTOCOL_EFFECTIVE=""
-SSO_PUBLIC_URL_EFFECTIVE=""
-SSO_REQUIRE_PUBLIC_URL_EFFECTIVE="true"
-AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE="true"
-AUTH_SAML_PLUGIN_NAME_EFFECTIVE="saml"
-AUTH_SAML_ENTITY_ID_EFFECTIVE=""
-AUTH_SAML_ACS_URL_EFFECTIVE=""
-AUTH_SAML_LOGOUT_URL_EFFECTIVE=""
-AUTH_SAML_PLUGIN_PRESENT="false"
-AUTH_EVIDENCE_DIR="$(runtime_evidence_dir "$ENVIRONMENT")/auth"
-AUTH_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/auth-state.yml"
-AUTH_BACKUP_STATE_PATH="$(runtime_state_dir "$ENVIRONMENT")/auth-backup-latest.yml"
-AUTH_BACKUP_ROOT_DIR="$(runtime_env_dir "$ENVIRONMENT")/backups/auth"
-
 normalize_bool() {
   local value="$1"
   local default_value="${2:-false}"
@@ -269,29 +353,6 @@ version_gte() {
   local current="$1"
   local minimum="$2"
   [[ "$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)" == "$minimum" ]]
-}
-
-auth_requires_external() {
-  if [[ "$AUTH_EXTERNAL_ENABLED_EFFECTIVE" == "true" ]]; then
-    return 0
-  fi
-  if [[ "$AUTH_MODE_EFFECTIVE" != "local" ]]; then
-    return 0
-  fi
-  if [[ "$AUTH_LDAP_ENABLED_EFFECTIVE" == "true" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" || "$AUTH_OIDC_ENABLED_EFFECTIVE" == "true" ]]; then
-    return 0
-  fi
-  return 1
-}
-
-auth_requires_https() {
-  if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_MODE_EFFECTIVE" == "oidc" ]]; then
-    return 0
-  fi
-  if [[ "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" || "$AUTH_OIDC_ENABLED_EFFECTIVE" == "true" ]]; then
-    return 0
-  fi
-  return 1
 }
 
 domain_evidence_dir_path() {
@@ -407,6 +468,11 @@ domain_action_requires_remote_app_snapshot() {
       esac
       ;;
     ops/cert|ops/resume) return 0 ;;
+    ops/timezone)
+      if [[ "$target_name" == "apply" ]]; then
+        return 0
+      fi
+      ;;
   esac
   return 1
 }
@@ -429,6 +495,11 @@ domain_action_requires_remote_db_snapshot() {
       ;;
     ops/users)
       if [[ "$scope_name" == "db" ]]; then
+        return 0
+      fi
+      ;;
+    ops/timezone)
+      if [[ "$target_name" == "apply" ]] && ! is_managed_database_mode; then
         return 0
       fi
       ;;
@@ -932,32 +1003,6 @@ EOF
   chmod 600 "$latest_md" "$latest_yml"
 }
 
-ensure_auth_evidence_dir() {
-  ensure_domain_evidence_dir "auth"
-}
-
-write_auth_state() {
-  local action_name="$1"
-  local status="$2"
-  local details="$3"
-  write_domain_state "auth" "$action_name" "$status" "$details"
-}
-
-auth_create_backup_snapshot() {
-  local action_name="$1"
-  create_domain_backup_snapshot "auth" "$action_name"
-}
-
-run_auth_rollback() {
-  local backup_dir
-  backup_dir="$(find_domain_backup_for_restore "auth" "true")"
-  restore_remote_domain_backup_snapshot "auth" "$backup_dir"
-  run_domain_metadata_restore_from_backup "auth" "$backup_dir"
-  AUTH_SAML_PLUGIN_PRESENT="$(normalize_bool "$AUTH_SAML_PLUGIN_PRESENT" "false")"
-  write_auth_state "rollback" "completed" "restored_from=${backup_dir}"
-  write_auth_evidence "rollback" "pass" "Auth rollback restored runtime/evidence/state from backup: ${backup_dir}"
-}
-
 read_policy_flag() {
   local key="$1"
   local legacy_key="$2"
@@ -1239,7 +1284,6 @@ enforce_managed_db_target_support() {
 resolve_policy_contract() {
   REQUIRE_TLS="$(read_policy_flag "security.require_tls" "security.require_tls_in_production" "false")"
   REQUIRE_HTTPS="$(read_policy_flag "security.require_https" "security.require_https_in_production" "false")"
-  REQUIRE_SSO="$(read_policy_flag "security.require_sso" "security.require_sso_in_production" "false")"
   REQUIRE_PROMOTION_GATE="$(read_policy_flag "security.require_promotion_gate" "" "false")"
   REQUIRE_ORDERED_EXECUTION="$(read_policy_flag "security.require_ordered_execution" "" "true")"
 }
@@ -1250,9 +1294,8 @@ is_mutating_operation() {
     certify/check|certify/prepare|certify/apply|certify/post-check|certify/rollback|certify/run|\
     tls/check|tls/prepare|tls/apply|tls/post-check|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
     promote/check|promote/prepare|promote/apply|promote/post-check|promote/rollback|promote/base|promote/app|promote/db|promote/monitoring|promote/backup|promote/all|\
-    ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|\
-    audit/check|audit/prepare|audit/rollback|\
-    auth/check|auth/prepare|auth/apply|auth/post-check|auth/rollback) return 0 ;;
+    ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|ops/timezone|\
+    audit/check|audit/prepare|audit/rollback) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -1321,13 +1364,16 @@ policy_violation() {
   local policy_id="$1"
   local message="$2"
   local remediation="${3:-Review policy requirements and rerun.}"
+  local warning_message
   if [[ "$SECURITY_MODE_EFFECTIVE" == "secure" ]]; then
     echo "Execution blocked by security policy [$policy_id]: $message" >&2
     echo "Remediation: $remediation" >&2
     exit 1
   fi
   ensure_permissive_justification
-  echo "WARNING: permissive mode accepted policy risk [$policy_id]: $message" >&2
+  warning_message="permissive mode accepted policy risk [${policy_id}]: ${message}"
+  echo "WARNING: ${warning_message}" >&2
+  record_execution_warning "$warning_message"
   POLICY_VIOLATIONS+=("${policy_id}|${message}|${remediation}")
   persist_permissive_evidence
 }
@@ -1440,10 +1486,6 @@ mark_apply_sequence() {
 enforce_security_policy_contract() {
   local effective_tls_mode="${1:-}"
   local effective_use_tls="${2:-}"
-  local sso_enabled
-
-  sso_enabled="$(read_product_config_value "$ENVIRONMENT" "security.sso_enabled" || true)"
-  [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
 
   if [[ -z "${effective_tls_mode// }" ]]; then
     effective_tls_mode="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" || true)"
@@ -1460,9 +1502,6 @@ enforce_security_policy_contract() {
   fi
   if [[ "$REQUIRE_HTTPS" == "true" && "$effective_use_tls" != "true" ]]; then
     policy_violation "require-https" "Policy requires HTTPS/TLS enabled, current mode '$effective_tls_mode' resolves to HTTP-only." "Enable TLS mode self_signed/provided."
-  fi
-  if [[ "$REQUIRE_SSO" == "true" && "$sso_enabled" != "true" ]]; then
-    policy_violation "require-sso" "Policy requires SECURITY_SSO_ENABLED=true in config/$ENVIRONMENT.env." "Enable SECURITY_SSO_ENABLED in environment config."
   fi
 }
 
@@ -1485,11 +1524,25 @@ load_managed_db_runtime_contract() {
   MANAGED_DB_NAME="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_name" || true)"
   MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
   MANAGED_DB_GRANT_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "db_grant_host" || true)"
+  MANAGED_DB_TIMEZONE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "timezone_name" || true)"
   MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
   MANAGED_DB_ADMIN_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true)"
+  MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_support_enabled" || true)" "false")"
+  MANAGED_DB_TIMEZONE_MODE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_mode" || true)"
+  MANAGED_DB_TIMEZONE_LEGACY_GRANT="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_legacy_grant" || true)" "false")"
 
   [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
   [[ -z "${MANAGED_DB_GRANT_HOST// }" ]] && MANAGED_DB_GRANT_HOST="%"
+  [[ -z "${MANAGED_DB_TIMEZONE// }" ]] && MANAGED_DB_TIMEZONE="UTC"
+  [[ -z "${MANAGED_DB_TIMEZONE_MODE// }" ]] && MANAGED_DB_TIMEZONE_MODE="disabled"
+  MANAGED_DB_TIMEZONE_MODE="${MANAGED_DB_TIMEZONE_MODE,,}"
+  case "$MANAGED_DB_TIMEZONE_MODE" in
+    disabled|validate|apply) ;;
+    *)
+      echo "Managed DB validation cannot run: invalid glpi_timezone_db_mode='${MANAGED_DB_TIMEZONE_MODE}'." >&2
+      return 1
+      ;;
+  esac
 
   if [[ -z "${MANAGED_DB_HOST// }" ]]; then
     echo "Managed DB validation cannot run: missing runtime key glpi_db_host." >&2
@@ -1508,6 +1561,15 @@ load_managed_db_runtime_contract() {
     return 1
   fi
   return 0
+}
+
+effective_managed_timezone_db_mode() {
+  local mode="$MANAGED_DB_TIMEZONE_MODE"
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" == "true" && "$mode" == "disabled" ]]; then
+    echo "validate"
+    return 0
+  fi
+  echo "$mode"
 }
 
 sql_escape_literal() {
@@ -1641,6 +1703,146 @@ run_managed_db_select1_check() {
   return 1
 }
 
+run_managed_db_timezone_check_attempt() {
+  local check_label="$1"
+  local db_user="$2"
+  local db_password="$3"
+  local sql_query output
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped sql_escaped
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+  sql_query="SELECT CASE WHEN CONVERT_TZ('2000-01-01 00:00:00','UTC','${MANAGED_DB_TIMEZONE}') IS NULL THEN 0 ELSE 1 END AS tz_ready;"
+  sql_escaped="$(shell_escape_single_quotes "$sql_query")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --database='$(shell_escape_single_quotes "$MANAGED_DB_NAME")' --batch --skip-column-names --silent --execute='${sql_escaped}' | grep -qx '1'" -o 2>&1)"; then
+    echo "Managed DB timezone readiness (${check_label}, user=${db_user}): PASS"
+    return 0
+  fi
+
+  echo "Managed DB timezone readiness (${check_label}, user=${db_user}): FAIL"
+  if [[ -n "${output// }" ]]; then
+    echo "  Diagnostic output:"
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+run_managed_db_timezone_check() {
+  local check_label="$1"
+
+  if run_managed_db_timezone_check_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"; then
+    return 0
+  fi
+  if [[ -n "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    if run_managed_db_timezone_check_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+    if run_managed_db_timezone_check_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+apply_managed_db_timezone_tables_attempt() {
+  local db_user="$1"
+  local db_password="$2"
+  local output
+  local db_host_escaped db_port_escaped db_user_escaped db_password_escaped
+
+  db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+  db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+
+  if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; tz_loader=\$(command -v mariadb-tzinfo-to-sql || command -v mysql_tzinfo_to_sql || true); if [[ -z \"\$tz_loader\" ]]; then exit 2; fi; \"\$tz_loader\" /usr/share/zoneinfo | MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' mysql" -o 2>&1)"; then
+    return 0
+  fi
+  if [[ -n "${output// }" ]]; then
+    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+  fi
+  return 1
+}
+
+apply_managed_db_timezone_tables_if_configured() {
+  local tz_mode
+  tz_mode="$(effective_managed_timezone_db_mode)"
+
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" != "true" ]]; then
+    return 0
+  fi
+  if [[ "$tz_mode" != "apply" ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    record_execution_warning "Managed DB timezone apply mode requested but no interactive terminal is available; DB timezone mutation was skipped."
+    return 0
+  fi
+  if [[ -z "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
+    record_execution_warning "Managed DB timezone apply mode requested but DATABASE_MANAGED_ADMIN_PASSWORD is missing; DB timezone mutation was skipped."
+    return 0
+  fi
+  if ! prompt_yes_no "Managed DB timezone mode is apply. Execute timezone-table load on managed DB now (this may affect other databases in the same instance)?"; then
+    record_execution_warning "Operator skipped managed DB timezone-table load."
+    return 0
+  fi
+
+  write_step "Applying managed DB timezone tables from APP host context"
+  if apply_managed_db_timezone_tables_attempt "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
+    echo "Managed DB timezone-table load applied using admin user=root."
+  elif apply_managed_db_timezone_tables_attempt "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
+    echo "Managed DB timezone-table load applied using admin user=admin."
+  else
+    record_execution_warning "Managed DB timezone-table load failed for users root/admin."
+    return 0
+  fi
+
+  if [[ "$MANAGED_DB_TIMEZONE_LEGACY_GRANT" == "true" ]]; then
+    local user_sql host_sql grant_sql
+    user_sql="$(sql_escape_literal "$MANAGED_DB_USER")"
+    host_sql="$(sql_escape_literal "$MANAGED_DB_GRANT_HOST")"
+    grant_sql="GRANT SELECT ON mysql.time_zone_name TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
+    if run_managed_admin_sql "timezone-legacy-grant" "$grant_sql"; then
+      echo "Managed DB timezone legacy grant applied for '${MANAGED_DB_USER}'@'${MANAGED_DB_GRANT_HOST}'."
+    else
+      record_execution_warning "Managed DB timezone legacy grant failed for '${MANAGED_DB_USER}'@'${MANAGED_DB_GRANT_HOST}'."
+    fi
+  fi
+}
+
+run_managed_db_timezone_validation_gate() {
+  local tz_mode
+  tz_mode="$(effective_managed_timezone_db_mode)"
+
+  if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" != "true" ]]; then
+    echo "Managed DB timezone gate: skipped (GLPI_TIMEZONE_SUPPORT_ENABLED=false)."
+    return 0
+  fi
+  if [[ "$tz_mode" == "disabled" ]]; then
+    echo "Managed DB timezone gate: skipped (GLPI_TIMEZONE_DB_MODE=disabled)."
+    return 0
+  fi
+
+  write_step "Validating managed DB timezone readiness"
+  echo "Managed DB timezone mode (effective): ${tz_mode}"
+  echo "Managed DB timezone target: ${MANAGED_DB_TIMEZONE}"
+  if run_managed_db_timezone_check "initial"; then
+    return 0
+  fi
+
+  apply_managed_db_timezone_tables_if_configured || true
+  write_step "Re-trying managed DB timezone readiness validation"
+  if run_managed_db_timezone_check "retry"; then
+    return 0
+  fi
+
+  record_execution_warning "Managed DB timezone readiness validation failed. Timezone support may be incomplete in the database layer."
+  return 0
+}
+
 run_managed_db_guided_check() {
   local check_label="$1"
   local check_command="$2"
@@ -1751,6 +1953,7 @@ handle_managed_db_validation_after_app_apply() {
   fi
 
   if run_managed_db_select1_check "initial"; then
+    run_managed_db_timezone_validation_gate
     return 0
   fi
 
@@ -1758,6 +1961,7 @@ handle_managed_db_validation_after_app_apply() {
 
   write_step "Re-trying managed DB connectivity after guided checks"
   if run_managed_db_select1_check "retry"; then
+    run_managed_db_timezone_validation_gate
     return 0
   fi
 
@@ -2322,8 +2526,26 @@ run_ops() {
       bash "$SCRIPT_ROOT/ops-maintenance.sh" resume "$ENVIRONMENT"
       return
       ;;
+    timezone)
+      create_domain_backup_snapshot "ops" "timezone"
+      local timezone_action
+      timezone_action="${TARGET:-check}"
+      case "$timezone_action" in
+        check|apply) ;;
+        *)
+          echo "Unsupported ops timezone action: ${timezone_action} (expected check|apply)" >&2
+          exit 1
+          ;;
+      esac
+      ensure_runtime_inputs_if_missing "true"
+      if [[ "$timezone_action" == "apply" ]]; then
+        create_remote_domain_backup_snapshot "ops" "timezone" "$timezone_action" "$SCOPE"
+      fi
+      bash "$SCRIPT_ROOT/ops-maintenance.sh" timezone "$ENVIRONMENT" "$timezone_action"
+      return
+      ;;
     *)
-      echo "Unsupported ops action: $ACTION (expected check|prepare|rollback|users|cert|audit|resume)" >&2
+      echo "Unsupported ops action: $ACTION (expected check|prepare|rollback|users|cert|audit|resume|timezone)" >&2
       exit 1
       ;;
   esac
@@ -2440,406 +2662,6 @@ run_promote() {
   esac
 }
 
-resolve_auth_contract() {
-  AUTH_MODE_EFFECTIVE="$(read_effective_runtime_value "auth_mode" "local")"
-  AUTH_MODE_EFFECTIVE="${AUTH_MODE_EFFECTIVE,,}"
-  [[ -z "${AUTH_MODE_EFFECTIVE// }" ]] && AUTH_MODE_EFFECTIVE="local"
-  case "$AUTH_MODE_EFFECTIVE" in
-    local|ldap|saml|oidc) ;;
-    *)
-      echo "Unsupported AUTH_MODE '$AUTH_MODE_EFFECTIVE'. Allowed values: local|ldap|saml|oidc." >&2
-      exit 1
-      ;;
-  esac
-
-  AUTH_EXTERNAL_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_external_enabled" "false")" "false")"
-  AUTH_LDAP_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_ldap_enabled" "false")" "false")"
-  AUTH_SAML_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_saml_enabled" "false")" "false")"
-  AUTH_OIDC_ENABLED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_oidc_enabled" "false")" "false")"
-  AUTH_PROTOCOL_EFFECTIVE="$(read_effective_runtime_value "sso_protocol" "")"
-  SSO_PUBLIC_URL_EFFECTIVE="$(read_effective_runtime_value "sso_public_url" "")"
-  SSO_REQUIRE_PUBLIC_URL_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "sso_require_public_url" "true")" "true")"
-  AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE="$(normalize_bool "$(read_effective_runtime_value "auth_saml_plugin_expected" "true")" "true")"
-  AUTH_SAML_PLUGIN_NAME_EFFECTIVE="$(read_effective_runtime_value "auth_saml_plugin_name" "saml")"
-  AUTH_SAML_ENTITY_ID_EFFECTIVE="$(read_effective_runtime_value "auth_saml_entity_id" "")"
-  AUTH_SAML_ACS_URL_EFFECTIVE="$(read_effective_runtime_value "auth_saml_acs_url" "")"
-  AUTH_SAML_LOGOUT_URL_EFFECTIVE="$(read_effective_runtime_value "auth_saml_logout_url" "")"
-
-  if [[ -z "${AUTH_PROTOCOL_EFFECTIVE// }" ]]; then
-    AUTH_PROTOCOL_EFFECTIVE="$AUTH_MODE_EFFECTIVE"
-  fi
-}
-
-validate_auth_public_url() {
-  if [[ "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE" == "true" ]] && auth_requires_external; then
-    if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
-      echo "Missing required runtime key: sso_public_url" >&2
-      echo "Set SSO_PUBLIC_URL in config/$ENVIRONMENT.env." >&2
-      exit 1
-    fi
-  fi
-
-  if auth_requires_https; then
-    if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
-      echo "SSO public URL is required for SAML/OIDC flows." >&2
-      exit 1
-    fi
-    if [[ ! "$SSO_PUBLIC_URL_EFFECTIVE" =~ ^https:// ]]; then
-      echo "SSO_PUBLIC_URL must start with https:// when SAML/OIDC is enabled." >&2
-      exit 1
-    fi
-  fi
-}
-
-validate_auth_tls_requirements() {
-  local effective_tls_mode effective_use_tls
-  effective_tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
-  effective_use_tls="false"
-  [[ "$effective_tls_mode" != "none" ]] && effective_use_tls="true"
-  if auth_requires_https; then
-    if [[ "$effective_use_tls" != "true" ]]; then
-      echo "SAML/OIDC requires HTTPS/TLS enabled. Current TLS mode: '$effective_tls_mode'." >&2
-      exit 1
-    fi
-  fi
-}
-
-validate_auth_glpi_version() {
-  local glpi_version
-  glpi_version="$(read_effective_runtime_value "glpi_version" "")"
-  if auth_requires_https; then
-    if [[ -z "${glpi_version// }" ]]; then
-      echo "Missing runtime key: glpi_version." >&2
-      exit 1
-    fi
-    if ! version_gte "$glpi_version" "11.0.7"; then
-      echo "SAML/OIDC workflow requires GLPI >= 11.0.7. Current: $glpi_version" >&2
-      exit 1
-    fi
-  fi
-}
-
-validate_auth_webroot_public() {
-  local glpi_install_dir glpi_public_dir web_server_type escaped_public_dir check_cmd
-  glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
-  if [[ -z "${glpi_install_dir// }" ]]; then
-    echo "Missing runtime key: glpi_install_dir." >&2
-    exit 1
-  fi
-
-  glpi_public_dir="${glpi_install_dir%/}/public"
-  web_server_type="$(read_effective_runtime_value "glpi_web_server_type" "nginx")"
-  web_server_type="${web_server_type,,}"
-  escaped_public_dir="${glpi_public_dir//\'/\'\"\'\"\'}"
-
-  if ! auth_requires_https; then
-    if [[ ! "$glpi_install_dir" =~ /glpi$ ]]; then
-      echo "Warning: glpi_install_dir does not end with '/glpi'. Ensure web root points to '${glpi_public_dir}'." >&2
-    fi
-    return 0
-  fi
-
-  case "$web_server_type" in
-    nginx)
-      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/nginx/nginx.conf 2>/dev/null | grep -q ."
-      ;;
-    apache)
-      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/apache2/sites-enabled /etc/apache2/sites-available /etc/httpd/conf.d /etc/httpd/conf/httpd.conf 2>/dev/null | grep -q ."
-      ;;
-    lighttpd)
-      check_cmd="test -d '${escaped_public_dir}' && grep -R -F '${escaped_public_dir}' /etc/lighttpd/lighttpd.conf /etc/lighttpd/conf-enabled 2>/dev/null | grep -q ."
-      ;;
-    *)
-      check_cmd="test -d '${escaped_public_dir}'"
-      ;;
-  esac
-
-  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "$check_cmd" -o >/dev/null; then
-    echo "Webroot validation failed for auth flow. Expected web root reference to '${glpi_public_dir}' in ${web_server_type} configuration." >&2
-    exit 1
-  fi
-}
-
-check_auth_php_openssl() {
-  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "php -m | grep -iq '^openssl$'" -o >/dev/null
-}
-
-check_auth_time_sync() {
-  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "if command -v systemctl >/dev/null 2>&1; then systemctl is-active --quiet chrony || systemctl is-active --quiet chronyd || systemctl is-active --quiet ntp || systemctl is-active --quiet ntpd || systemctl is-active --quiet systemd-timesyncd; else timedatectl show -p NTPSynchronized --value | grep -qi '^yes$'; fi" -o >/dev/null
-}
-
-detect_saml_plugin_presence() {
-  local glpi_install_dir glpi_plugin_dir plugin_name
-  glpi_install_dir="$(read_effective_runtime_value "glpi_install_dir" "/usr/share/glpi")"
-  glpi_plugin_dir="$(read_effective_runtime_value "glpi_plugin_dir" "/var/lib/glpi/plugins")"
-  plugin_name="$AUTH_SAML_PLUGIN_NAME_EFFECTIVE"
-  AUTH_SAML_PLUGIN_PRESENT="false"
-
-  export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
-  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -m shell -a "test -d '${glpi_install_dir}/marketplace/${plugin_name}' || test -d '${glpi_install_dir}/plugins/${plugin_name}' || test -d '${glpi_plugin_dir}/${plugin_name}'" -o >/dev/null; then
-    AUTH_SAML_PLUGIN_PRESENT="true"
-  fi
-}
-
-derive_saml_urls_if_missing() {
-  if [[ -z "${SSO_PUBLIC_URL_EFFECTIVE// }" ]]; then
-    return 0
-  fi
-  local base_url
-  base_url="${SSO_PUBLIC_URL_EFFECTIVE%/}"
-  if [[ -z "${AUTH_SAML_ENTITY_ID_EFFECTIVE// }" ]]; then
-    AUTH_SAML_ENTITY_ID_EFFECTIVE="$base_url"
-    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_entity_id" "$AUTH_SAML_ENTITY_ID_EFFECTIVE"
-  fi
-  if [[ -z "${AUTH_SAML_ACS_URL_EFFECTIVE// }" ]]; then
-    AUTH_SAML_ACS_URL_EFFECTIVE="${base_url}/front/saml.php"
-    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_acs_url" "$AUTH_SAML_ACS_URL_EFFECTIVE"
-  fi
-  if [[ -z "${AUTH_SAML_LOGOUT_URL_EFFECTIVE// }" ]]; then
-    AUTH_SAML_LOGOUT_URL_EFFECTIVE="${base_url}/front/saml_logout.php"
-    update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "auth_saml_logout_url" "$AUTH_SAML_LOGOUT_URL_EFFECTIVE"
-  fi
-}
-
-validate_auth_local_sensitive_permissions() {
-  local secret_mode
-  if [[ -f "$SECRET_PATH" ]]; then
-    secret_mode="$(capture_mode_if_exists "$SECRET_PATH")"
-    if [[ "$secret_mode" != "600" ]]; then
-      echo "Invalid permissions for runtime secret file: $SECRET_PATH (expected 600, got ${secret_mode:-unknown})." >&2
-      exit 1
-    fi
-  fi
-
-  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
-    while IFS= read -r evidence_file; do
-      local evidence_mode
-      evidence_mode="$(capture_mode_if_exists "$evidence_file")"
-      if [[ "$evidence_mode" != "600" ]]; then
-        echo "Invalid permissions for auth evidence file: $evidence_file (expected 600, got ${evidence_mode:-unknown})." >&2
-        exit 1
-      fi
-    done < <(find "$AUTH_EVIDENCE_DIR" -type f \( -name "*.md" -o -name "*.yml" \))
-  fi
-}
-
-validate_auth_sensitive_exposure() {
-  local evidence_match logs_match forbidden_pattern
-  forbidden_pattern='BEGIN ([A-Z ]*PRIVATE KEY)|auth_saml_x509_certificate[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*|ldap_bind_password[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*|oidc_client_secret[[:space:]]*:[[:space:]]*["'\'']?[^"'\''][^[:space:]]*'
-  evidence_match=""
-  logs_match=""
-
-  if [[ -d "$AUTH_EVIDENCE_DIR" ]]; then
-    evidence_match="$(grep -R -n -E "$forbidden_pattern" "$AUTH_EVIDENCE_DIR" 2>/dev/null | head -n 1 || true)"
-  fi
-  if [[ -d "$(runtime_logs_dir "$ENVIRONMENT")" ]]; then
-    logs_match="$(grep -R -n -E "$forbidden_pattern" "$(runtime_logs_dir "$ENVIRONMENT")" 2>/dev/null | head -n 1 || true)"
-  fi
-
-  if [[ -n "${evidence_match// }" ]]; then
-    echo "Sensitive exposure detected in auth evidence: ${evidence_match}" >&2
-    exit 1
-  fi
-  if [[ -n "${logs_match// }" ]]; then
-    echo "Sensitive exposure detected in runtime logs: ${logs_match}" >&2
-    exit 1
-  fi
-}
-
-write_auth_evidence() {
-  local action_name="$1"
-  local status="$2"
-  local notes="$3"
-  local timestamp report_md report_yml latest_md latest_yml
-  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  ensure_auth_evidence_dir
-  report_md="$AUTH_EVIDENCE_DIR/${action_name}-${timestamp}.md"
-  report_yml="$AUTH_EVIDENCE_DIR/${action_name}-${timestamp}.yml"
-  latest_md="$AUTH_EVIDENCE_DIR/${action_name}-latest.md"
-  latest_yml="$AUTH_EVIDENCE_DIR/${action_name}-latest.yml"
-
-  cat >"$report_md" <<EOF
-# Auth ${action_name} Evidence
-
-- environment: \`$ENVIRONMENT\`
-- status: \`$status\`
-- generated_at_utc: \`$(date -u +%FT%TZ)\`
-- auth_mode: \`$AUTH_MODE_EFFECTIVE\`
-- auth_protocol: \`$AUTH_PROTOCOL_EFFECTIVE\`
-- auth_external_enabled: \`$AUTH_EXTERNAL_ENABLED_EFFECTIVE\`
-- auth_ldap_enabled: \`$AUTH_LDAP_ENABLED_EFFECTIVE\`
-- auth_saml_enabled: \`$AUTH_SAML_ENABLED_EFFECTIVE\`
-- auth_oidc_enabled: \`$AUTH_OIDC_ENABLED_EFFECTIVE\`
-- sso_public_url: \`$SSO_PUBLIC_URL_EFFECTIVE\`
-- sso_require_public_url: \`$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE\`
-- saml_plugin_expected: \`$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE\`
-- saml_plugin_name: \`$AUTH_SAML_PLUGIN_NAME_EFFECTIVE\`
-- saml_plugin_detected: \`$AUTH_SAML_PLUGIN_PRESENT\`
-
-## Derived SAML URLs
-
-- Entity ID: \`$AUTH_SAML_ENTITY_ID_EFFECTIVE\`
-- ACS URL: \`$AUTH_SAML_ACS_URL_EFFECTIVE\`
-- Logout URL: \`$AUTH_SAML_LOGOUT_URL_EFFECTIVE\`
-
-## Azure/Entra Checklist
-
-- Identifier / Entity ID: \`$AUTH_SAML_ENTITY_ID_EFFECTIVE\`
-- Reply URL / ACS URL: \`$AUTH_SAML_ACS_URL_EFFECTIVE\`
-- Sign-on URL: \`$SSO_PUBLIC_URL_EFFECTIVE\`
-- Logout URL: \`$AUTH_SAML_LOGOUT_URL_EFFECTIVE\`
-- NameID format: \`emailAddress\`
-- Claims:
-  - email: \`user.mail\`
-  - username: \`user.userprincipalname\`
-  - firstname: \`user.givenname\`
-  - lastname: \`user.surname\`
-  - groups: \`user.groups\`
-
-## GLPI Checklist
-
-- Preserve local authentication and local admin account.
-- Do not auto-install SAML plugin; install manually via Marketplace.
-- Validate plugin presence only when SAML is enabled.
-- Do not expose secrets in logs/evidence.
-
-## Notes
-
-$notes
-EOF
-
-  cat >"$report_yml" <<EOF
----
-environment: '$(yaml_escape "$ENVIRONMENT")'
-status: '$(yaml_escape "$status")'
-generated_at_utc: '$(date -u +%FT%TZ)'
-auth_mode: '$(yaml_escape "$AUTH_MODE_EFFECTIVE")'
-auth_protocol: '$(yaml_escape "$AUTH_PROTOCOL_EFFECTIVE")'
-auth_external_enabled: $(yaml_escape "$AUTH_EXTERNAL_ENABLED_EFFECTIVE")
-auth_ldap_enabled: $(yaml_escape "$AUTH_LDAP_ENABLED_EFFECTIVE")
-auth_saml_enabled: $(yaml_escape "$AUTH_SAML_ENABLED_EFFECTIVE")
-auth_oidc_enabled: $(yaml_escape "$AUTH_OIDC_ENABLED_EFFECTIVE")
-sso_public_url: '$(yaml_escape "$SSO_PUBLIC_URL_EFFECTIVE")'
-sso_require_public_url: $(yaml_escape "$SSO_REQUIRE_PUBLIC_URL_EFFECTIVE")
-saml_plugin_expected: $(yaml_escape "$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE")
-saml_plugin_name: '$(yaml_escape "$AUTH_SAML_PLUGIN_NAME_EFFECTIVE")'
-saml_plugin_detected: $(yaml_escape "$AUTH_SAML_PLUGIN_PRESENT")
-saml_entity_id: '$(yaml_escape "$AUTH_SAML_ENTITY_ID_EFFECTIVE")'
-saml_acs_url: '$(yaml_escape "$AUTH_SAML_ACS_URL_EFFECTIVE")'
-saml_logout_url: '$(yaml_escape "$AUTH_SAML_LOGOUT_URL_EFFECTIVE")'
-notes: '$(yaml_escape "$notes")'
-EOF
-
-  chmod 600 "$report_md" "$report_yml"
-  cp "$report_md" "$latest_md"
-  cp "$report_yml" "$latest_yml"
-  chmod 600 "$latest_md" "$latest_yml"
-}
-
-run_auth_validation_suite() {
-  validate_auth_public_url
-  validate_auth_tls_requirements
-  validate_auth_glpi_version
-  validate_auth_webroot_public
-
-  if auth_requires_https; then
-    if ! check_auth_php_openssl; then
-      echo "OpenSSL PHP extension validation failed on app host." >&2
-      exit 1
-    fi
-    if ! check_auth_time_sync; then
-      echo "Time synchronization validation failed on app host (chrony/ntpd/systemd-timesyncd)." >&2
-      exit 1
-    fi
-  fi
-
-  detect_saml_plugin_presence
-  if [[ "$AUTH_SAML_PLUGIN_EXPECTED_EFFECTIVE" == "true" ]] && [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
-    if [[ "$AUTH_SAML_PLUGIN_PRESENT" != "true" ]]; then
-      echo "SAML plugin was expected but not detected. Install it manually via GLPI Marketplace." >&2
-      exit 1
-    fi
-  fi
-}
-
-run_auth_post_check_suite() {
-  run_auth_validation_suite
-  if auth_requires_https; then
-    if ! run_tls_web_server_postcheck; then
-      echo "TLS/web server post-check failed for auth domain." >&2
-      exit 1
-    fi
-  fi
-  validate_auth_local_sensitive_permissions
-  validate_auth_sensitive_exposure
-}
-
-run_auth() {
-  local auth_action="$ACTION"
-  local notes
-
-  ensure_runtime_inputs_if_missing "false"
-  resolve_auth_contract
-
-  case "$auth_action" in
-    check|prepare|apply|post-check|rollback) ;;
-    *)
-      echo "Unsupported auth action: $auth_action (expected check|prepare|apply|post-check|rollback)" >&2
-      exit 1
-      ;;
-  esac
-
-  case "$auth_action" in
-    check)
-      auth_create_backup_snapshot "check"
-      run_auth_validation_suite
-      notes="Auth check completed. No mutable system changes were applied."
-      write_auth_state "check" "completed" "$notes"
-      write_auth_evidence "check" "pass" "$notes"
-      ;;
-    prepare)
-      auth_create_backup_snapshot "prepare"
-      run_auth_validation_suite
-      if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
-        derive_saml_urls_if_missing
-      fi
-      notes="Auth prepare completed. Runtime auth values were prepared without destructive changes."
-      write_auth_state "prepare" "completed" "$notes"
-      write_auth_evidence "prepare" "pass" "$notes"
-      ;;
-    apply)
-      auth_create_backup_snapshot "apply"
-      run_auth_validation_suite
-      if [[ "$AUTH_MODE_EFFECTIVE" == "saml" || "$AUTH_SAML_ENABLED_EFFECTIVE" == "true" ]]; then
-        derive_saml_urls_if_missing
-      fi
-      notes="Auth apply completed in safe mode. No plugin installation, no DB writes, no local auth/admin removal. Use manual checklist for provider-side and GLPI plugin internal configuration."
-      write_auth_state "apply" "completed" "$notes"
-      write_auth_evidence "apply" "pass" "$notes"
-      ;;
-    post-check)
-      auth_create_backup_snapshot "post-check"
-      run_auth_post_check_suite
-      notes="Auth post-check completed. TLS/URL/plugin/checklist consistency validated."
-      write_auth_state "post-check" "completed" "$notes"
-      write_auth_evidence "post-check" "pass" "$notes"
-      ;;
-    rollback)
-      auth_create_backup_snapshot "rollback"
-      run_auth_rollback
-      notes="Auth rollback completed successfully."
-      ;;
-  esac
-
-  if [[ "$AUTH_MODE_EFFECTIVE" == "local" && "$auth_action" != "rollback" ]]; then
-    echo "AUTH_MODE=local; authentication behavior remains unchanged."
-  fi
-  echo "Auth action '$auth_action' completed."
-}
-
 trap 'finalize_glpictl_operation "$?"' EXIT
 trap 'handle_signal INT' INT
 trap 'handle_signal TERM' TERM
@@ -2871,9 +2693,8 @@ case "$DOMAIN" in
   tls) run_tls ;;
   ops) run_ops ;;
   audit) run_audit ;;
-  auth) run_auth ;;
   *)
-    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit|auth)" >&2
+    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit)" >&2
     exit 1
     ;;
 esac

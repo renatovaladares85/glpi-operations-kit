@@ -4,125 +4,70 @@ Este apêndice explica como os dados de configuração e runtime circulam no pro
 
 ## Entrada pública versus segredo
 
-Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os 3 segredos de deploy lidos desse arquivo (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`) são materializados em `.runtime/<environment>/secrets.yml`; segredos de autenticação externa são runtime-only e devem permanecer somente em `.runtime/<environment>/secrets.yml`.
-
-Comportamento baseline do template:
-
-- `config/product.env` mantém descomentadas apenas as chaves obrigatórias de baseline.
-- Chaves opcionais e específicas de cenário ficam comentadas até o cenário ser explicitamente habilitado.
-
-Na prática, você ajusta os valores públicos em `config/<environment>.env`, executa `deploy check`, e deixa os scripts renderizarem os arquivos runtime usados pelo Ansible.
+Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos de deploy lidos desse arquivo (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD` e `DATABASE_MANAGED_ADMIN_PASSWORD` opcional) são materializados em `.runtime/<environment>/secrets.yml`.
 
 ## Como funciona o `GLPI_APP_PACKAGES` automático
 
 `GLPI_APP_PACKAGES` tem dois modos:
 
-- Modo automático: deixe `GLPI_APP_PACKAGES=` vazio no `config/<environment>.env`.
-- Modo manual (override total): preencha `GLPI_APP_PACKAGES` com uma lista completa de pacotes separados por vírgula.
+- Automático: deixe `GLPI_APP_PACKAGES=` vazio.
+- Manual: preencha `GLPI_APP_PACKAGES` com lista completa separada por vírgula.
 
-No modo automático, a resolução dos pacotes é feita no renderer `scripts/lib/render_product_config.py`, usando:
-
-- `WEB_SERVER_PACKAGES` (pacotes específicos por servidor web)
-- `DEFAULT_GLPI_APP_PACKAGES` (pacotes comuns de PHP e utilitários)
-
-Lógica efetiva:
-
-1. Lê `WEB_SERVER_TYPE`.
-2. Monta os pacotes como `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE] + DEFAULT_GLPI_APP_PACKAGES`.
-3. Se `GLPI_APP_PACKAGES` estiver preenchido, usa esse valor como override total.
-
-Exemplos no `config/<environment>.env`:
-
-- Nginx automático:
-  - `WEB_SERVER_TYPE=nginx`
-  - `GLPI_APP_PACKAGES=`
-- Apache automático:
-  - `WEB_SERVER_TYPE=apache`
-  - `GLPI_APP_PACKAGES=`
-- lighttpd automático:
-  - `WEB_SERVER_TYPE=lighttpd`
-  - `GLPI_APP_PACKAGES=`
-- Valores suportados no Linux:
-  - `WEB_SERVER_TYPE=nginx`
-  - `WEB_SERVER_TYPE=apache`
-  - `WEB_SERVER_TYPE=lighttpd`
-
-Exemplos de override manual:
-
-- Nginx:
-  - `WEB_SERVER_TYPE=nginx`
-  - `GLPI_APP_PACKAGES=nginx,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
-- Apache:
-  - `WEB_SERVER_TYPE=apache`
-  - `GLPI_APP_PACKAGES=apache2,libapache2-mod-fcgid,libapache2-mod-php8.3,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
-- lighttpd:
-  - `WEB_SERVER_TYPE=lighttpd`
-  - `GLPI_APP_PACKAGES=lighttpd,php-fpm,php-cli,php-curl,php-gd,php-intl,php-mbstring,php-bcmath,php-mysql,php-xml,php-zip,php-bz2,php-apcu,php-ldap,php-imap,php-opcache,php-redis,tar,xz-utils,curl,openssl,mariadb-client`
+No modo automático, o renderer `scripts/lib/render_product_config.py` monta `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE] + DEFAULT_GLPI_APP_PACKAGES`.
 
 ## Mapa de arquivos runtime
 
 | Arquivo | Quem cria | Por que existe | Quem consome |
 |---|---|---|---|
-| `.runtime/<env>/inventory.runtime.yml` | renderizador de config via `glpictl` | Codifica o modelo efetivo de alvo (`local` ou `ssh`) para a execução | `ansible-inventory`, `ansible-playbook` |
-| `.runtime/<env>/public.runtime.yml` | renderizador de config via `glpictl` | Converte o `key=value` público em variáveis prontas para roles | `ansible-playbook` |
-| `.runtime/<env>/overrides.runtime.yml` | scripts e ações do operador | Guarda sobrescritas mutáveis (por exemplo troca de TLS) sem alterar baseline | `ansible-playbook` |
-| `.runtime/<env>/secrets.yml` | renderizador de `config/<env>.env` | Guarda segredos fora do Git com permissão restrita | `ansible-playbook` |
-| `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Status de pré-requisitos e política em formato máquina | operadores, auditoria |
+| `.runtime/<env>/inventory.runtime.yml` | renderizador via `glpictl` | Modelo efetivo de alvo (`local` ou `ssh`) | `ansible-inventory`, `ansible-playbook` |
+| `.runtime/<env>/public.runtime.yml` | renderizador via `glpictl` | Converte `key=value` público em variáveis de role | `ansible-playbook` |
+| `.runtime/<env>/overrides.runtime.yml` | scripts e operador | Sobrescritas mutáveis (ex.: TLS) | `ansible-playbook` |
+| `.runtime/<env>/secrets.yml` | renderizador de `config/<env>.env` | Segredos fora do Git com permissão restrita | `ansible-playbook` |
+| `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Status técnico do precheck/política | operadores, auditoria |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Resumo legível do precheck | operadores, auditoria |
-| `.runtime/<env>/state/deploy-sequence.yml` | fluxo de deploy | Rastreia estado de execução ordenada | `glpictl` |
-| `.runtime/<env>/state/security-mode-last.yml` | controle de política em permissive | Registra contexto do último aceite de risco | operadores, auditoria |
-| `.runtime/<env>/evidence/security-mode-*.yml` | controle de política em permissive | Histórico de exceções e justificativas | operadores, auditoria |
-| `.runtime/<env>/logs/*.log` e `*.summary.yml` | scripts operacionais | Trilha de execução e sumário compacto por execução | operadores, troubleshooting, auditoria |
+| `.runtime/<env>/state/deploy-sequence.yml` | fluxo deploy | Estado de execução ordenada | `glpictl` |
+| `.runtime/<env>/state/security-mode-last.yml` | política em permissive | Contexto do último aceite de risco | operadores, auditoria |
+| `.runtime/<env>/evidence/security-mode-*.yml` | política em permissive | Histórico de exceções/justificativas | operadores, auditoria |
+| `.runtime/<env>/logs/*.log` e `*.summary.yml` | scripts operacionais | Trilha e resumo de execução | operadores, troubleshooting, auditoria |
 
 ## Precedência de merge em execução
-
-Quando o Ansible roda, a precedência é explícita:
 
 1. `public.runtime.yml`
 2. `overrides.runtime.yml`
 3. `secrets.yml`
 
-Operacionalmente, isso significa: baseline vem de `config/<environment>.env`, ajustes mutáveis entram por overrides, e segredos entram por último via arquivo secreto.
-
 ## Valores do contrato de execução
 
-`GLPI_EXECUTION_MODE`, `GLPI_HOST_ROLE` e `SECURITY_MODE` podem ser passados como override temporário, mas o comportamento padrão vem das chaves `EXECUTION_MODE`, `EXECUTION_HOST_ROLE_DEFAULT` e `OPERATIONS_SECURITY_MODE_DEFAULT` no arquivo de ambiente.
+`GLPI_EXECUTION_MODE`, `GLPI_HOST_ROLE` e `SECURITY_MODE` podem ser passados como override temporário, mas o padrão vem de `EXECUTION_MODE`, `EXECUTION_HOST_ROLE_DEFAULT` e `OPERATIONS_SECURITY_MODE_DEFAULT`.
 
 ## Chaves secretas obrigatórias
 
-As chaves mínimas obrigatórias no `config/<environment>.env` para materialização de segredos são:
+As chaves mínimas no `config/<environment>.env` para materialização de segredos são:
 
 - `DATABASE_PASSWORD`
-- `DATABASE_ROOT_PASSWORD`
-- `MONITORING_MYSQLD_EXPORTER_PASSWORD`
+- `DATABASE_ROOT_PASSWORD` quando `DATABASE_DEPLOYMENT_MODE=self_hosted`
+- `MONITORING_MYSQLD_EXPORTER_PASSWORD` quando `DATABASE_DEPLOYMENT_MODE=self_hosted`
 
-Se alguma estiver ausente, os scripts falham cedo e bloqueiam operações mutáveis até o `config/<environment>.env` ficar completo.
+Opcional para fallback em managed mode:
 
-Segredos de autenticação externa não devem ser colocados no Git e devem permanecer somente em `.runtime/<environment>/secrets.yml`:
+- `DATABASE_MANAGED_ADMIN_PASSWORD`
 
-- `auth_saml_x509_certificate`
-- `ldap_bind_password`
-- `oidc_client_secret`
+Se faltar chave obrigatória, o script falha cedo e bloqueia operação mutável.
 
 ## Regras condicionais de runtime
 
-Quando o modo é `local`, não há exigência de conectividade SSH remota, e comandos por papel devem ser executados no host correto em topologia dual-server.
+Quando o modo é `local`, não há exigência de conectividade SSH remota, e comandos por papel devem rodar no host correto na topologia dual-server.
 
 Quando o modo é `ssh`, chave e conectividade remota tornam-se obrigatórias:
 
 - `NETWORK_SSH_USER` deve estar ativo.
-- `NETWORK_SSH_PRIVATE_KEY_PATH` deve estar ativo e apontar para arquivo real.
+- `NETWORK_SSH_PRIVATE_KEY_PATH` deve apontar para arquivo real.
 
-Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem estar ativos e apontar para arquivos reais:
+Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem existir:
 
 - `TLS_PROVIDED_LOCAL_CERT_PATH`
 - `TLS_PROVIDED_LOCAL_KEY_PATH`
 
-Quando auth externa é habilitada (`AUTH_MODE!=local` ou `AUTH_*_ENABLED=true`), entram checks de contrato de URL:
+As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas; o bloqueio depende do `SECURITY_MODE` efetivo.
 
-- `SSO_PUBLIC_URL` torna-se obrigatório quando a exigência de URL está ativa.
-- Em cenários SAML/OIDC, `SSO_PUBLIC_URL` deve ser `https://` e `TLS_MODE` não pode ser `none`.
-
-Se faltarem chaves obrigatórias no `config/<environment>.env`, a execução falha cedo e não solicita dados no terminal.
-
-As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas, e o efeito de bloqueio depende do `SECURITY_MODE` efetivo.
+Chaves legadas `AUTH_*` / `SSO_*` podem existir em `.env` antigo e são ignoradas pelos fluxos de execução.

@@ -12,7 +12,7 @@ SCOPE="${4:-}"
 export GLPI_ENVIRONMENT="$ENVIRONMENT"
 
 if [[ -z "$DOMAIN" ]]; then
-  echo "Usage: ./scripts/ops-maintenance.sh <users|cert|audit|resume> [environment] [action] [scope]" >&2
+  echo "Usage: ./scripts/ops-maintenance.sh <users|cert|audit|resume|timezone> [environment] [action] [scope]" >&2
   exit 1
 fi
 
@@ -27,6 +27,11 @@ if [[ "$DB_DEPLOYMENT_MODE" == "invalid" ]]; then
   exit 1
 fi
 PROTECTED_USERS=("root" "www-data" "mysql")
+TIMEZONE_TARGET=""
+TIMEZONE_SUPPORT_ENABLED="false"
+TIMEZONE_DB_MODE_RAW="disabled"
+TIMEZONE_DB_MODE_EFFECTIVE="disabled"
+TIMEZONE_DB_LEGACY_GRANT="false"
 
 ensure_runtime_foundation "$ENVIRONMENT"
 ensure_bootstrap_baseline "$SCRIPT_ROOT"
@@ -38,7 +43,7 @@ require_runtime_file "$INVENTORY_RUNTIME_PATH" "runtime inventory"
 export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
 
 case "$DOMAIN" in
-  cert|audit)
+  cert|audit|timezone)
     require_runtime_file "$PUBLIC_RUNTIME_PATH" "public runtime data"
     require_runtime_file "$OVERRIDE_RUNTIME_PATH" "runtime override data"
     ;;
@@ -307,6 +312,272 @@ audit_check() {
   write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "audit-check" "completed" "audit checks completed"
 }
 
+normalize_bool_local() {
+  local value="${1:-}"
+  local default_value="${2:-false}"
+  case "${value,,}" in
+    true|1|yes|on) echo "true" ;;
+    false|0|no|off|"") echo "false" ;;
+    *) echo "$default_value" ;;
+  esac
+}
+
+shell_escape_single_quotes() {
+  local value="$1"
+  value="${value//\'/\'\"\'\"\'}"
+  printf "%s" "$value"
+}
+
+read_runtime_effective_value() {
+  local key="$1"
+  local default_value="${2:-}"
+  local value
+  value="$(read_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "$key" || true)"
+  [[ -z "${value// }" ]] && value="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "$key" || true)"
+  [[ -z "${value// }" ]] && value="$default_value"
+  echo "$value"
+}
+
+read_db_app_password() {
+  require_runtime_file "$SECRET_PATH" "runtime secret file"
+  read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true
+}
+
+read_db_managed_admin_password() {
+  require_runtime_file "$SECRET_PATH" "runtime secret file"
+  read_yaml_top_level_value "$SECRET_PATH" "glpi_db_managed_admin_password" || true
+}
+
+timezone_load_runtime_contract() {
+  TIMEZONE_TARGET="$(read_runtime_effective_value "timezone_name" "UTC")"
+  TIMEZONE_SUPPORT_ENABLED="$(normalize_bool_local "$(read_runtime_effective_value "glpi_timezone_support_enabled" "false")" "false")"
+  TIMEZONE_DB_MODE_RAW="$(read_runtime_effective_value "glpi_timezone_db_mode" "disabled")"
+  TIMEZONE_DB_MODE_RAW="${TIMEZONE_DB_MODE_RAW,,}"
+  TIMEZONE_DB_LEGACY_GRANT="$(normalize_bool_local "$(read_runtime_effective_value "glpi_timezone_db_legacy_grant" "false")" "false")"
+  case "$TIMEZONE_DB_MODE_RAW" in
+    disabled|validate|apply) ;;
+    *)
+      echo "Invalid GLPI timezone DB mode: ${TIMEZONE_DB_MODE_RAW} (expected disabled|validate|apply)." >&2
+      return 1
+      ;;
+  esac
+  TIMEZONE_DB_MODE_EFFECTIVE="$TIMEZONE_DB_MODE_RAW"
+  if [[ "$DB_DEPLOYMENT_MODE" == "managed" && "$TIMEZONE_SUPPORT_ENABLED" == "true" && "$TIMEZONE_DB_MODE_EFFECTIVE" == "disabled" ]]; then
+    TIMEZONE_DB_MODE_EFFECTIVE="validate"
+  fi
+  return 0
+}
+
+timezone_check_os() {
+  local timezone_escaped
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "current_tz=\$(timedatectl show -p Timezone --value 2>/dev/null || true); [[ \"\$current_tz\" == '${timezone_escaped}' ]]" -o >/dev/null 2>&1; then
+    echo "OS timezone check: PASS (${TIMEZONE_TARGET})"
+    return 0
+  fi
+  echo "OS timezone check: FAIL (expected ${TIMEZONE_TARGET})"
+  return 1
+}
+
+timezone_check_php() {
+  local timezone_escaped php_service
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  php_service="$(read_runtime_effective_value "glpi_php_fpm_service" "php8.3-fpm")"
+  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "php_tz=\$(php -r 'echo date_default_timezone_get();' 2>/dev/null || true); systemctl is-active --quiet '${php_service}'; [[ \"\$php_tz\" == '${timezone_escaped}' ]]" -o >/dev/null 2>&1; then
+    echo "PHP timezone check: PASS (${TIMEZONE_TARGET})"
+    return 0
+  fi
+  echo "PHP timezone check: FAIL (expected ${TIMEZONE_TARGET})"
+  return 1
+}
+
+timezone_check_db_self_hosted() {
+  local root_password timezone_escaped
+  root_password="$(read_db_root_password)"
+  if [[ -z "${root_password// }" ]]; then
+    echo "DB timezone check (self_hosted): FAIL (missing DATABASE_ROOT_PASSWORD materialized runtime secret)"
+    return 1
+  fi
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  if ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='$(shell_escape_single_quotes "$root_password")' mysql --protocol=SOCKET --socket=/run/mysqld/mysqld.sock --user=root --batch --skip-column-names --silent --execute=\"SELECT CASE WHEN CONVERT_TZ('2000-01-01 00:00:00','UTC','${timezone_escaped}') IS NULL THEN 0 ELSE 1 END;\" | grep -qx '1'" -o >/dev/null 2>&1; then
+    echo "DB timezone check (self_hosted): PASS (${TIMEZONE_TARGET})"
+    return 0
+  fi
+  echo "DB timezone check (self_hosted): FAIL (timezone tables may be missing)"
+  return 1
+}
+
+timezone_check_db_managed_attempt() {
+  local db_user="$1"
+  local db_password="$2"
+  local db_host db_port db_name
+  local timezone_escaped db_host_escaped db_port_escaped db_user_escaped db_password_escaped db_name_escaped
+
+  db_host="$(read_runtime_effective_value "glpi_db_host" "")"
+  db_port="$(read_runtime_effective_value "mariadb_port" "3306")"
+  db_name="$(read_runtime_effective_value "glpi_db_name" "")"
+  [[ -z "${db_host// }" || -z "${db_name// }" ]] && return 1
+
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  db_host_escaped="$(shell_escape_single_quotes "$db_host")"
+  db_port_escaped="$(shell_escape_single_quotes "$db_port")"
+  db_user_escaped="$(shell_escape_single_quotes "$db_user")"
+  db_password_escaped="$(shell_escape_single_quotes "$db_password")"
+  db_name_escaped="$(shell_escape_single_quotes "$db_name")"
+
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --database='${db_name_escaped}' --batch --skip-column-names --silent --execute=\"SELECT CASE WHEN CONVERT_TZ('2000-01-01 00:00:00','UTC','${timezone_escaped}') IS NULL THEN 0 ELSE 1 END;\" | grep -qx '1'" -o >/dev/null 2>&1
+}
+
+timezone_check_db_managed() {
+  local app_user app_password admin_password
+  app_user="$(read_runtime_effective_value "glpi_db_user" "")"
+  app_password="$(read_db_app_password)"
+  admin_password="$(read_db_managed_admin_password)"
+
+  if [[ -n "${app_user// }" && -n "${app_password// }" ]] && timezone_check_db_managed_attempt "$app_user" "$app_password"; then
+    echo "DB timezone check (managed): PASS (user=${app_user})"
+    return 0
+  fi
+  if [[ -n "${admin_password// }" ]] && timezone_check_db_managed_attempt "root" "$admin_password"; then
+    echo "DB timezone check (managed): PASS (user=root)"
+    return 0
+  fi
+  if [[ -n "${admin_password// }" ]] && timezone_check_db_managed_attempt "admin" "$admin_password"; then
+    echo "DB timezone check (managed): PASS (user=admin)"
+    return 0
+  fi
+  echo "DB timezone check (managed): FAIL (timezone tables may be missing or credentials/reachability failed)"
+  return 1
+}
+
+timezone_apply_os() {
+  local timezone_escaped
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "timedatectl set-timezone '${timezone_escaped}'" -o >/dev/null
+  echo "OS timezone apply: PASS (${TIMEZONE_TARGET})"
+}
+
+timezone_apply_php() {
+  local timezone_escaped php_service php_version_major_minor
+  php_service="$(read_runtime_effective_value "glpi_php_fpm_service" "php8.3-fpm")"
+  php_version_major_minor="$(read_runtime_effective_value "glpi_php_fpm_socket" "/run/php/php8.3-fpm.sock" | sed -n "s|.*php\\([0-9]\\+\\.[0-9]\\+\\)-fpm.*|\\1|p")"
+  [[ -z "${php_version_major_minor// }" ]] && php_version_major_minor="8.3"
+  timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "printf '%s\n' 'date.timezone = ${timezone_escaped}' > /etc/php/${php_version_major_minor}/fpm/conf.d/99-glpi-timezone.ini; systemctl restart '${php_service}'" -o >/dev/null
+  echo "PHP timezone apply: PASS (${TIMEZONE_TARGET})"
+}
+
+timezone_apply_db_self_hosted() {
+  local root_password db_user db_grant_host user_sql host_sql
+  root_password="$(read_db_root_password)"
+  db_user="$(read_runtime_effective_value "glpi_db_user" "")"
+  db_grant_host="$(read_runtime_effective_value "db_grant_host" "%")"
+  if [[ -z "${root_password// }" ]]; then
+    echo "DB timezone apply (self_hosted): FAIL (missing DATABASE_ROOT_PASSWORD materialized runtime secret)"
+    return 1
+  fi
+  ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; tz_loader=\$(command -v mariadb-tzinfo-to-sql || command -v mysql_tzinfo_to_sql || true); if [[ -z \"\$tz_loader\" ]]; then exit 2; fi; MYSQL_PWD='$(shell_escape_single_quotes "$root_password")' \"\$tz_loader\" /usr/share/zoneinfo | MYSQL_PWD='$(shell_escape_single_quotes "$root_password")' mysql --protocol=SOCKET --socket=/run/mysqld/mysqld.sock --user=root mysql; systemctl restart mariadb" -o >/dev/null
+  echo "DB timezone apply (self_hosted): PASS (timezone tables loaded)"
+  if [[ "$TIMEZONE_DB_LEGACY_GRANT" == "true" && -n "${db_user// }" ]]; then
+    user_sql="${db_user//\'/\'\'}"
+    host_sql="${db_grant_host//\'/\'\'}"
+    ansible glpi_db -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='$(shell_escape_single_quotes "$root_password")' mysql --protocol=SOCKET --socket=/run/mysqld/mysqld.sock --user=root --execute=\"GRANT SELECT ON mysql.time_zone_name TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;\"" -o >/dev/null
+    echo "DB timezone apply (self_hosted): PASS (legacy grant applied to ${db_user}@${db_grant_host})"
+  fi
+  return 0
+}
+
+timezone_apply_db_managed_if_confirmed() {
+  local admin_password db_host db_port
+  admin_password="$(read_db_managed_admin_password)"
+  db_host="$(read_runtime_effective_value "glpi_db_host" "")"
+  db_port="$(read_runtime_effective_value "mariadb_port" "3306")"
+
+  if [[ "$TIMEZONE_DB_MODE_EFFECTIVE" != "apply" ]]; then
+    echo "DB timezone apply (managed): SKIP (effective mode=${TIMEZONE_DB_MODE_EFFECTIVE}, validation-only)."
+    return 0
+  fi
+  if [[ -z "${admin_password// }" ]]; then
+    echo "DB timezone apply (managed): WARN (DATABASE_MANAGED_ADMIN_PASSWORD is missing)."
+    return 0
+  fi
+  if ! prompt_yes_no "Managed DB timezone apply may affect other databases in the same instance. Proceed with DB timezone-table load now?"; then
+    echo "DB timezone apply (managed): SKIP (operator chose not to execute)."
+    return 0
+  fi
+
+  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; tz_loader=\$(command -v mariadb-tzinfo-to-sql || command -v mysql_tzinfo_to_sql || true); if [[ -z \"\$tz_loader\" ]]; then exit 2; fi; \"\$tz_loader\" /usr/share/zoneinfo | MYSQL_PWD='$(shell_escape_single_quotes "$admin_password")' mysql --protocol=TCP --host='$(shell_escape_single_quotes "$db_host")' --port='$(shell_escape_single_quotes "$db_port")' --user=root mysql" -o >/dev/null 2>&1; then
+    echo "DB timezone apply (managed): PASS (executed with user=root)"
+    return 0
+  fi
+  if ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; tz_loader=\$(command -v mariadb-tzinfo-to-sql || command -v mysql_tzinfo_to_sql || true); if [[ -z \"\$tz_loader\" ]]; then exit 2; fi; \"\$tz_loader\" /usr/share/zoneinfo | MYSQL_PWD='$(shell_escape_single_quotes "$admin_password")' mysql --protocol=TCP --host='$(shell_escape_single_quotes "$db_host")' --port='$(shell_escape_single_quotes "$db_port")' --user=admin mysql" -o >/dev/null 2>&1; then
+    echo "DB timezone apply (managed): PASS (executed with user=admin)"
+    return 0
+  fi
+  echo "DB timezone apply (managed): WARN (failed with users root/admin)."
+  return 0
+}
+
+timezone_check() {
+  local has_failure="false"
+  write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "timezone-check" "started" "checking timezone readiness"
+  timezone_load_runtime_contract || return 1
+  echo "Timezone support: enabled=${TIMEZONE_SUPPORT_ENABLED} db_mode=${TIMEZONE_DB_MODE_RAW} effective_db_mode=${TIMEZONE_DB_MODE_EFFECTIVE} deployment_mode=${DB_DEPLOYMENT_MODE} target_timezone=${TIMEZONE_TARGET}"
+
+  if ! timezone_check_os; then
+    has_failure="true"
+  fi
+  if ! timezone_check_php; then
+    has_failure="true"
+  fi
+
+  if [[ "$TIMEZONE_SUPPORT_ENABLED" == "true" && "$TIMEZONE_DB_MODE_EFFECTIVE" != "disabled" ]]; then
+    if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
+      if ! timezone_check_db_managed; then
+        has_failure="true"
+      fi
+    else
+      if ! timezone_check_db_self_hosted; then
+        has_failure="true"
+      fi
+    fi
+  else
+    echo "DB timezone check: SKIP (timezone support disabled or DB mode disabled)."
+  fi
+
+  if [[ "$has_failure" == "true" ]]; then
+    write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "timezone-check" "failed" "timezone readiness check failed"
+    return 1
+  fi
+  write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "timezone-check" "completed" "timezone readiness check passed"
+  return 0
+}
+
+timezone_apply() {
+  write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "timezone-apply" "started" "applying timezone settings"
+  timezone_load_runtime_contract || return 1
+  echo "Timezone support: enabled=${TIMEZONE_SUPPORT_ENABLED} db_mode=${TIMEZONE_DB_MODE_RAW} effective_db_mode=${TIMEZONE_DB_MODE_EFFECTIVE} deployment_mode=${DB_DEPLOYMENT_MODE} target_timezone=${TIMEZONE_TARGET}"
+
+  timezone_apply_os || return 1
+  timezone_apply_php || return 1
+
+  if [[ "$TIMEZONE_SUPPORT_ENABLED" == "true" && "$TIMEZONE_DB_MODE_EFFECTIVE" != "disabled" ]]; then
+    if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
+      timezone_apply_db_managed_if_confirmed || return 1
+    else
+      if [[ "$TIMEZONE_DB_MODE_EFFECTIVE" == "apply" ]]; then
+        timezone_apply_db_self_hosted || return 1
+      else
+        echo "DB timezone apply (self_hosted): SKIP (effective mode=${TIMEZONE_DB_MODE_EFFECTIVE})."
+      fi
+    fi
+  else
+    echo "DB timezone apply: SKIP (timezone support disabled or DB mode disabled)."
+  fi
+
+  timezone_check
+}
+
 resume_last_operation() {
   local latest_state
   latest_state="$(latest_operation_state "$ENVIRONMENT")"
@@ -403,6 +674,13 @@ case "$DOMAIN" in
   resume)
     resume_last_operation
     RESULT=$?
+    ;;
+  timezone)
+    case "${ACTION:-check}" in
+      check) timezone_check; RESULT=$? ;;
+      apply) timezone_apply; RESULT=$? ;;
+      *) echo "Unsupported timezone action: $ACTION (expected check|apply)" >&2; RESULT=1 ;;
+    esac
     ;;
   *)
     echo "Unsupported domain: $DOMAIN" >&2

@@ -22,14 +22,12 @@ Activation rule:
 
 ## Conditional checks by enabled feature
 
-Validation does not check only global mandatory keys. It also checks required keys for enabled features:
+Validation checks global mandatory keys and scenario-specific keys:
 
 - `EXECUTION_MODE=ssh`: `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` must be active and valid.
 - `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB host Linux operations are disabled; DB validation uses direct MySQL TCP connectivity.
-- External auth enabled (`AUTH_MODE!=local` or `AUTH_*_ENABLED=true`): `SSO_PUBLIC_URL` becomes mandatory when URL enforcement is active.
-- SAML/OIDC enabled: `SSO_PUBLIC_URL` must be `https://` and `TLS_MODE` cannot be `none`.
-- `SECURITY_REQUIRE_SSO=true`: requires `SECURITY_SSO_ENABLED=true`.
+- `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates PHP/system timezone and DB timezone readiness according to `GLPI_TIMEZONE_DB_MODE`.
 
 ## Secret handling
 
@@ -38,13 +36,7 @@ Deployment secrets currently read from `config/<environment>.env` and materializ
 - `DATABASE_PASSWORD`
 - `DATABASE_ROOT_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD` (`DATABASE_DEPLOYMENT_MODE=self_hosted`)
-- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, used as managed-mode fallback credential for `root`/`admin` connectivity checks)
-
-External-auth secrets are runtime-only and must stay in `.runtime/<environment>/secrets.yml`:
-
-- `auth_saml_x509_certificate`
-- `ldap_bind_password`
-- `oidc_client_secret`
+- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, managed-mode fallback credential)
 
 Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sensitive evidence.
 
@@ -60,11 +52,13 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `TLS_*` | TLS mode, certificate target paths, provided source files. | Manual field guide and TLS appendix. |
 | `BACKUP_*` | Backup base directory and retention. | Manual field guide. |
 | `MONITORING_*`, `ALERTING_*` | Exporters, labels, thresholds, scrape profiles, alert routes. | Manual field guide. |
-| `AUTH_*`, `SSO_*` | Optional local/LDAP/SAML/OIDC preparation and SSO evidence. | Manual field guide and auth/SSO appendix. |
 | `SECURITY_*` | Secure/permissive policy gates. | Manual field guide. |
 | `PATH_*` | Secure GLPI filesystem layout outside webroot. | Manual field guide. |
 | `OPERATIONS_*` | Timezone, cron, operator group, default security mode. | Manual field guide. |
+| `GLPI_TIMEZONE_*` | Optional GLPI timezone support and DB timezone workflow. | Manual field guide. |
 | `RESOURCE_PROFILE_*` | PHP-FPM and MariaDB tuning profiles for `small`, `medium`, `large`. | Manual field guide. |
+
+Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ignored by execution flows.
 
 ## High-risk decisions
 
@@ -74,8 +68,7 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `TOPOLOGY_MODE` | Match the real host layout. | Wrong topology can apply DB/app actions to the wrong host. |
 | `DATABASE_DEPLOYMENT_MODE` | `self_hosted` for VM-managed DB, `managed` for AWS RDS/external DB. | Controls whether scripts expect Linux DB host operations or direct DB TCP validation. |
 | `WEB_SERVER_TYPE` | One of `nginx`, `apache`, `lighttpd`. | The Linux kit automates these engines only. |
-| `TLS_MODE` | `provided` for production. | SSO and compliance usually require HTTPS. |
-| `AUTH_MODE` | `local` unless external auth is explicitly approved. | Preserves existing login behavior. |
+| `TLS_MODE` | `provided` for production. | Enforces secure public access defaults. |
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure`. | Prevents silent risk acceptance. |
 | `RESOURCE_PROFILE_ACTIVE` | `small` until sized by real workload. | Avoids overcommitting small hosts. |

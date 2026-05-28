@@ -8,7 +8,7 @@ Use estes apêndices quando precisar preencher configuração, executar instala�
 - [Exemplos de Ambiente](environment-examples.md)
 - [Entradas e Arquivos de Runtime](runtime-input-reference.md)
 
-## Segurança, TLS e autenticação
+## Segurança, TLS e SSO
 
 - [Modos TLS e Operações de Certificado](tls-modes.md)
 - [Guia de Autenticação, SSO e Azure/Entra ID](auth-sso-guide.md)

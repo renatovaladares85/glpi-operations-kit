@@ -145,18 +145,14 @@ check_staging_certification_artifacts() {
 }
 
 check_production_policy_contract() {
-  local tls_mode sso_enabled require_tls require_https require_sso
+  local tls_mode require_tls require_https
   tls_mode="$(read_product_config_value "$ENVIRONMENT" "tls.mode" || true)"
-  sso_enabled="$(read_product_config_value "$ENVIRONMENT" "security.sso_enabled" || true)"
   require_tls="$(read_product_config_value "$ENVIRONMENT" "security.require_tls" || true)"
   [[ -z "${require_tls// }" ]] && require_tls="$(read_product_config_value "$ENVIRONMENT" "security.require_tls_in_production" || true)"
   [[ -z "${require_tls// }" ]] && require_tls="false"
   require_https="$(read_product_config_value "$ENVIRONMENT" "security.require_https" || true)"
   [[ -z "${require_https// }" ]] && require_https="$(read_product_config_value "$ENVIRONMENT" "security.require_https_in_production" || true)"
   [[ -z "${require_https// }" ]] && require_https="false"
-  require_sso="$(read_product_config_value "$ENVIRONMENT" "security.require_sso" || true)"
-  [[ -z "${require_sso// }" ]] && require_sso="$(read_product_config_value "$ENVIRONMENT" "security.require_sso_in_production" || true)"
-  [[ -z "${require_sso// }" ]] && require_sso="false"
 
   if [[ "$require_tls" == "true" && "$tls_mode" != "provided" ]]; then
     echo "Policy violation: TLS_MODE must be provided when SECURITY_REQUIRE_TLS=true." >&2
@@ -164,10 +160,6 @@ check_production_policy_contract() {
   fi
   if [[ "$require_https" == "true" && "$tls_mode" == "none" ]]; then
     echo "Policy violation: TLS_MODE cannot be none when SECURITY_REQUIRE_HTTPS=true." >&2
-    return 1
-  fi
-  if [[ "$require_sso" == "true" && "$sso_enabled" != "true" ]]; then
-    echo "Policy violation: SECURITY_SSO_ENABLED must be true when SECURITY_REQUIRE_SSO=true." >&2
     return 1
   fi
 }

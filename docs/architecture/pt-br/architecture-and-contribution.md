@@ -107,7 +107,7 @@ Regras importantes:
 - `config/<environment>.env` é a entrada do ambiente.
 - `.runtime/` é gerado e não deve ser versionado.
 - `overrides.runtime.yml` guarda mudanças mutáveis, como troca de TLS, sem alterar o baseline público.
-- Segredos de autenticação externa ficam somente em `.runtime/<environment>/secrets.yml`.
+- Segredos runtime ficam somente em `.runtime/<environment>/secrets.yml`.
 
 ## CLI e domínios operacionais
 
@@ -123,7 +123,6 @@ Domínios conhecidos:
 |---|---|
 | `deploy` | Executa check, prepare, apply, post-check e rollback para instalação base. |
 | `tls` | Opera modos TLS `none`, `self_signed` e `provided`, mantendo aliases legados. |
-| `auth` | Prepara/valida autenticação `local`, `ldap`, `saml`, `oidc` e evidências SSO. |
 | `ops` | Operações day-2, usuários, certificado, auditoria e rollback local de metadados. |
 | `audit` | Checagens operacionais e evidências de auditoria. |
 | `certify` | Certificação de staging e evidências para promoção. |

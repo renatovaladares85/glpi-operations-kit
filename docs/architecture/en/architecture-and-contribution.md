@@ -107,7 +107,7 @@ Important rules:
 - `config/<environment>.env` is the environment input.
 - `.runtime/` is generated and must not be versioned.
 - `overrides.runtime.yml` stores mutable changes, such as TLS switches, without changing the public baseline.
-- External-auth secrets stay only in `.runtime/<environment>/secrets.yml`.
+- Runtime secrets stay only in `.runtime/<environment>/secrets.yml`.
 
 ## CLI and operational domains
 
@@ -123,7 +123,6 @@ Known domains:
 |---|---|
 | `deploy` | Runs check, prepare, apply, post-check, and rollback for base installation. |
 | `tls` | Operates TLS modes `none`, `self_signed`, and `provided`, while keeping legacy aliases. |
-| `auth` | Prepares/validates `local`, `ldap`, `saml`, `oidc` authentication and SSO evidence. |
 | `ops` | Day-2 operations, users, certificates, audit, and local metadata rollback. |
 | `audit` | Operational checks and audit evidence. |
 | `certify` | Staging certification and evidence for promotion. |

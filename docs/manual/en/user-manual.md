@@ -1,6 +1,6 @@
 # GLPI Operations Kit - Operator Manual (EN)
 
-This manual guides a complete GLPI Operations Kit installation from Linux shell. It covers preparation, `.env` filling, TLS, SSO, database, application, monitoring, backup, validation, and rollback.
+This manual guides a complete GLPI Operations Kit installation from Linux shell. It covers preparation, `.env` filling, TLS, database, application, monitoring, backup, validation, and rollback.
 
 You may edit files from Windows, but operational commands must run from Linux shell on the target host or a Linux execution host.
 
@@ -11,7 +11,7 @@ You may edit files from Windows, but operational commands must run from Linux sh
 3. [Recommended flow from zero](#recommended-flow-from-zero)
 4. [Topology choice](#topology-choice)
 5. [TLS and certificates](#tls-and-certificates)
-6. [SSO and external authentication](#sso-and-external-authentication)
+6. [SSO manual configuration in GLPI](#sso-manual-configuration-in-glpi)
 7. [Database, application, monitoring, and backup](#database-application-monitoring-and-backup)
 8. [Validation, evidence, and rollback](#validation-evidence-and-rollback)
 9. [Appendices](#appendices)
@@ -24,7 +24,7 @@ Before changing the environment, confirm:
 - Repository available on the execution host.
 - `config/<environment>.env` created from `config/product.env`.
 - Strong secrets available for database and monitoring.
-- GLPI FQDN defined, especially when TLS or SSO is used.
+- GLPI FQDN defined, especially when TLS is used.
 - Topology decision: `single-server` or `dual-server`.
 - Execution decision: `local` or `ssh`.
 
@@ -40,7 +40,7 @@ bash scripts/bootstrap-permissions.sh
 |---|---|---|
 | `config/product.env` | Versioned product template. | Yes. Do not put real sensitive values. |
 | `config/<environment>.env` | Environment public config plus 3 deployment secrets (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`). | Do not commit real environment copies. |
-| `.runtime/<environment>/secrets.yml` | Runtime secrets, especially external auth. | Never. |
+| `.runtime/<environment>/secrets.yml` | Runtime secrets used by execution flows. | Never. |
 | `.runtime/<environment>/public.runtime.yml` | Public runtime rendered by scripts. | Never. |
 | `.runtime/<environment>/evidence/` | Execution evidence. | Never, except sanitized audit packages outside Git. |
 | `.runtime/<environment>/backups/` | Domain snapshots/backups. | Never. |
@@ -48,7 +48,7 @@ bash scripts/bootstrap-permissions.sh
 Secret flow note:
 
 - The 3 deployment secrets stored in `config/<environment>.env` are materialized by automation into `.runtime/<environment>/secrets.yml`.
-- External-auth secrets (`auth_saml_x509_certificate`, `ldap_bind_password`, `oidc_client_secret`) are runtime-only and must never be sourced from `config/<environment>.env`.
+- SSO/IdP credentials are configured manually in GLPI and in the IdP, outside kit orchestration.
 
 To fill each `.env` key, use [Environment Configuration Field Guide](appendices/configuration-field-guide.md).
 
@@ -78,11 +78,10 @@ cp config/product.env config/staging.env
 ./scripts/glpictl.sh staging deploy post-check all
 ```
 
-5. Validate TLS and auth when applicable.
+5. Validate TLS when applicable.
 
 ```bash
 ./scripts/glpictl.sh staging tls check
-./scripts/glpictl.sh staging auth check
 ```
 
 6. Generate final evidence.
@@ -125,20 +124,18 @@ For production, the expected path is `provided`: HTTPS server certificate, full 
 
 Read [TLS Modes and Certificate Operations](appendices/tls-modes.md) before requesting a certificate from CA/security.
 
-## SSO and external authentication
+## SSO manual configuration in GLPI
 
-`AUTH_MODE=local` preserves current behavior. For LDAP, SAML, or OIDC, the `auth` domain prepares, validates, and generates evidence without installing plugins automatically and without removing local/admin login.
+SSO/SAML/OIDC is configured directly in the GLPI application and in the identity provider (for example Entra ID). The kit does not automate IdP integration and does not apply SSO settings through scripts.
 
-For Azure/Entra ID with SAML, read [Authentication, SSO, and Azure/Entra ID Guide](appendices/auth-sso-guide.md). The SAML plugin must be installed manually in GLPI via Marketplace or an approved procedure.
+Recommended operational sequence:
 
-Basic flow:
+1. Keep a tested local admin fallback in GLPI.
+2. Install/enable the SSO plugin manually in GLPI when required.
+3. Configure IdP metadata, claims, and JIT mapping directly in GLPI.
+4. Run pilot login tests before enabling production users.
 
-```bash
-./scripts/glpictl.sh staging auth check
-./scripts/glpictl.sh staging auth prepare
-./scripts/glpictl.sh staging auth apply
-./scripts/glpictl.sh staging auth post-check
-```
+Use [Authentication, SSO, and Azure/Entra ID Guide](appendices/auth-sso-guide.md) as an app-level checklist.
 
 ## Database, application, monitoring, and backup
 
@@ -182,7 +179,6 @@ Important structures:
 Standardized commands where available:
 
 ```bash
-./scripts/glpictl.sh staging auth rollback
 ./scripts/glpictl.sh staging tls rollback
 ./scripts/glpictl.sh staging ops rollback
 ./scripts/glpictl.sh staging audit rollback

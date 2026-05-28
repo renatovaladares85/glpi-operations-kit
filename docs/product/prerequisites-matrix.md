@@ -35,7 +35,6 @@ Each item defines:
 | Promotion gate file | Promotion control | all | `SECURITY_REQUIRE_PROMOTION_GATE=true` | conditional-mandatory | Enforces certification before mutable rollout when policy is enabled | `.runtime/promotion/staging-certified.yml` exists | No | Yes in `secure`; No in `permissive` |
 | TLS mode policy | Security policy | all | `SECURITY_REQUIRE_TLS=true` | conditional-mandatory | Requires valid provided certificate mode when policy is enabled | `TLS_MODE=provided` | No | Yes in `secure`; No in `permissive` |
 | HTTPS policy | Security policy | all | `SECURITY_REQUIRE_HTTPS=true` | conditional-mandatory | Requires encrypted transport when policy is enabled | `TLS_MODE!=none` | No | Yes in `secure`; No in `permissive` |
-| SSO policy | Security policy | all | `SECURITY_REQUIRE_SSO=true` | conditional-mandatory | Requires SSO gate when policy is enabled | `SECURITY_SSO_ENABLED=true` in config | No | Yes in `secure`; No in `permissive` |
 | Ordered execution policy | Workflow policy | all | `SECURITY_REQUIRE_ORDERED_EXECUTION=true` | conditional-mandatory | Prevents out-of-order deployment state | deploy sequence state file | No | Yes in `secure`; No in `permissive` |
 | `ssh` client | Diagnostic tooling | all | always | optional | Useful for diagnostics and manual checks | `command -v ssh` | Yes (`apt`) | No |
 | Free local disk >= 1 GB | Local host health | all | always | mandatory | Required for runtime artifacts and evidence | `df -Pk .` | No | Yes |

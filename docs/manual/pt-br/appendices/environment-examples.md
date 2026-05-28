@@ -2,7 +2,7 @@
 
 Os exemplos abaixo são modelos de preenchimento com valores fictícios. Mantenha credenciais reais fora do Git.
 
-## Exemplo 1 - Homologação single-server sem SSO
+## Exemplo 1 - Homologação single-server
 
 ```env
 ENVIRONMENT_NAME=staging
@@ -25,9 +25,6 @@ DATABASE_ROOT_PASSWORD=kit-demo-Root7#kM4wN1z
 TLS_MODE=none
 SECURITY_REQUIRE_TLS=false
 SECURITY_REQUIRE_HTTPS=false
-AUTH_MODE=local
-AUTH_EXTERNAL_ENABLED=false
-SECURITY_SSO_ENABLED=false
 MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 BACKUP_BASE_DIR=/var/backups/glpi
 BACKUP_RETENTION_DAYS=14
@@ -97,55 +94,7 @@ Fluxo APP:
 ./scripts/glpictl.sh production deploy post-check all
 ```
 
-## Exemplo 3 - SAML com Azure/Entra ID
-
-```env
-AUTH_MODE=saml
-AUTH_EXTERNAL_ENABLED=true
-AUTH_SAML_ENABLED=true
-AUTH_LDAP_ENABLED=false
-AUTH_OIDC_ENABLED=false
-SSO_PROVIDER=Azure Entra ID
-SSO_PROTOCOL=saml
-SSO_PUBLIC_URL=https://glpi.company.com
-AUTH_SAML_PLUGIN_EXPECTED=true
-AUTH_SAML_PLUGIN_NAME=saml
-AUTH_SAML_ENTITY_ID=
-AUTH_SAML_ACS_URL=
-AUTH_SAML_LOGOUT_URL=
-AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/11111111-2222-3333-4444-555555555555/
-AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/saml2
-AUTH_SAML_IDP_SLO_URL=
-AUTH_SAML_CLAIM_EMAIL=email
-AUTH_SAML_CLAIM_USERNAME=username
-AUTH_SAML_CLAIM_FIRSTNAME=firstname
-AUTH_SAML_CLAIM_LASTNAME=lastname
-AUTH_SAML_CLAIM_GROUPS=groups
-AUTH_GROUP_ADMIN=GLPI-Admins
-AUTH_GROUP_TECHNICIAN=GLPI-Technicians
-AUTH_GROUP_USER=GLPI-Users
-SECURITY_SSO_ENABLED=false
-SECURITY_REQUIRE_SSO=false
-```
-
-Runtime secret estrutural:
-
-```yaml
-auth_saml_x509_certificate: "MIIC...EXAMPLE_PUBLIC_CERT...AB"
-```
-
-Fluxo:
-
-```bash
-./scripts/glpictl.sh production auth check
-./scripts/glpictl.sh production auth prepare
-./scripts/glpictl.sh production auth apply
-./scripts/glpictl.sh production auth post-check
-```
-
-Depois de testar SSO e fallback local no GLPI, ajuste `SECURITY_SSO_ENABLED=true` se a política exigir.
-
-## Exemplo 4 - Modo open no acesso ao DB (qualquer origem)
+## Exemplo 3 - Modo open no acesso ao DB (qualquer origem)
 
 ```env
 ENVIRONMENT_NAME=staging
@@ -168,3 +117,7 @@ MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 ```
 
 `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=` permanece ativo e vazio quando `NETWORK_DATABASE_ACCESS_MODE=open`.
+
+## Nota sobre SSO
+
+A configuração de SSO é manual no GLPI/IdP e intencionalmente não aparece como exemplo dirigido por script com `AUTH_*`/`SSO_*`.

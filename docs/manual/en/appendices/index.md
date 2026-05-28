@@ -8,7 +8,7 @@ Use these appendices when filling configuration, running installation, validatin
 - [Environment Examples](environment-examples.md)
 - [Runtime Inputs and Files](runtime-input-reference.md)
 
-## Security, TLS, and authentication
+## Security, TLS, and SSO
 
 - [TLS Modes and Certificate Operations](tls-modes.md)
 - [Authentication, SSO, and Azure/Entra ID Guide](auth-sso-guide.md)

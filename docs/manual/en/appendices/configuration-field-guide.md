@@ -2,7 +2,7 @@
 
 This guide explains how to fill `config/<environment>.env` from `config/product.env`. It is written for operators who do not yet know the kit or the customer infrastructure.
 
-Use this guide before running `deploy check`, `auth check`, `tls check`, or any mutable operation.
+Use this guide before running `deploy check`, `tls check`, or any mutable operation.
 
 ## Golden rule
 
@@ -11,7 +11,6 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 - Keys not used in the current scenario stay commented with a filled default example.
 - Keys used in the current scenario stay uncommented with real environment values.
 - Deployment secrets currently read from the environment file are `DATABASE_PASSWORD` (always), plus `DATABASE_ROOT_PASSWORD` and `MONITORING_MYSQLD_EXPORTER_PASSWORD` only when `DATABASE_DEPLOYMENT_MODE=self_hosted`.
-- External-auth secrets must remain only in `.runtime/<environment>/secrets.yml`, such as `auth_saml_x509_certificate`, `ldap_bind_password`, and `oidc_client_secret`.
 - Never commit private certificates, tokens, passwords, or dumps to Git.
 - Example strong non-real secret value: `DATABASE_PASSWORD=kit-demo-9f4aT2m7Q1x`.
 
@@ -20,7 +19,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 1. Copy the template: `cp config/product.env config/staging.env`.
 2. Fill identity, topology, network, DB, app, paths, and policy first.
 3. Choose TLS mode: `none`, `self_signed`, or `provided`.
-4. If SSO is enabled, fill `AUTH_*`, `SSO_*`, and keep secrets only in `.runtime/<environment>/secrets.yml`.
+4. Configure SSO directly in GLPI/IdP when needed (outside script orchestration).
 5. Run `bash scripts/bootstrap-permissions.sh`.
 6. Run `./scripts/glpictl.sh <environment> deploy check all` before any `apply`.
    Example: `./scripts/glpictl.sh staging deploy check all`.
@@ -33,7 +32,7 @@ Use this guide before running `deploy check`, `auth check`, `tls check`, or any 
 | Operating system | Linux/infrastructure | Operational user, sudo, `glpiops` group, Linux shell, allowed packages. |
 | Database | DBA/infrastructure | Schema name, application user, strong password, root/provisioning password, port, bind address, allowed sources. |
 | TLS | Security/PKI | HTTPS server certificate, full chain, matching private key, FQDN/SAN. |
-| SSO | IAM/Azure/Entra ID | Public HTTPS URL, Entity ID, ACS/Reply URL, Logout URL, claims, groups, IdP public certificate. |
+| SSO (manual in app) | IAM/Azure/Entra ID | Public GLPI URL, IdP metadata, claims, group mapping, and JIT rules configured directly in GLPI. |
 | Monitoring | Observability/NOC | Exporter toggles, labels, thresholds, alert routes, DB exporter credential. |
 | Backup | Infrastructure/backup | Backup directory, retention, space, external encryption if required, restore window. |
 
@@ -151,48 +150,13 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `ALERTING_BACKUP_FAILURE_ENABLED` | `true` or `false`. | Keep `true` unless formally excepted. | Boolean. |
 | `ALERTING_SERVICE_DOWN_ENABLED` | `true` or `false`. | Keep `true` unless formally excepted. | Boolean. |
 
-## Auth, SSO, LDAP, SAML, and OIDC
-
-| Key | What to set | How to get or decide it | Common validation |
-|---|---|---|---|
-| `AUTH_MODE` | `local`, `ldap`, `saml`, or `oidc`. | Use `local` to preserve local login; use external only when IAM approves. | `local` does not change functional behavior. |
-| `AUTH_EXTERNAL_ENABLED` | `true` if external provider is enabled. | Set according to IAM decision. | Must be coherent with `AUTH_MODE`. |
-| `AUTH_LDAP_ENABLED` | `true` for LDAP preparation/validation. | Use if LDAP is part of the solution. | Kit prepares/validates; it does not invent secrets. |
-| `AUTH_SAML_ENABLED` | `true` for SAML preparation/validation. | Use with Entra ID/SAML and manual plugin. | Requires public HTTPS URL when applicable. |
-| `AUTH_OIDC_ENABLED` | `true` for OIDC preparation/validation. | Use only if OIDC implementation/plugin is approved outside the kit. | No SCIM and no paid plugin automation. |
-| `SSO_PROVIDER` | Provider name. | Example `Azure Entra ID`. | Used in evidence/checklists. |
-| `SSO_PROTOCOL` | `saml`, `oidc`, `ldap`, or free label. | Usually equal to external `AUTH_MODE`. | Used in evidence. |
-| `SSO_PUBLIC_URL` | Public HTTPS GLPI URL. | Ask DNS/network, e.g. `https://glpi.company.com`. | SAML/OIDC require `https://`. |
-| `SSO_REQUIRE_PUBLIC_URL` | `true` or `false`. | Keep `true` when external auth is enabled. | Blocks missing URL when required. |
-| `AUTH_SAML_PLUGIN_EXPECTED` | `true` when SAML plugin should exist. | Keep `true` for SAML. | Kit detects only; it does not install. |
-| `AUTH_SAML_PLUGIN_NAME` | Plugin directory/name. | Default `saml`, matching manually installed Marketplace plugin. | Must exist under plugin directory when SAML is active. |
-| `AUTH_SAML_ENTITY_ID` | SP Entity ID. | Leave empty to derive from `SSO_PUBLIC_URL`, or set IAM-approved value. | Empty becomes `${SSO_PUBLIC_URL}`. |
-| `AUTH_SAML_ACS_URL` | Reply/ACS URL. | Leave empty to derive. | Empty becomes `${SSO_PUBLIC_URL}/front/saml.php`. |
-| `AUTH_SAML_LOGOUT_URL` | Logout URL. | Leave empty to derive. | Empty becomes `${SSO_PUBLIC_URL}/front/saml_logout.php`. |
-| `AUTH_SAML_NAMEID_FORMAT` | NameID format. | Keep email format unless IAM requires otherwise. | Default is emailAddress URN. |
-| `AUTH_SAML_IDP_ENTITY_ID` | IdP Entity ID. | Copy from Entra ID/IdP metadata. | Not a secret. |
-| `AUTH_SAML_IDP_SSO_URL` | IdP login URL. | Copy from Entra ID/IdP metadata. | Must be HTTPS. |
-| `AUTH_SAML_IDP_SLO_URL` | IdP logout URL. | Copy if provided by IdP. | May be empty if unused. |
-| `AUTH_SAML_CLAIM_EMAIL` | Email claim name. | Define from IAM mapping. | Example `email`. |
-| `AUTH_SAML_CLAIM_USERNAME` | Username claim name. | Define from IAM mapping. | Example `username`. |
-| `AUTH_SAML_CLAIM_FIRSTNAME` | First name claim. | Define from IAM mapping. | Example `firstname`. |
-| `AUTH_SAML_CLAIM_LASTNAME` | Last name claim. | Define from IAM mapping. | Example `lastname`. |
-| `AUTH_SAML_CLAIM_GROUPS` | Groups claim. | Define from IAM mapping. | Example `groups`. |
-| `AUTH_JIT_ENABLED` | `true` to indicate JIT provisioning in checklist. | Use according to GLPI/IAM policy. | Evidence only; does not remove local login. |
-| `AUTH_DEFAULT_PROFILE` | Default GLPI profile. | Example `Self-Service`. | Must exist/be configured in GLPI if used. |
-| `AUTH_GROUP_ADMIN` | IAM group for GLPI admins. | Ask IAM. | Example `GLPI-Admins`. |
-| `AUTH_GROUP_TECHNICIAN` | IAM group for technicians. | Ask IAM. | Example `GLPI-Technicians`. |
-| `AUTH_GROUP_USER` | IAM group for users. | Ask IAM. | Example `GLPI-Users`. |
-
 ## Policy and operational security
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `SECURITY_SSO_ENABLED` | Real current SSO state. | `true` only when SSO is actually ready. | Used by policy checks. |
 | `SECURITY_ALLOW_INSECURE_NON_PRODUCTION` | Non-production exception flag. | Use according to internal policy. | Does not replace `SECURITY_MODE`. |
 | `SECURITY_REQUIRE_TLS` | Require `TLS_MODE=provided`. | Enable when compliance requires valid certificate. | Can block in `secure`. |
 | `SECURITY_REQUIRE_HTTPS` | Require HTTPS. | Enable when HTTP is unacceptable. | Accepts `self_signed` or `provided` depending on policy. |
-| `SECURITY_REQUIRE_SSO` | Require SSO. | Enable when external login is mandatory. | Depends on `SECURITY_SSO_ENABLED=true`. |
 | `SECURITY_REQUIRE_PROMOTION_GATE` | Require promotion gate. | Use in staging -> production flow. | Requires certification artifact. |
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | Require deployment order. | Keep `true` unless excepted. | Blocks wrong order in `secure`. |
 | `OPERATIONS_ASSUME_DB_APPLIED` | Confirm DB was applied on another host. | Use on APP host in local dual-server after DB was applied separately. | Affects ordered execution validation. |
@@ -205,7 +169,7 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `PATH_GLPI_INSTALL_DIR` | GLPI install directory. | Default `/usr/share/glpi`. | Webroot must point to its `public` directory. |
 | `PATH_GLPI_CONFIG_DIR` | Config directory outside webroot. | Default `/etc/glpi`. | Never expose by web server. |
 | `PATH_GLPI_VAR_DIR` | Data/files directory outside webroot. | Default `/var/lib/glpi/files`. | Must be writable by web user. |
-| `PATH_GLPI_PLUGIN_DIR` | Plugin directory. | Default `/var/lib/glpi/plugins`. | Manual SAML plugin must be detectable here when applicable. |
+| `PATH_GLPI_PLUGIN_DIR` | Plugin directory. | Default `/var/lib/glpi/plugins`. | Manual plugins must be installed and validated directly in GLPI when applicable. |
 | `PATH_GLPI_LOG_DIR` | GLPI log directory. | Default `/var/log/glpi`. | Must stay outside webroot. |
 
 ## Operations
@@ -213,6 +177,9 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
 | `OPERATIONS_TIMEZONE` | IANA timezone. | Example `America/Sao_Paulo`. | Use `timedatectl list-timezones`. |
+| `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables GLPI timezone readiness workflow. | `true` to enable checks/apply logic for PHP + DB timezone readiness. | Default `false`. |
+| `GLPI_TIMEZONE_DB_MODE` | Controls DB timezone workflow. | `disabled`, `validate`, `apply`. | For managed DB, effective default is validate when support is enabled. |
+| `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Optional legacy DB grant for timezone table listing. | `true` only for old compatibility requirements. | Default `false` (recommended for modern GLPI). |
 | `OPERATIONS_GLPI_CRON_SCHEDULE` | Operational cron schedule. | Usually same as `GLPI_CRON_SCHEDULE`. | Must be quoted. |
 | `OPERATIONS_REQUIRED_OPS_GROUP` | Linux operator group. | Default `glpiops`. | Operator must belong to this group. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure` or `permissive`. | Use `secure` by default. | `permissive` requires justification. |
@@ -266,7 +233,6 @@ Run in this order:
 ```bash
 bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy check all
-./scripts/glpictl.sh staging auth check
 ./scripts/glpictl.sh staging tls check
 ```
 

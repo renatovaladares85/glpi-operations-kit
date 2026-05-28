@@ -33,7 +33,7 @@ Examples:
 
 ```text
 docs(architecture): add contribution manual
-feat(auth): add SAML evidence generation
+feat(tls): add certificate evidence summary
 fix(rollback): restore domain metadata permissions
 ```
 

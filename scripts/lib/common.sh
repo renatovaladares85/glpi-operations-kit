@@ -1468,8 +1468,8 @@ run_preflight_checks() {
   local runtime_base_dir="$SCRIPT_ROOT/../.runtime"
   local marker_file
   local items_file
-  local topology_mode ssh_key_path ssh_user app_host db_host tls_mode sso_enabled glpi_version
-  local require_tls require_https require_sso require_promotion_gate
+  local topology_mode ssh_key_path ssh_user app_host db_host tls_mode glpi_version
+  local require_tls require_https require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
   local execution_mode host_role db_deployment_mode require_privileged_checks
   local app_stack_expected glpi_major_version glpi_requires_bcmath php_version php_fpm_service
@@ -1639,7 +1639,6 @@ run_preflight_checks() {
     db_host="$(read_product_config_value "$environment" "topology.db.host" || true)"
     glpi_version="$(read_product_config_value "$environment" "glpi.version" || true)"
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
-    sso_enabled="$(read_product_config_value "$environment" "security.sso_enabled" || true)"
     security_mode="$(resolve_security_mode_for_environment "$environment")"
     execution_mode="$(resolve_execution_mode_for_environment "$environment")"
     host_role="$(resolve_host_role_for_environment "$environment")"
@@ -1649,7 +1648,6 @@ run_preflight_checks() {
     [[ -z "${php_fpm_service// }" ]] && php_fpm_service="php${php_version}-fpm"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
-    [[ -z "${sso_enabled// }" ]] && sso_enabled="false"
     [[ -z "${db_deployment_mode// }" ]] && db_deployment_mode="self_hosted"
     promotion_gate_path="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 
@@ -1766,12 +1764,6 @@ run_preflight_checks() {
     fi
     require_https="$(normalize_bool_value "$require_https" "false")"
 
-    require_sso="$(read_product_config_value "$environment" "security.require_sso" || true)"
-    if [[ -z "${require_sso// }" ]]; then
-      require_sso="$(read_product_config_value "$environment" "security.require_sso_in_production" || true)"
-    fi
-    require_sso="$(normalize_bool_value "$require_sso" "false")"
-
     require_promotion_gate="$(read_product_config_value "$environment" "security.require_promotion_gate" || true)"
     require_promotion_gate="$(normalize_bool_value "$require_promotion_gate" "false")"
 
@@ -1865,21 +1857,6 @@ run_preflight_checks() {
       else
         append_precheck_item "$environment" "policy-require-https" "environment-policy" "all" "$policy_obligation" \
           "Secure policy requires HTTPS/TLS enabled." "TLS_MODE in config/<environment>.env" "set TLS_MODE to self_signed or provided" "$policy_block" "$policy_status" "Enable TLS mode or accept risk in permissive mode."
-        if [[ "$security_mode" == "secure" ]]; then
-          register_mandatory_failure
-        else
-          optional_failures=$((optional_failures + 1))
-        fi
-      fi
-    fi
-
-    if [[ "$require_sso" == "true" ]]; then
-      if [[ "$sso_enabled" == "true" ]]; then
-        append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires SSO enabled." "SECURITY_SSO_ENABLED in config/<environment>.env" "set SECURITY_SSO_ENABLED=true" "$policy_block" "pass" "none"
-      else
-        append_precheck_item "$environment" "policy-require-sso" "environment-policy" "all" "$policy_obligation" \
-          "Secure policy requires SSO enabled." "SECURITY_SSO_ENABLED in config/<environment>.env" "set SECURITY_SSO_ENABLED=true" "$policy_block" "$policy_status" "Enable SSO or accept risk in permissive mode."
         if [[ "$security_mode" == "secure" ]]; then
           register_mandatory_failure
         else
