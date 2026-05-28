@@ -199,3 +199,28 @@ Before committing Ansible changes.
 ### Risks
 
 - low risk; does not change remote state
+
+### Objective
+
+Create a full GLPI transfer backup (app + DB) in a single artifact for migration or clone.
+
+### Command
+
+```bash
+sudo ./scripts/backup-app.sh backup --target all --encrypt
+```
+
+### When to use
+
+Before migration, clone, or full environment copy where application files and database must be restored together.
+
+### Preconditions
+
+- Linux host with root privileges
+- `tar`, `gzip`, `mysqldump`, and `openssl` available
+- DB access credentials discoverable from `config_db.php` or passed explicitly
+
+### Risks
+
+- high data exposure impact if artifact/passphrase handling is weak
+- backup can become partial if exclusions are used intentionally

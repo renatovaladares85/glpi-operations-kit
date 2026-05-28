@@ -208,6 +208,20 @@ Example with filled values:
 
 The auth domain validates and prepares local/LDAP/SAML/OIDC configuration safely, preserves local admin access, and provides evidence + rollback metadata without auto-installing plugins.
 
+## Unified GLPI backup and restore (app|db|all)
+
+```bash
+sudo ./scripts/backup-app.sh backup --target all --encrypt
+sudo ./scripts/backup-app.sh backup --target app --exclude-app "var/_cache,var/_sessions"
+sudo ./scripts/backup-app.sh backup --target db --exclude-db-tables-data "glpi_logs,glpi_sessions"
+
+sudo ./scripts/backup-app.sh restore --target app --artifact /var/backups/glpi/<file>.tar.gz --force
+sudo ./scripts/backup-app.sh restore --target db --artifact /var/backups/glpi/<file>.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target all --artifact /var/backups/glpi/<file>.tar.gz --force --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
+```
+
+`backup-app.sh` now uses a single `backup|restore` contract with `--target app|db|all`. The `app` scope preserves GLPI core, config, and external GLPI paths in one package. The `db` scope creates a dump with table-data exclusions (`--exclude-db-tables-data`) while preserving schema. Restore is safe-by-default: app restore refuses populated destinations without `--force`, and DB restore refuses non-empty databases without `--db-recreate`.
+
 ## Manual Ansible fallback
 
 ```bash
