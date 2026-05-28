@@ -33,22 +33,7 @@ This folder is the single central documentation hub for operators.
 
 ## Runtime and Secrets Rule
 
-<<<<<<< HEAD
-1. User Manual.
-2. Configuration Field Guide.
-3. TLS Modes and Certificate Operations.
-4. SSO manual configuration guide in GLPI, if external authentication is required.
-5. Environment Examples.
-6. Command Reference.
-7. Troubleshooting Matrix.
-
-## Runtime and secrets rule
-
-- Public values: `config/<environment>.env`.
-- Deployment secrets read from environment config: `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
-- Runtime secrets file: `.runtime/<environment>/secrets.yml` only.
-=======
 - Public values: `config/<environment>.env`
+- Deployment secrets read from environment config: `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`
 - Runtime secrets: `.runtime/<environment>/secrets.yml`
->>>>>>> df2502e (docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror)
 - Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sensitive evidence.
