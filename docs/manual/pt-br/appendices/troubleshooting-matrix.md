@@ -73,7 +73,7 @@
 - Sintoma: comando mutável encerra por violação de política.
 - Validação:
   - modo efetivo (`SECURITY_MODE` ou `OPERATIONS_SECURITY_MODE_DEFAULT`)
-  - flags de política em `config/<env>.env` (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`)
+  - flags de política em `config/<env>.env` (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`)
   - Exemplo: `config/staging.env`
 - Correção: cumprir requisitos de política ou executar em modo permissivo com justificativa explícita.
 - Retomada segura:

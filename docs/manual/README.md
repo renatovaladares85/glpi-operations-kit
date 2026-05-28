@@ -22,7 +22,7 @@ Most operators should read in this order:
 1. User Manual.
 2. Configuration Field Guide.
 3. TLS Modes and Certificate Operations.
-4. Authentication, SSO, and Azure/Entra ID Guide, if external authentication is required.
+4. SSO manual configuration guide in GLPI, if external authentication is required.
 5. Environment Examples.
 6. Command Reference.
 7. Troubleshooting Matrix.
@@ -31,5 +31,5 @@ Most operators should read in this order:
 
 - Public values: `config/<environment>.env`.
 - Deployment secrets read from environment config: `DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`.
-- Auth secrets: `.runtime/<environment>/secrets.yml` only.
+- Runtime secrets file: `.runtime/<environment>/secrets.yml` only.
 - Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sensitive evidence.

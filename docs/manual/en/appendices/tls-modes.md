@@ -21,7 +21,7 @@ Recommended requirements:
 | Type | TLS server certificate for HTTPS. |
 | Extended usage | `serverAuth`. |
 | CN | Main FQDN, e.g. `glpi.company.com`. |
-| SAN | Must include the FQDN used by `GLPI_DOMAIN` and `SSO_PUBLIC_URL`. May include approved aliases. |
+| SAN | Must include the FQDN used by `GLPI_DOMAIN`. May include approved aliases. |
 | Certificate format | PEM, usually `.crt` or `.pem`. |
 | Chain | Prefer fullchain PEM with server certificate + intermediates. |
 | Private key | Matching PEM private key, protected, never versioned. |

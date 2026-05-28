@@ -1,129 +1,58 @@
 # Guia de Autenticação, SSO e Azure/Entra ID (PT-BR)
 
-Este guia cobre o domínio `auth` do `glpictl` e o preenchimento das chaves `AUTH_*` e `SSO_*`. O objetivo é preparar e validar autenticação sem quebrar login local, sem remover o usuário admin local e sem instalar plugin automaticamente.
+Este guia é somente de aplicação. SSO/SAML/OIDC é configurado diretamente no GLPI e no provedor de identidade. O kit não orquestra configurações de IdP via `glpictl`.
 
-## O que o kit faz
+## Escopo
 
-| Ação | Comportamento |
-|---|---|
-| `auth check` | Valida contrato `local|ldap|saml|oidc`, URL pública, HTTPS quando aplicável, plugin SAML detectável e evidências sem alterar sistema. |
-| `auth prepare` | Deriva URLs SAML quando faltam, prepara runtime/evidências e não faz alteração destrutiva. |
-| `auth apply` | Gera backup de domínio e aplica apenas estado/evidência seguro. Não configura plugin diretamente no banco. |
-| `auth post-check` | Valida consistência final, exposição de arquivos sensíveis e evidências. |
-| `auth rollback` | Restaura snapshot local do domínio `auth`. |
+- Coberto por este guia: checklist manual de configuração de SSO no GLPI + IdP.
+- Fora do escopo dos scripts: provisionamento automático de SSO, configuração de plugin, mapeamento de claims, provisionamento de regras JIT.
 
-## Modos de autenticação
+## Sequência recomendada
 
-| Modo | Quando usar | Observações |
-|---|---|---|
-| `AUTH_MODE=local` | Sem SSO/LDAP/OIDC. | Mantém comportamento atual e não remove login local/admin. |
-| `AUTH_MODE=ldap` | Diretório LDAP aprovado. | O kit prepara/valida contrato; senha bind fica em `.runtime/<env>/secrets.yml`. |
-| `AUTH_MODE=saml` | SSO SAML, como Azure/Entra ID. | Exige URL pública HTTPS quando habilitado. Plugin SAML é instalado manualmente via Marketplace. |
-| `AUTH_MODE=oidc` | OIDC aprovado pela arquitetura. | O kit não instala plugin pago nem implementa SCIM. Segredo client fica em runtime secrets. |
+1. Manter acesso de admin local habilitado e testado no GLPI.
+2. Confirmar a URL pública final do GLPI (`https://<GLPI_DOMAIN>` quando TLS estiver habilitado).
+3. Instalar/habilitar no GLPI o plugin de autenticação necessário (se aplicável).
+4. Configurar metadados e endpoints do IdP no GLPI.
+5. Configurar mapeamento de claims e regras de JIT/grupo/perfil no GLPI.
+6. Executar testes piloto de login.
+7. Validar fallback de login local.
+8. Liberar para grupos maiores.
 
-## Checklist para Azure/Entra ID SAML
+## Checklist Azure/Entra ID SAML
 
-Solicite ou confirme com a equipe IAM:
+Alinhar com IAM:
 
 | Item | Valor esperado |
 |---|---|
-| Nome da aplicação enterprise | Nome claro, por exemplo `GLPI - Production`. |
-| Identifier / Entity ID | `https://glpi.company.com` ou valor de `AUTH_SAML_ENTITY_ID`. |
-| Reply URL / ACS URL | `https://glpi.company.com/front/saml.php` ou valor de `AUTH_SAML_ACS_URL`. |
-| Sign-on URL | `https://glpi.company.com`. |
-| Logout URL | `https://glpi.company.com/front/saml_logout.php` ou valor de `AUTH_SAML_LOGOUT_URL`. |
-| NameID Format | `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`. |
-| Certificado público do IdP | Certificado X.509 público do Entra ID, sem chave privada. |
-| Groups | IDs ou nomes de grupos liberados para GLPI. |
+| Nome da aplicação enterprise | Nome claro, ex.: `GLPI - Production`. |
+| Identifier / Entity ID | Entity ID do SP definido no plugin do GLPI. |
+| Reply URL / ACS URL | URL ACS do GLPI configurada no plugin. |
+| Sign-on URL | URL pública do GLPI. |
+| Logout URL | URL de logout configurada no plugin (se usada). |
+| Formato NameID | Normalmente `emailAddress`, salvo exigência IAM. |
+| Certificado público do IdP | Certificado público Entra ID (sem chave privada). |
+| Groups | IDs/nomes de grupos autorizados no GLPI. |
 
-Claims recomendados:
+Exemplo típico de mapeamento de claims:
 
-| Claim no GLPI | Origem Entra ID típica |
+| Campo GLPI | Origem comum no Entra ID |
 |---|---|
-| `email` | `user.mail` |
-| `username` | `user.userprincipalname` |
-| `firstname` | `user.givenname` |
-| `lastname` | `user.surname` |
-| `groups` | `user.groups` |
+| email | `user.mail` |
+| username | `user.userprincipalname` |
+| firstname | `user.givenname` |
+| lastname | `user.surname` |
+| groups | `user.groups` |
 
-## Chaves públicas no `.env`
+## Notas de segurança
 
-```env
-AUTH_MODE=saml
-AUTH_EXTERNAL_ENABLED=true
-AUTH_SAML_ENABLED=true
-AUTH_OIDC_ENABLED=false
-AUTH_LDAP_ENABLED=false
-SSO_PROVIDER=Azure Entra ID
-SSO_PROTOCOL=saml
-SSO_PUBLIC_URL=https://glpi.company.com
-SSO_REQUIRE_PUBLIC_URL=true
-AUTH_SAML_PLUGIN_EXPECTED=true
-AUTH_SAML_PLUGIN_NAME=saml
-AUTH_SAML_ENTITY_ID=
-AUTH_SAML_ACS_URL=
-AUTH_SAML_LOGOUT_URL=
-AUTH_SAML_NAMEID_FORMAT=urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress
-AUTH_SAML_IDP_ENTITY_ID=https://sts.windows.net/11111111-2222-3333-4444-555555555555/
-AUTH_SAML_IDP_SSO_URL=https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/saml2
-AUTH_SAML_IDP_SLO_URL=
-AUTH_SAML_CLAIM_EMAIL=email
-AUTH_SAML_CLAIM_USERNAME=username
-AUTH_SAML_CLAIM_FIRSTNAME=firstname
-AUTH_SAML_CLAIM_LASTNAME=lastname
-AUTH_SAML_CLAIM_GROUPS=groups
-AUTH_JIT_ENABLED=true
-AUTH_DEFAULT_PROFILE=Self-Service
-AUTH_GROUP_ADMIN=GLPI-Admins
-AUTH_GROUP_TECHNICIAN=GLPI-Technicians
-AUTH_GROUP_USER=GLPI-Users
-SECURITY_SSO_ENABLED=false
-```
+- Não commitar segredos de IdP, chaves privadas, tokens ou exportações sensíveis.
+- Registrar mudanças de plugin e IdP em evidências/checklists operacionais fora do versionamento quando necessário.
+- Se necessário, mantenha chaves legadas `AUTH_*` / `SSO_*` em `.env` antigo; os fluxos de execução ignoram essas chaves.
 
-Deixe `AUTH_SAML_ENTITY_ID`, `AUTH_SAML_ACS_URL` e `AUTH_SAML_LOGOUT_URL` vazios quando quiser que `auth prepare` derive automaticamente a partir de `SSO_PUBLIC_URL`.
+## Checklist de validação
 
-## Segredos em runtime
-
-Crie ou atualize `.runtime/<environment>/secrets.yml` com permissão restrita. Exemplo preenchido com valores fictícios:
-
-```yaml
-auth_saml_x509_certificate: "MIIC...EXAMPLE_PUBLIC_CERT...AB"
-ldap_bind_password: "kit-demo-Ldap8@vT2pQ5"
-oidc_client_secret: "kit-demo-Oidc6#nR4xW9"
-```
-
-Não coloque chave privada SAML, client secret, senha LDAP, token ou certificado privado em `config/<environment>.env`, evidência, log ou Git.
-
-## Plugin SAML
-
-O kit não instala plugin SAML. O operador deve instalar manualmente via Marketplace do GLPI ou procedimento aprovado. O `auth check` apenas tenta detectar o plugin pelo nome configurado em `AUTH_SAML_PLUGIN_NAME`.
-
-Checklist manual no GLPI:
-
-1. Confirmar que login local continua habilitado.
-2. Confirmar que usuário admin local continua acessível.
-3. Instalar plugin SAML pelo Marketplace.
-4. Configurar Entity ID, ACS, Logout, IdP Entity ID, SSO URL e certificado público do IdP.
-5. Configurar claims e mapeamento de grupos.
-6. Testar login SSO com usuário piloto.
-7. Testar fallback com usuário local.
-8. Só então ajustar `SECURITY_SSO_ENABLED=true`, se a política exigir.
-
-## Validação
-
-```bash
-./scripts/glpictl.sh staging auth check
-./scripts/glpictl.sh staging auth prepare
-./scripts/glpictl.sh staging auth apply
-./scripts/glpictl.sh staging auth post-check
-```
-
-As evidências ficam em `.runtime/<environment>/evidence/auth/`. Elas não devem conter segredos.
-
-## Rollback
-
-```bash
-./scripts/glpictl.sh staging auth rollback
-```
-
-Rollback do domínio `auth` restaura runtime/evidências/estado local do domínio. Alterações manuais feitas dentro do GLPI ou no provedor IAM devem seguir checklist operacional da equipe responsável, porque o kit não escreve configuração insegura direto no banco do plugin.
+- URL do GLPI acessível com o protocolo esperado (`http` ou `https`).
+- Login SSO funcionando para usuários piloto.
+- Fallback de admin local funcionando.
+- Mapeamento JIT/grupo/perfil conforme esperado.
+- Fluxo de logout validado (se habilitado).

@@ -73,7 +73,7 @@
 - Symptom: mutable command exits due to policy violation.
 - Validate:
   - effective mode (`SECURITY_MODE` or `OPERATIONS_SECURITY_MODE_DEFAULT`)
-  - policy flags in `config/<env>.env` (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_SSO`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`)
+  - policy flags in `config/<env>.env` (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`)
   - Example: `config/staging.env`
 - Fix: either comply with policy requirements or switch to permissive execution with explicit justification.
 - Safe resume:

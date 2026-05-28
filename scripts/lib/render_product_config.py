@@ -4,13 +4,11 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
 
 EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
 WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
-AUTH_MODES = {"local", "ldap", "saml", "oidc"}
 TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
@@ -133,10 +131,6 @@ REQUIRED_PUBLIC_KEYS = {
         "purpose": "Selects the active tuning profile.",
         "consumer": "generated public.runtime.yml",
     },
-    "SECURITY_SSO_ENABLED": {
-        "purpose": "Defines whether SSO policy is currently enabled for the environment.",
-        "consumer": "policy checks",
-    },
 }
 
 SSH_REQUIRED_KEYS = {
@@ -212,42 +206,11 @@ DOTTED_KEY_MAP = {
     "alerting.tls_expiry_warning_days": "ALERTING_TLS_EXPIRY_WARNING_DAYS",
     "alerting.backup_failure_enabled": "ALERTING_BACKUP_FAILURE_ENABLED",
     "alerting.service_down_enabled": "ALERTING_SERVICE_DOWN_ENABLED",
-    "auth.mode": "AUTH_MODE",
-    "auth.external_enabled": "AUTH_EXTERNAL_ENABLED",
-    "auth.ldap_enabled": "AUTH_LDAP_ENABLED",
-    "auth.saml_enabled": "AUTH_SAML_ENABLED",
-    "auth.oidc_enabled": "AUTH_OIDC_ENABLED",
-    "sso.provider": "SSO_PROVIDER",
-    "sso.protocol": "SSO_PROTOCOL",
-    "sso.public_url": "SSO_PUBLIC_URL",
-    "sso.require_public_url": "SSO_REQUIRE_PUBLIC_URL",
-    "auth.saml_plugin_expected": "AUTH_SAML_PLUGIN_EXPECTED",
-    "auth.saml_plugin_name": "AUTH_SAML_PLUGIN_NAME",
-    "auth.saml_entity_id": "AUTH_SAML_ENTITY_ID",
-    "auth.saml_acs_url": "AUTH_SAML_ACS_URL",
-    "auth.saml_logout_url": "AUTH_SAML_LOGOUT_URL",
-    "auth.saml_nameid_format": "AUTH_SAML_NAMEID_FORMAT",
-    "auth.saml_idp_entity_id": "AUTH_SAML_IDP_ENTITY_ID",
-    "auth.saml_idp_sso_url": "AUTH_SAML_IDP_SSO_URL",
-    "auth.saml_idp_slo_url": "AUTH_SAML_IDP_SLO_URL",
-    "auth.saml_claim_email": "AUTH_SAML_CLAIM_EMAIL",
-    "auth.saml_claim_username": "AUTH_SAML_CLAIM_USERNAME",
-    "auth.saml_claim_firstname": "AUTH_SAML_CLAIM_FIRSTNAME",
-    "auth.saml_claim_lastname": "AUTH_SAML_CLAIM_LASTNAME",
-    "auth.saml_claim_groups": "AUTH_SAML_CLAIM_GROUPS",
-    "auth.jit_enabled": "AUTH_JIT_ENABLED",
-    "auth.default_profile": "AUTH_DEFAULT_PROFILE",
-    "auth.group_admin": "AUTH_GROUP_ADMIN",
-    "auth.group_technician": "AUTH_GROUP_TECHNICIAN",
-    "auth.group_user": "AUTH_GROUP_USER",
-    "security.sso_enabled": "SECURITY_SSO_ENABLED",
     "security.allow_insecure_non_production": "SECURITY_ALLOW_INSECURE_NON_PRODUCTION",
     "security.require_tls": "SECURITY_REQUIRE_TLS",
     "security.require_tls_in_production": "SECURITY_REQUIRE_TLS",
     "security.require_https": "SECURITY_REQUIRE_HTTPS",
     "security.require_https_in_production": "SECURITY_REQUIRE_HTTPS",
-    "security.require_sso": "SECURITY_REQUIRE_SSO",
-    "security.require_sso_in_production": "SECURITY_REQUIRE_SSO",
     "security.require_promotion_gate": "SECURITY_REQUIRE_PROMOTION_GATE",
     "security.require_ordered_execution": "SECURITY_REQUIRE_ORDERED_EXECUTION",
     "paths.glpi_release_root": "PATH_GLPI_RELEASE_ROOT",
@@ -271,18 +234,9 @@ BOOL_KEYS = {
     "MONITORING_MYSQLD_EXPORTER_ENABLED",
     "ALERTING_BACKUP_FAILURE_ENABLED",
     "ALERTING_SERVICE_DOWN_ENABLED",
-    "AUTH_EXTERNAL_ENABLED",
-    "AUTH_LDAP_ENABLED",
-    "AUTH_SAML_ENABLED",
-    "AUTH_OIDC_ENABLED",
-    "SSO_REQUIRE_PUBLIC_URL",
-    "AUTH_SAML_PLUGIN_EXPECTED",
-    "AUTH_JIT_ENABLED",
-    "SECURITY_SSO_ENABLED",
     "SECURITY_ALLOW_INSECURE_NON_PRODUCTION",
     "SECURITY_REQUIRE_TLS",
     "SECURITY_REQUIRE_HTTPS",
-    "SECURITY_REQUIRE_SSO",
     "SECURITY_REQUIRE_PROMOTION_GATE",
     "SECURITY_REQUIRE_ORDERED_EXECUTION",
     "GLPI_TIMEZONE_SUPPORT_ENABLED",
@@ -430,18 +384,6 @@ def validate_no_legacy_web_port_keys(values: dict) -> None:
         )
 
 
-def validate_url(value: str, *, https_only: bool = False) -> bool:
-    raw = (value or "").strip()
-    if not raw:
-        return False
-    parsed = urlparse(raw)
-    if https_only and parsed.scheme != "https":
-        return False
-    if not https_only and parsed.scheme not in {"http", "https"}:
-        return False
-    return bool(parsed.netloc)
-
-
 def validate_feature_contract(values: dict, execution_mode: str, db_deployment_mode: str) -> None:
     topology_mode = read_value(values, "TOPOLOGY_MODE", "dual-server").strip().lower() or "dual-server"
     if topology_mode not in TOPOLOGY_MODES:
@@ -473,43 +415,6 @@ def validate_feature_contract(values: dict, execution_mode: str, db_deployment_m
             fail(f"TLS_PROVIDED_LOCAL_CERT_PATH is not available or is not a file: {local_cert_path}")
         if not Path(local_key_path).is_file():
             fail(f"TLS_PROVIDED_LOCAL_KEY_PATH is not available or is not a file: {local_key_path}")
-
-    auth_mode = read_value(values, "AUTH_MODE", "local").strip().lower() or "local"
-    if auth_mode not in AUTH_MODES:
-        fail("AUTH_MODE must be one of: local, ldap, saml, oidc.")
-
-    auth_external_enabled = as_bool(read_value(values, "AUTH_EXTERNAL_ENABLED", "false"), False)
-    auth_ldap_enabled = as_bool(read_value(values, "AUTH_LDAP_ENABLED", "false"), False)
-    auth_saml_enabled = as_bool(read_value(values, "AUTH_SAML_ENABLED", "false"), False)
-    auth_oidc_enabled = as_bool(read_value(values, "AUTH_OIDC_ENABLED", "false"), False)
-    sso_require_public_url = as_bool(read_value(values, "SSO_REQUIRE_PUBLIC_URL", "true"), True)
-
-    auth_requires_external = auth_external_enabled or auth_mode != "local" or auth_ldap_enabled or auth_saml_enabled or auth_oidc_enabled
-    auth_requires_https = auth_mode in {"saml", "oidc"} or auth_saml_enabled or auth_oidc_enabled
-
-    if auth_requires_external:
-        require_value(values, "AUTH_MODE")
-        if sso_require_public_url:
-            sso_public_url = require_value(values, "SSO_PUBLIC_URL").strip()
-            if not validate_url(sso_public_url):
-                fail("SSO_PUBLIC_URL must be a valid http:// or https:// URL when external auth is enabled.")
-
-    if auth_requires_https:
-        sso_public_url = require_value(values, "SSO_PUBLIC_URL").strip()
-        if not validate_url(sso_public_url, https_only=True):
-            fail("SSO_PUBLIC_URL must be a valid https:// URL when SAML/OIDC is enabled.")
-        if tls_mode == "none":
-            fail("TLS_MODE must not be 'none' when SAML/OIDC is enabled.")
-
-    if auth_mode == "saml" or auth_saml_enabled:
-        auth_saml_plugin_expected = as_bool(read_value(values, "AUTH_SAML_PLUGIN_EXPECTED", "true"), True)
-        if auth_saml_plugin_expected:
-            require_value(values, "AUTH_SAML_PLUGIN_NAME")
-
-    security_require_sso = as_bool(read_value(values, "SECURITY_REQUIRE_SSO", "false"), False)
-    security_sso_enabled = as_bool(require_value(values, "SECURITY_SSO_ENABLED"), False)
-    if security_require_sso and not security_sso_enabled:
-        fail("SECURITY_REQUIRE_SSO=true requires SECURITY_SSO_ENABLED=true.")
 
 
 def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_deployment_mode: str) -> dict:
@@ -623,43 +528,9 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "monitoring_dashboard_profile": read_value(values, "MONITORING_DASHBOARD_PROFILE", "glpi-standard"),
         "monitoring_alert_routes": as_json_object(read_value(values, "MONITORING_ALERT_ROUTES_JSON", "{}"), {}),
         "alert_tls_expiry_warning_days": as_int(read_value(values, "ALERTING_TLS_EXPIRY_WARNING_DAYS", "30"), 30),
-        "auth_mode": read_value(values, "AUTH_MODE", "local").strip().lower() or "local",
-        "auth_external_enabled": as_bool(read_value(values, "AUTH_EXTERNAL_ENABLED", "false"), False),
-        "auth_ldap_enabled": as_bool(read_value(values, "AUTH_LDAP_ENABLED", "false"), False),
-        "auth_saml_enabled": as_bool(read_value(values, "AUTH_SAML_ENABLED", "false"), False),
-        "auth_oidc_enabled": as_bool(read_value(values, "AUTH_OIDC_ENABLED", "false"), False),
-        "sso_provider": read_value(values, "SSO_PROVIDER", ""),
-        "sso_protocol": read_value(values, "SSO_PROTOCOL", ""),
-        "sso_public_url": read_value(values, "SSO_PUBLIC_URL", ""),
-        "sso_require_public_url": as_bool(read_value(values, "SSO_REQUIRE_PUBLIC_URL", "true"), True),
-        "auth_saml_plugin_expected": as_bool(read_value(values, "AUTH_SAML_PLUGIN_EXPECTED", "true"), True),
-        "auth_saml_plugin_name": read_value(values, "AUTH_SAML_PLUGIN_NAME", "saml"),
-        "auth_saml_entity_id": read_value(values, "AUTH_SAML_ENTITY_ID", ""),
-        "auth_saml_acs_url": read_value(values, "AUTH_SAML_ACS_URL", ""),
-        "auth_saml_logout_url": read_value(values, "AUTH_SAML_LOGOUT_URL", ""),
-        "auth_saml_nameid_format": read_value(
-            values,
-            "AUTH_SAML_NAMEID_FORMAT",
-            "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
-        ),
-        "auth_saml_idp_entity_id": read_value(values, "AUTH_SAML_IDP_ENTITY_ID", ""),
-        "auth_saml_idp_sso_url": read_value(values, "AUTH_SAML_IDP_SSO_URL", ""),
-        "auth_saml_idp_slo_url": read_value(values, "AUTH_SAML_IDP_SLO_URL", ""),
-        "auth_saml_claim_email": read_value(values, "AUTH_SAML_CLAIM_EMAIL", "email"),
-        "auth_saml_claim_username": read_value(values, "AUTH_SAML_CLAIM_USERNAME", "username"),
-        "auth_saml_claim_firstname": read_value(values, "AUTH_SAML_CLAIM_FIRSTNAME", "firstname"),
-        "auth_saml_claim_lastname": read_value(values, "AUTH_SAML_CLAIM_LASTNAME", "lastname"),
-        "auth_saml_claim_groups": read_value(values, "AUTH_SAML_CLAIM_GROUPS", "groups"),
-        "auth_jit_enabled": as_bool(read_value(values, "AUTH_JIT_ENABLED", "true"), True),
-        "auth_default_profile": read_value(values, "AUTH_DEFAULT_PROFILE", "Self-Service"),
-        "auth_group_admin": read_value(values, "AUTH_GROUP_ADMIN", "GLPI-Admins"),
-        "auth_group_technician": read_value(values, "AUTH_GROUP_TECHNICIAN", "GLPI-Technicians"),
-        "auth_group_user": read_value(values, "AUTH_GROUP_USER", "GLPI-Users"),
-        "security_sso_enabled": as_bool(require_value(values, "SECURITY_SSO_ENABLED"), False),
         "security_allow_insecure_non_production": as_bool(read_value(values, "SECURITY_ALLOW_INSECURE_NON_PRODUCTION", "true"), True),
         "security_require_tls": as_bool(read_value(values, "SECURITY_REQUIRE_TLS", "false"), False),
         "security_require_https": as_bool(read_value(values, "SECURITY_REQUIRE_HTTPS", "false"), False),
-        "security_require_sso": as_bool(read_value(values, "SECURITY_REQUIRE_SSO", "false"), False),
         "security_require_promotion_gate": as_bool(read_value(values, "SECURITY_REQUIRE_PROMOTION_GATE", "false"), False),
         "security_require_ordered_execution": as_bool(read_value(values, "SECURITY_REQUIRE_ORDERED_EXECUTION", "true"), True),
         "operations_security_mode_default": read_value(values, "OPERATIONS_SECURITY_MODE_DEFAULT", "secure"),
