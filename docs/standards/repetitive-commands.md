@@ -51,7 +51,7 @@ bash scripts/ops-maintenance.sh audit staging check
 
 ### When to use
 
-After post-implementation changes (users, certs, permissions) and before closing maintenance windows.
+After post-implementation changes (users, certs, permissions) and before closing the local operational cycle.
 
 ### Preconditions
 

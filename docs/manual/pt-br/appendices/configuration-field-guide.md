@@ -34,7 +34,7 @@ Use este guia antes de executar `deploy check`, `tls check` ou qualquer operaç�
 | TLS | Segurança/PKI | Certificado de servidor HTTPS, cadeia completa, chave privada correspondente, FQDN/SAN. |
 | SSO (manual na aplicação) | IAM/Azure/Entra ID | URL pública do GLPI, metadados IdP, mapeamento de claims, grupos e regras JIT configurados diretamente no GLPI. |
 | Monitoramento | Observabilidade/NOC | Exporters habilitados, labels, thresholds, rotas de alerta e credencial do exporter DB. |
-| Backup | Infra/backup | Diretório, retenção, espaço, criptografia externa se aplicável e janela de restore. |
+| Backup | Infra/backup | Diretório, retenção, espaço e criptografia externa se aplicável. |
 
 ## Identidade do produto e ambiente
 
@@ -131,7 +131,7 @@ Para certificado `provided`, solicite um certificado de servidor HTTPS, não de 
 | Chave | O que colocar | Como obter ou definir | Validação comum |
 |---|---|---|---|
 | `BACKUP_BASE_DIR` | Diretório base de backup no alvo. | Peça path aprovado pela infra; padrão `/var/backups/glpi`. | Deve ter espaço e permissão restrita. |
-| `BACKUP_RETENTION_DAYS` | Retenção em dias. | Use política do ambiente, exemplo `14` staging e `30` production. | Inteiro positivo. |
+| `BACKUP_RETENTION_DAYS` | Retenção em dias. | Use a política local do ambiente/projeto. | Inteiro positivo. |
 
 ## Monitoramento e alertas
 

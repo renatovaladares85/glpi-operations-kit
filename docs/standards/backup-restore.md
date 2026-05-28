@@ -1,24 +1,26 @@
 # Backup and Restore Standard
 
+This standard defines product-scope technical expectations only. Local governance rules must be defined by each project.
+
 ## Minimum backup set
 
 - database dump
-- copy of `/etc/glpi`
-- copy of `/var/lib/glpi/files`
-- copy of `/var/lib/glpi/plugins`
+- copy of GLPI configuration directory (default `/etc/glpi`)
+- copy of GLPI files/data directory (default `/var/lib/glpi/files`)
+- copy of GLPI plugins directory (default `/var/lib/glpi/plugins`)
 
-## Initial retention
+## Retention rule
 
-- `staging`: 14 days
-- `production`: 30 days
+- Retention days must be defined per environment/project through `BACKUP_RETENTION_DAYS`.
+- This repository does not enforce fixed retention values for all installations.
 
-## Restore
+## Restore rule
 
-- Document the procedure
-- Test restore regularly
-- Do not restore a backup into a partially migrated database
+- Restore procedure must be documented for the local environment.
+- Restore must be tested in a controlled target before considering backups reliable.
+- Do not restore over partially migrated or unknown DB state.
 
 ## Rules for agents
 
-- When changing backups, document operational impact
-- When changing restore behavior, document risk and validation
+- When changing backup behavior, document operational impact.
+- When changing restore behavior, document risk and validation path.

@@ -1,35 +1,33 @@
 # 06 - GLPI Upgrade In Place
 
-This repository uses an in-place upgrade posture with strict safety checks.
+This repository uses in-place upgrade with mandatory technical validations.
 
 Minimum conditions before upgrade:
 
-1. validated backup available;
-2. approved maintenance window;
-3. staging rehearsal completed;
-4. rollback path confirmed.
+1. backup artifact is available and verifiable;
+2. target version is defined in `config/<environment>.env`;
+3. technical rollback path is confirmed;
+4. post-upgrade validation commands are prepared.
 
 Typical sequence:
 
 ```bash
-./scripts/glpictl.sh staging deploy check all
-./scripts/glpictl.sh staging deploy apply app
-./scripts/glpictl.sh staging deploy post-check all
-bash scripts/release-readiness.sh staging
+./scripts/glpictl.sh <environment> deploy check all
+./scripts/glpictl.sh <environment> deploy apply app
+./scripts/glpictl.sh <environment> deploy post-check all
+bash scripts/release-readiness.sh <environment>
 ```
-
-You usually set the target version in `config/<environment>.env` before applying.
 
 What success looks like:
 
-- deploy apply app succeeds;
-- post-check succeeds;
+- `deploy apply app` succeeds;
+- `post-check` succeeds;
 - readiness report has no critical failures.
 
 Common error and quick action:
 
-- error: upgrade attempted without validated backup
-- action: stop upgrade, produce backup, then re-run with controlled window
+- error: upgrade started without a verifiable backup
+- action: stop, generate a new verifiable backup, and rerun
 
 Go next:
 
