@@ -29,12 +29,12 @@ This creates your environment baseline. The scripts read this file automatically
 
 ## Environment file sync (env-sync)
 
-Use `scripts/env-sync.py` to compare `.env.example` against a real environment file (`development.env`, `staging.env`, or `production.env`) using policy rules from `.env.sync.yml`.
+Use `scripts/env-sync.py` to compare the kit baseline template (`config/product.env`) against an environment file (`config/<environment>.env`) using policy rules from `.env.sync.yml`.
 
 ```bash
 python3 scripts/env-sync.py \
-  --source .env.example \
-  --target production.env \
+  --source config/product.env \
+  --target config/production.env \
   --rules .env.sync.yml \
   --mode report
 ```
@@ -43,8 +43,8 @@ Apply only allowed changes:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source .env.example \
-  --target production.env \
+  --source config/product.env \
+  --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
   --allow-managed
@@ -54,8 +54,8 @@ Force one reviewed key (explicit/manual operation):
 
 ```bash
 python3 scripts/env-sync.py \
-  --source .env.example \
-  --target production.env \
+  --source config/product.env \
+  --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
   --force-reviewed QUEUE_CONNECTION
@@ -65,8 +65,8 @@ Generate a report file:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source .env.example \
-  --target production.env \
+  --source config/product.env \
+  --target config/production.env \
   --rules .env.sync.yml \
   --mode report \
   --write-report .runtime/reports/env-sync-production.txt
