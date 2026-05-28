@@ -6,7 +6,7 @@ SCRIPT_NAME="$(basename "$0")"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 HOSTNAME_SHORT="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo host)"
 
-BACKUP_ROOT_DEFAULT="${BACKUP_ROOT:-/var/backups/glpi}"
+BACKUP_ROOT_DEFAULT="${BACKUP_ROOT:-/tmp/glpi-backups}"
 
 MODE="${1:-}"
 if [[ $# -gt 0 ]]; then
@@ -95,7 +95,7 @@ Parâmetros comuns:
   -h, --help                 Exibe esta ajuda
 
 Opções de backup:
-  --output-dir <path>        Diretório de saída. Padrão: /var/backups/glpi
+  --output-dir <path>        Diretório de saída. Padrão: /tmp/glpi-backups
   --artifact <path>          Caminho final do artefato (sobrescreve output-dir/nome)
   --artifact-name <name>     Nome do artefato .tar.gz (sem caminho)
   --exclude-app <csv>        Exclusões app CSV (prefixo de área ou absoluto)
@@ -114,8 +114,8 @@ Exemplos:
   sudo ./${SCRIPT_NAME} backup --target app --exclude-app "var/_cache,var/_sessions"
   sudo ./${SCRIPT_NAME} backup --target db --exclude-db-tables-data "glpi_logs,glpi_sessions"
   sudo ./${SCRIPT_NAME} backup --target all --encrypt
-  sudo ./${SCRIPT_NAME} restore --target app --artifact /var/backups/glpi/arquivo.tar.gz --force
-  sudo ./${SCRIPT_NAME} restore --target db --artifact /var/backups/glpi/arquivo.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
+  sudo ./${SCRIPT_NAME} restore --target app --artifact /tmp/glpi-backups/arquivo.tar.gz --force
+  sudo ./${SCRIPT_NAME} restore --target db --artifact /tmp/glpi-backups/arquivo.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 USAGE
 }
 
@@ -751,7 +751,7 @@ build_final_artifact_path() {
   fi
 
   mkdir -p "$OUTPUT_DIR"
-  chmod 700 "$OUTPUT_DIR" 2>/dev/null || true
+  chmod 755 "$OUTPUT_DIR" 2>/dev/null || true
 
   local name="$ARTIFACT_NAME"
   if [[ -z "$name" ]]; then
@@ -773,7 +773,7 @@ package_backup_bundle() {
 
   log "Gerando artefato único..."
   tar -czf "$final_artifact" -C "$WORKDIR" bundle
-  chmod 600 "$final_artifact"
+  chmod 644 "$final_artifact"
 
   if [[ "$ENCRYPT_OUTPUT" == "1" ]]; then
     local passphrase passfile encrypted_artifact
@@ -790,7 +790,7 @@ package_backup_bundle() {
       -out "$encrypted_artifact" \
       -pass "file:${passfile}"
 
-    chmod 600 "$encrypted_artifact"
+    chmod 644 "$encrypted_artifact"
     rm -f "$final_artifact"
     final_artifact="$encrypted_artifact"
   fi
@@ -798,7 +798,7 @@ package_backup_bundle() {
   if command_exists sha256sum; then
     FINAL_ARTIFACT_SHA256="$(compute_sha256 "$final_artifact")"
     printf '%s  %s\n' "$FINAL_ARTIFACT_SHA256" "$(basename "$final_artifact")" > "${final_artifact}.sha256"
-    chmod 600 "${final_artifact}.sha256"
+    chmod 644 "${final_artifact}.sha256"
   fi
 
   log "Backup concluído: $final_artifact"

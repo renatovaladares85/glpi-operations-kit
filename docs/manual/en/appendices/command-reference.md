@@ -144,9 +144,9 @@ sudo ./scripts/backup-app.sh backup --target all --encrypt
 sudo ./scripts/backup-app.sh backup --target app --exclude-app "var/_cache,var/_sessions"
 sudo ./scripts/backup-app.sh backup --target db --exclude-db-tables-data "glpi_logs,glpi_sessions"
 
-sudo ./scripts/backup-app.sh restore --target app --artifact /var/backups/glpi/<file>.tar.gz --force
-sudo ./scripts/backup-app.sh restore --target db --artifact /var/backups/glpi/<file>.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
-sudo ./scripts/backup-app.sh restore --target all --artifact /var/backups/glpi/<file>.tar.gz --force --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target app --artifact /tmp/glpi-backups/<file>.tar.gz --force
+sudo ./scripts/backup-app.sh restore --target db --artifact /tmp/glpi-backups/<file>.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target all --artifact /tmp/glpi-backups/<file>.tar.gz --force --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 ```
 
 ## Manual Ansible fallback
