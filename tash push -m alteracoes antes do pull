@@ -1,0 +1,44 @@
+* [33m811d736[m[33m ([m[1;32mvaladares/rds-managed-mode[m[33m)[m fix(backup): use /tmp default output and public-readable artifacts
+* [33meb0876b[m[33m ([m[1;31morigin/valadares/rds-managed-mode[m[33m)[m Ajuste no repositorio
+[31m|[m * [33mdf2502e[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror
+[31m|[m [32m|[m *   [33m2638cdc[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Merge pull request #19 from renatovaladares85:valadares/rds-managed-mode
+[31m|[m [32m|[m [33m|[m[31m\[m  
+[31m|[m [32m|[m[31m_[m[33m|[m[31m/[m  
+[31m|[m[31m/[m[32m|[m [33m|[m   
+* [32m|[m [33m|[m [33me6902e9[m refactor(glpictl): remove auth automation and add final execution summary
+* [32m|[m [33m|[m [33m43ce829[m feat(backup): unify glpi backup and restore workflow
+* [32m|[m [33m|[m [33m7e5a22f[m feat(timezone): add install and day-2 timezone support workflow
+[34m|[m [32m|[m *   [33m1acfb3b[m Merge pull request #18 from renatovaladares85:valadares/rds-managed-mode
+[34m|[m [32m|[m [35m|[m[34m\[m  
+[34m|[m [32m|[m[34m_[m[35m|[m[34m/[m  
+[34m|[m[34m/[m[32m|[m [35m|[m   
+* [32m|[m [35m|[m [33mc25cae0[m fix(nginx): align GLPI routing with official public/index pattern
+[36m|[m [32m|[m *   [33mea1ee71[m Merge pull request #17 from renatovaladares85:valadares/rds-managed-mode
+[36m|[m [32m|[m [1;31m|[m[36m\[m  
+[36m|[m [32m|[m[36m_[m[1;31m|[m[36m/[m  
+[36m|[m[36m/[m[32m|[m [1;31m|[m   
+* [32m|[m [1;31m|[m [33m9ffcc20[m feat(managed-db): provision schema/user grants before connectivity gate
+[1;32m|[m [32m|[m *   [33m849eee1[m Merge pull request #16 from renatovaladares85:valadares/rds-managed-mode
+[1;32m|[m [32m|[m [1;33m|[m[1;32m\[m  
+[1;32m|[m [32m|[m[1;32m_[m[1;33m|[m[1;32m/[m  
+[1;32m|[m[1;32m/[m[32m|[m [1;33m|[m   
+* [32m|[m [1;33m|[m [33m2997cad[m fix(app): skip in-role db user check for managed deployments
+[1;34m|[m [32m|[m *   [33m1e6391b[m Merge pull request #15 from renatovaladares85:valadares/rds-managed-mode
+[1;34m|[m [32m|[m [1;35m|[m[1;34m\[m  
+[1;34m|[m [32m|[m[1;34m_[m[1;35m|[m[1;34m/[m  
+[1;34m|[m[1;34m/[m[32m|[m [1;35m|[m   
+* [32m|[m [1;35m|[m [33me43e974[m fix(snapshot): avoid pipefail in /bin/sh remote snapshot commands
+[1;36m|[m [32m|[m * [33m6c2a30c[m Merge pull request #14 from renatovaladares85:valadares/rds-managed-mode
+[1;36m|[m [32m|[m[32m/[m[1;36m|[m 
+[1;36m|[m [32m|[m[1;36m/[m  
+[1;36m|[m[1;36m/[m[32m|[m   
+* [32m|[m [33ma2af343[m fix(deploy): surface remote snapshot failures before app apply
+[32m|[m *   [33m07b5eeb[m Merge pull request #13 from renatovaladares85:valadares/rds-managed-mode
+[32m|[m [33m|[m[32m\[m  
+[32m|[m [33m|[m[32m/[m  
+[32m|[m[32m/[m[33m|[m   
+* [33m|[m [33m55586af[m feat(managed-db): add admin fallback credential for RDS connectivity checks
+[34m|[m *   [33mf993042[m Merge pull request #12 from renatovaladares85:valadares/rds-managed-mode
+[34m|[m [35m|[m[34m\[m  
+[34m|[m [35m|[m[34m/[m  
+[34m|[m[34m/[m[35m|[m   

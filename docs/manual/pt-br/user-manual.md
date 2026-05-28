@@ -1,11 +1,19 @@
-# GLPI Operations Kit - Manual do Operador (PT-BR)
+# GLPI Operations Kit - Manual do Operador (PT-BR, Espelho)
 
+<<<<<<< HEAD
 Este manual orienta uma instalação completa do GLPI Operations Kit em shell Linux. Ele cobre preparação, preenchimento do `.env`, TLS, banco, aplicação, monitoramento, backup, validação e rollback.
+=======
+Este manual é o espelho da versão canônica em EN.
+>>>>>>> df2502e (docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror)
 
-Você pode editar arquivos no Windows, mas os comandos operacionais devem ser executados em shell Linux no host alvo ou em host Linux executor.
+Use esta página como roteador:
 
-## Índice
+1. comece pela trilha guiada;
+2. execute as etapas operacionais;
+3. valide os resultados;
+4. consulte apêndices técnicos apenas quando precisar de profundidade.
 
+<<<<<<< HEAD
 1. [Pré-requisitos](#pré-requisitos)
 2. [Arquivos que você precisa preencher](#arquivos-que-você-precisa-preencher)
 3. [Fluxo recomendado do zero](#fluxo-recomendado-do-zero)
@@ -15,11 +23,24 @@ Você pode editar arquivos no Windows, mas os comandos operacionais devem ser ex
 7. [Banco, aplicação, monitoramento e backup](#banco-aplicação-monitoramento-e-backup)
 8. [Validação, evidências e rollback](#validação-evidências-e-rollback)
 9. [Apêndices](#apêndices)
+=======
+## Trilha Operacional (Guiada)
+>>>>>>> df2502e (docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror)
 
-## Pré-requisitos
+1. [Início e Prechecks](guide/01-start-and-prechecks.md)
+2. [Ambiente e Topologia](guide/02-environment-and-topology.md)
+3. [Deploy em Linux (Ubuntu + Nginx + PHP-FPM + MariaDB)](guide/03-deploy-linux-traditional.md)
+4. [TLS e Certificados](guide/04-tls-and-certificates.md)
+5. [Backup, Restore e Teste de Restore](guide/05-backup-restore-and-restore-test.md)
+6. [Atualização In-Place do GLPI](guide/06-glpi-upgrade-in-place.md)
+7. [Plugins e Marketplace (Fluxo Manual)](guide/07-plugins-and-marketplace.md)
+8. [Validação e Troubleshooting](guide/08-validation-and-troubleshooting.md)
+9. [Trilha de Referência Docker/Compose (Separada)](guide/09-docker-compose-reference.md)
+10. [Cobertura da Automação](guide/10-automation-coverage.md)
 
-Antes de alterar o ambiente, confirme:
+## Atalhos por Intenção
 
+<<<<<<< HEAD
 - Acesso Linux com `sudo` quando necessário.
 - Repositório disponível no host executor.
 - Arquivo `config/<environment>.env` criado a partir de `config/product.env`.
@@ -27,9 +48,22 @@ Antes de alterar o ambiente, confirme:
 - FQDN do GLPI definido, principalmente quando TLS for usado.
 - Decisão de topologia: `single-server` ou `dual-server`.
 - Decisão de execução: `local` ou `ssh`.
+=======
+- Quero instalar o GLPI: [Deploy em Linux](guide/03-deploy-linux-traditional.md)
+- Quero configurar variáveis de ambiente: [Ambiente e Topologia](guide/02-environment-and-topology.md)
+- Quero TLS/HTTPS: [TLS e Certificados](guide/04-tls-and-certificates.md)
+- Quero backup: [Backup, Restore e Teste de Restore](guide/05-backup-restore-and-restore-test.md)
+- Quero restore: [Backup, Restore e Teste de Restore](guide/05-backup-restore-and-restore-test.md)
+- Quero atualizar o GLPI: [Atualização In-Place do GLPI](guide/06-glpi-upgrade-in-place.md)
+- Quero validar serviços e saúde do ambiente: [Validação e Troubleshooting](guide/08-validation-and-troubleshooting.md)
+- Estou com erro: [Validação e Troubleshooting](guide/08-validation-and-troubleshooting.md)
+- Quero entender o que a automação faz: [Cobertura da Automação](guide/10-automation-coverage.md)
+- Preciso de detalhes de comandos: [Referência de Comandos](appendices/command-reference.md)
+>>>>>>> df2502e (docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror)
 
-Prepare permissões e baseline local:
+## Referências Técnicas (Profundidade)
 
+<<<<<<< HEAD
 ```bash
 bash scripts/bootstrap-permissions.sh
 ```
@@ -188,12 +222,21 @@ Comandos padronizados onde disponíveis:
 Rollback de metadados locais restaura runtime/evidências/estado do domínio. Rollback de alterações manuais em GLPI, IAM, certificado externo ou infraestrutura remota deve seguir o checklist operacional da equipe responsável.
 
 ## Apêndices
+=======
+Use estes documentos quando precisar de explicações campo a campo ou detalhes técnicos avançados:
+>>>>>>> df2502e (docs(manual): restructure operational guide with EN canonical flow and PT-BR mirror)
 
+- [Índice de Apêndices](appendices/index.md)
 - [Guia de Preenchimento do Ambiente](appendices/configuration-field-guide.md)
-- [Exemplos de Ambiente](appendices/environment-examples.md)
 - [Modos TLS e Operações de Certificado](appendices/tls-modes.md)
 - [Guia de Autenticação, SSO e Azure/Entra ID](appendices/auth-sso-guide.md)
 - [Entradas e Arquivos de Runtime](appendices/runtime-input-reference.md)
 - [Referência de Comandos](appendices/command-reference.md)
 - [Checagens Operacionais](appendices/operational-checks.md)
 - [Matriz de Troubleshooting](appendices/troubleshooting-matrix.md)
+
+## Notas de Escopo
+
+- EN permanece canônico.
+- PT-BR espelha EN após atualização canônica.
+- Docker/Compose está documentado como trilha de referência separada nesta fase.

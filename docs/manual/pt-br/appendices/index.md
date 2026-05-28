@@ -1,6 +1,13 @@
 # Índice de Apêndices (PT-BR)
 
-Use estes apêndices quando precisar preencher configuração, executar instalação, validar segurança ou recuperar o ambiente.
+Esta seção é conteúdo de referência técnica.
+
+Para execução operacional guiada, comece em:
+
+- [Manual do Operador (PT-BR Espelho)](../user-manual.md)
+- [Capítulos Guiados](../guide/01-start-and-prechecks.md)
+
+Use estes apêndices quando precisar de mais profundidade durante execução ou troubleshooting.
 
 ## Configuração e instalação
 
