@@ -1,0 +1,1075 @@
+#!/usr/bin/env python3
+"""Safe environment file synchronization tool.
+
+Exit codes:
+0 = success without critical error
+1 = validation or execution error
+2 = differences found in report mode
+3 = manual review required found
+4 = permission or backup error
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shutil
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+SUPPORTED_POLICIES = {"protected", "managed", "review_required", "deprecated"}
+SECRET_NAME_HINTS = (
+    "PASSWORD",
+    "PASS",
+    "SECRET",
+    "TOKEN",
+    "PRIVATE",
+    "CREDENTIAL",
+    "CLIENT_SECRET",
+    "AUTH",
+    "APP_KEY",
+)
+SECRET_MASK = "********"
+
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_DIFF = 2
+EXIT_REVIEW_REQUIRED = 3
+EXIT_PERMISSION = 4
+
+ANSI = {
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "red": "\033[31m",
+    "blue": "\033[34m",
+    "gray": "\033[90m",
+    "reset": "\033[0m",
+}
+
+
+class EnvSyncError(Exception):
+    """Base exception for env-sync errors."""
+
+
+class ValidationError(EnvSyncError):
+    """Raised when an input validation fails."""
+
+
+class PermissionErrorSync(EnvSyncError):
+    """Raised for permission or backup failures."""
+
+
+@dataclass
+class EnvLine:
+    line_type: str
+    original_line: str
+    line_number: int
+    key: str | None = None
+    value: str | None = None
+    prefix: str | None = None
+    suffix: str = ""
+    quote_style: str = "none"
+
+
+@dataclass
+class ParsedEnv:
+    path: Path
+    lines: list[EnvLine]
+    trailing_newline: bool
+    key_indices: dict[str, int]
+    values: dict[str, str]
+    duplicates: set[str]
+
+
+@dataclass
+class KeyRule:
+    description: str
+    required: bool
+    policy: str
+    auto_apply: bool = False
+    default: str | None = None
+    allowed_values: list[str] | None = None
+    secret: bool = False
+    reason: str | None = None
+    impact: str | None = None
+    validation: list[str] | None = None
+
+
+@dataclass
+class RulesConfig:
+    version: int
+    defaults: dict[str, Any]
+    keys: dict[str, KeyRule]
+
+
+@dataclass
+class SyncPlan:
+    mode: str
+    added: list[dict[str, Any]]
+    changed: list[dict[str, Any]]
+    preserved_protected: list[dict[str, Any]]
+    review_required: list[dict[str, Any]]
+    required_missing: list[dict[str, Any]]
+    extra_in_target: list[dict[str, Any]]
+    deprecated: list[dict[str, Any]]
+    ambiguous: list[dict[str, Any]]
+    validation_errors: list[str]
+    ok_count: int
+    applied_changes: int
+    updates: dict[str, str]
+    additions: list[tuple[str, str]]
+    backup_path: Path | None = None
+
+
+class ReportBuilder:
+    def __init__(self, use_color: bool) -> None:
+        self.use_color = use_color
+
+    def color(self, text: str, tone: str) -> str:
+        if not self.use_color or tone not in ANSI:
+            return text
+        return f"{ANSI[tone]}{text}{ANSI['reset']}"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Compare and safely synchronize env files using .env.sync.yml rules.",
+        epilog=(
+            "Exit codes: 0=success, 1=validation/execution error, "
+            "2=differences in report mode, 3=manual review required, 4=permission/backup error"
+        ),
+    )
+    parser.add_argument("--source", required=True, help="Reference env file (example: .env.example)")
+    parser.add_argument("--target", required=True, help="Real environment file to analyze/apply")
+    parser.add_argument("--rules", required=True, help="YAML rules file (.env.sync.yml)")
+    parser.add_argument("--mode", choices=["report", "apply"], default="report", help="Execution mode")
+    parser.add_argument("--only", default="", help="Comma-separated keys to analyze/apply")
+    parser.add_argument(
+        "--allow-managed",
+        action="store_true",
+        help="Allow managed keys with auto_apply=true to be changed",
+    )
+    parser.add_argument(
+        "--force-reviewed",
+        default="",
+        help="Comma-separated review_required keys to force in apply mode",
+    )
+    parser.add_argument("--write-report", default="", help="Optional report output file")
+    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
+    parser.add_argument("--verbose", action="store_true", help="Show extra validation context")
+    return parser.parse_args()
+
+
+def ensure_readable_file(path: Path, label: str) -> None:
+    if not path.exists():
+        raise ValidationError(f"Missing {label} file: {path}")
+    if not path.is_file():
+        raise ValidationError(f"Invalid {label} path (not a file): {path}")
+    if not os.access(path, os.R_OK):
+        raise PermissionErrorSync(f"Read permission denied for {label} file: {path}")
+
+
+def parse_key_list(raw: str) -> set[str]:
+    keys = {token.strip() for token in raw.split(",") if token.strip()}
+    return keys
+
+
+def load_rules(path: Path) -> RulesConfig:
+    try:
+        import yaml
+    except ModuleNotFoundError as exc:
+        raise ValidationError("Missing dependency: PyYAML.\nInstall with: pip install pyyaml") from exc
+
+    ensure_readable_file(path, "rules")
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ValidationError(f"Invalid YAML in rules file: {path}") from exc
+
+    if loaded is None:
+        raise ValidationError("Rules file is empty.")
+    if not isinstance(loaded, dict):
+        raise ValidationError("Rules file root must be a mapping.")
+
+    if "version" not in loaded:
+        raise ValidationError("Rules file must define 'version'.")
+    version = loaded["version"]
+    if version != 1:
+        raise ValidationError(f"Unsupported rules version: {version}")
+
+    raw_defaults = loaded.get("defaults") or {}
+    if not isinstance(raw_defaults, dict):
+        raise ValidationError("'defaults' must be a mapping when provided.")
+
+    defaults: dict[str, Any] = {
+        "add_missing": True,
+        "remove_extra": False,
+        "backup": True,
+        "default_mode": "report",
+        "apply_managed_changes": False,
+        "backup_dir": ".env-backups",
+    }
+    defaults.update(raw_defaults)
+
+    keys = loaded.get("keys")
+    if not isinstance(keys, dict) or not keys:
+        raise ValidationError("Rules file must define non-empty 'keys' mapping.")
+
+    parsed_keys: dict[str, KeyRule] = {}
+    errors: list[str] = []
+
+    for key, spec in keys.items():
+        if not isinstance(spec, dict):
+            errors.append(f"Rule '{key}' must be a mapping.")
+            continue
+
+        missing_fields = [field for field in ("description", "required", "policy") if field not in spec]
+        if missing_fields:
+            errors.append(f"Rule '{key}' is missing fields: {', '.join(missing_fields)}")
+            continue
+
+        policy = str(spec.get("policy"))
+        if policy not in SUPPORTED_POLICIES:
+            errors.append(f"Rule '{key}' has unsupported policy: {policy}")
+
+        required = spec.get("required")
+        if not isinstance(required, bool):
+            errors.append(f"Rule '{key}' field 'required' must be boolean.")
+
+        allowed_values = spec.get("allowed_values")
+        if allowed_values is not None and not isinstance(allowed_values, list):
+            errors.append(f"Rule '{key}' field 'allowed_values' must be a list.")
+
+        validation = spec.get("validation")
+        if validation is not None and not isinstance(validation, list):
+            errors.append(f"Rule '{key}' field 'validation' must be a list.")
+
+        auto_apply = spec.get("auto_apply", False)
+        if not isinstance(auto_apply, bool):
+            errors.append(f"Rule '{key}' field 'auto_apply' must be boolean when provided.")
+            auto_apply = False
+
+        secret = spec.get("secret", False)
+        if not isinstance(secret, bool):
+            errors.append(f"Rule '{key}' field 'secret' must be boolean when provided.")
+            secret = False
+
+        if errors:
+            # Continue collecting as many validation errors as possible.
+            pass
+
+        parsed_keys[key] = KeyRule(
+            description=str(spec.get("description", "")),
+            required=bool(spec.get("required", False)),
+            policy=policy,
+            auto_apply=auto_apply,
+            default=str(spec["default"]) if "default" in spec and spec["default"] is not None else None,
+            allowed_values=[str(item) for item in allowed_values] if isinstance(allowed_values, list) else None,
+            secret=secret,
+            reason=str(spec["reason"]) if spec.get("reason") is not None else None,
+            impact=str(spec["impact"]) if spec.get("impact") is not None else None,
+            validation=[str(item) for item in validation] if isinstance(validation, list) else None,
+        )
+
+    if errors:
+        joined = "\n".join(f"- {item}" for item in errors)
+        raise ValidationError(f"Invalid rules file:\n{joined}")
+
+    return RulesConfig(version=1, defaults=defaults, keys=parsed_keys)
+
+
+def parse_env_file(path: Path, label: str) -> ParsedEnv:
+    ensure_readable_file(path, label)
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValidationError(f"{label} file must be UTF-8 encoded: {path}") from exc
+
+    trailing_newline = raw_text.endswith("\n")
+    raw_lines = raw_text.splitlines()
+
+    parsed_lines: list[EnvLine] = []
+    key_occurrences: dict[str, list[int]] = {}
+
+    for number, line in enumerate(raw_lines, start=1):
+        parsed = parse_env_line(line, number)
+        parsed_lines.append(parsed)
+        if parsed.line_type == "key_value" and parsed.key is not None:
+            key_occurrences.setdefault(parsed.key, []).append(len(parsed_lines) - 1)
+
+    duplicates = {key for key, indices in key_occurrences.items() if len(indices) > 1}
+    key_indices = {key: indices[0] for key, indices in key_occurrences.items() if len(indices) == 1}
+    values = {key: parsed_lines[index].value or "" for key, index in key_indices.items()}
+
+    return ParsedEnv(
+        path=path,
+        lines=parsed_lines,
+        trailing_newline=trailing_newline,
+        key_indices=key_indices,
+        values=values,
+        duplicates=duplicates,
+    )
+
+
+def parse_env_line(line: str, line_number: int) -> EnvLine:
+    stripped = line.strip()
+    if stripped == "":
+        return EnvLine("empty", line, line_number)
+    if line.lstrip().startswith("#"):
+        return EnvLine("comment", line, line_number)
+
+    if "=" not in line:
+        return EnvLine("raw", line, line_number)
+
+    left, right = line.split("=", 1)
+    key = left.strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        return EnvLine("raw", line, line_number)
+
+    ws_prefix_len = len(right) - len(right.lstrip(" \t"))
+    ws_prefix = right[:ws_prefix_len]
+    rhs = right[ws_prefix_len:]
+
+    if rhs.startswith("'"):
+        value, suffix = parse_single_quoted(rhs)
+        quote_style = "single"
+    elif rhs.startswith('"'):
+        value, suffix = parse_double_quoted(rhs)
+        quote_style = "double"
+    else:
+        value, suffix = parse_unquoted(rhs)
+        quote_style = "none"
+
+    return EnvLine(
+        line_type="key_value",
+        original_line=line,
+        line_number=line_number,
+        key=key,
+        value=value,
+        prefix=f"{left}={ws_prefix}",
+        suffix=suffix,
+        quote_style=quote_style,
+    )
+
+
+def parse_single_quoted(raw: str) -> tuple[str, str]:
+    closing = raw.find("'", 1)
+    if closing == -1:
+        return raw[1:], ""
+    token = raw[: closing + 1]
+    suffix = raw[closing + 1 :]
+    return token[1:-1], suffix
+
+
+def parse_double_quoted(raw: str) -> tuple[str, str]:
+    escaped = False
+    closing = -1
+    for idx in range(1, len(raw)):
+        char = raw[idx]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            closing = idx
+            break
+
+    if closing == -1:
+        token = raw[1:]
+        suffix = ""
+    else:
+        token = raw[1:closing]
+        suffix = raw[closing + 1 :]
+    return decode_escaped(token), suffix
+
+
+def decode_escaped(value: str) -> str:
+    out: list[str] = []
+    escaped = False
+    for char in value:
+        if escaped:
+            out.append({"n": "\n", "r": "\r", "t": "\t", "\\": "\\", '"': '"'}.get(char, char))
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        out.append(char)
+    if escaped:
+        out.append("\\")
+    return "".join(out)
+
+
+def parse_unquoted(raw: str) -> tuple[str, str]:
+    comment_idx = None
+    for idx, char in enumerate(raw):
+        if char == "#" and idx > 0 and raw[idx - 1].isspace():
+            comment_idx = idx
+            break
+
+    if comment_idx is None:
+        return raw.strip(), ""
+
+    before = raw[:comment_idx]
+    trailing_ws = before[len(before.rstrip(" \t")) :]
+    value = before.strip()
+    suffix = f"{trailing_ws}{raw[comment_idx:]}"
+    return value, suffix
+
+
+def is_secret_key(key: str, rule: KeyRule | None) -> bool:
+    if rule is not None and rule.secret:
+        return True
+    upper = key.upper()
+    return any(hint in upper for hint in SECRET_NAME_HINTS)
+
+
+def mask_value(key: str, value: str, rule: KeyRule | None) -> str:
+    if is_secret_key(key, rule):
+        return SECRET_MASK
+    return value
+
+
+def choose_missing_value(key: str, source_value: str, rule: KeyRule) -> str:
+    if is_secret_key(key, rule):
+        if rule.default in (None, ""):
+            return ""
+        # Conservative behavior: secret defaults are only considered safe when explicitly empty.
+        return ""
+
+    if source_value != "":
+        return source_value
+    if rule.default is not None:
+        return rule.default
+    return ""
+
+
+def can_apply_managed(rule: KeyRule, allow_managed: bool, defaults: dict[str, Any]) -> bool:
+    if rule.policy != "managed":
+        return False
+    if not rule.auto_apply:
+        return False
+    return bool(allow_managed or defaults.get("apply_managed_changes") is True)
+
+
+def build_sync_plan(
+    source: ParsedEnv,
+    target: ParsedEnv,
+    rules: RulesConfig,
+    mode: str,
+    only_keys: set[str],
+    allow_managed: bool,
+    force_reviewed: set[str],
+    verbose: bool,
+) -> SyncPlan:
+    validation_errors: list[str] = []
+    ambiguous: list[dict[str, Any]] = []
+    added: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    preserved_protected: list[dict[str, Any]] = []
+    review_required: list[dict[str, Any]] = []
+    required_missing: list[dict[str, Any]] = []
+    extra_in_target: list[dict[str, Any]] = []
+    deprecated: list[dict[str, Any]] = []
+
+    updates: dict[str, str] = {}
+    additions: list[tuple[str, str]] = []
+    applied_changes = 0
+    ok_count = 0
+
+    source_keys_all = set(source.values.keys()) | source.duplicates
+    target_keys_all = set(target.values.keys()) | target.duplicates
+
+    if only_keys:
+        unknown_only = sorted([key for key in only_keys if key not in source_keys_all])
+        for key in unknown_only:
+            validation_errors.append(f"Key from --only not found in source: {key}")
+        keys_to_process = sorted([key for key in only_keys if key in source_keys_all])
+    else:
+        keys_to_process = sorted(source_keys_all)
+
+    scope_for_global_checks = set(keys_to_process) if only_keys else source_keys_all
+
+    for key in sorted(source.duplicates):
+        if key in scope_for_global_checks:
+            ambiguous.append({"key": key, "reason": "duplicated in source"})
+
+    for key in sorted(target.duplicates):
+        if (not only_keys) or (key in scope_for_global_checks):
+            ambiguous.append({"key": key, "reason": "duplicated in target"})
+
+    for key in sorted(source.values.keys()):
+        if key in scope_for_global_checks and key not in rules.keys:
+            ambiguous.append({"key": key, "reason": "no rule in .env.sync.yml"})
+
+    if not only_keys:
+        for key in sorted(rules.keys.keys()):
+            if key not in source_keys_all:
+                validation_errors.append(f"Rule key '{key}' not found in source file.")
+
+    if force_reviewed:
+        for key in sorted(force_reviewed):
+            if key not in rules.keys:
+                validation_errors.append(f"Key from --force-reviewed not found in rules: {key}")
+                continue
+            if rules.keys[key].policy != "review_required":
+                validation_errors.append(
+                    f"Key from --force-reviewed is not review_required: {key}"
+                )
+
+    add_missing = bool(rules.defaults.get("add_missing", True))
+
+    for key in keys_to_process:
+        if key in source.duplicates or key in target.duplicates:
+            continue
+
+        source_value = source.values.get(key)
+        if source_value is None:
+            continue
+
+        rule = rules.keys.get(key)
+        if rule is None:
+            continue
+
+        target_has_key = key in target.values
+        target_value = target.values.get(key, "")
+
+        if rule.required and (not target_has_key or target_value == ""):
+            required_missing.append({"key": key})
+
+        if target_has_key and rule.allowed_values and target_value not in rule.allowed_values and target_value != "":
+            allowed = ", ".join(rule.allowed_values)
+            validation_errors.append(
+                f"{key} has invalid value in target: {mask_value(key, target_value, rule)} (allowed: {allowed})"
+            )
+
+        if not target_has_key:
+            if add_missing:
+                new_value = choose_missing_value(key, source_value, rule)
+                should_apply = False
+                apply_reason = "report mode"
+
+                if mode == "apply":
+                    if rule.policy == "managed":
+                        if can_apply_managed(rule, allow_managed, rules.defaults):
+                            should_apply = True
+                            apply_reason = "managed policy allowed"
+                        else:
+                            apply_reason = "managed policy not allowed"
+                    elif rule.policy == "protected":
+                        should_apply = True
+                        apply_reason = "protected key added as missing"
+                    elif rule.policy == "review_required":
+                        if key in force_reviewed:
+                            should_apply = True
+                            apply_reason = "forced review_required key"
+                        else:
+                            apply_reason = "review_required needs --force-reviewed"
+                    elif rule.policy == "deprecated":
+                        apply_reason = "deprecated key is not auto-added"
+
+                if rule.allowed_values and new_value not in ("", *rule.allowed_values):
+                    allowed = ", ".join(rule.allowed_values)
+                    validation_errors.append(
+                        f"{key} has invalid value for add: {mask_value(key, new_value, rule)} (allowed: {allowed})"
+                    )
+                    should_apply = False
+
+                added.append(
+                    {
+                        "key": key,
+                        "value": new_value,
+                        "applied": should_apply,
+                        "reason": apply_reason,
+                    }
+                )
+
+                if should_apply:
+                    additions.append((key, new_value))
+                    applied_changes += 1
+            continue
+
+        if source_value == target_value:
+            ok_count += 1
+            if rule.policy == "deprecated":
+                deprecated.append({"key": key, "reason": "deprecated key present"})
+            continue
+
+        if rule.policy == "protected":
+            preserved_protected.append(
+                {
+                    "key": key,
+                    "current": target_value,
+                    "incoming": source_value,
+                }
+            )
+            continue
+
+        if rule.policy == "managed":
+            can_apply = mode == "apply" and can_apply_managed(rule, allow_managed, rules.defaults)
+            reason = "managed policy allowed" if can_apply else "managed policy blocked"
+
+            if rule.allowed_values and source_value not in rule.allowed_values:
+                allowed = ", ".join(rule.allowed_values)
+                validation_errors.append(
+                    f"{key} has invalid source value: {mask_value(key, source_value, rule)} (allowed: {allowed})"
+                )
+                can_apply = False
+                reason = "invalid source value"
+
+            changed.append(
+                {
+                    "key": key,
+                    "from": target_value,
+                    "to": source_value,
+                    "applied": can_apply,
+                    "reason": reason,
+                    "policy": "managed",
+                }
+            )
+            if can_apply:
+                updates[key] = source_value
+                applied_changes += 1
+            continue
+
+        if rule.policy == "review_required":
+            forced = mode == "apply" and key in force_reviewed
+            reason = "forced with --force-reviewed" if forced else "manual review required"
+
+            if rule.allowed_values and source_value not in rule.allowed_values:
+                allowed = ", ".join(rule.allowed_values)
+                validation_errors.append(
+                    f"{key} has invalid source value: {mask_value(key, source_value, rule)} (allowed: {allowed})"
+                )
+                forced = False
+                reason = "invalid source value"
+
+            review_required.append(
+                {
+                    "key": key,
+                    "from": target_value,
+                    "to": source_value,
+                    "reason": rule.reason,
+                    "impact": rule.impact,
+                    "validation": rule.validation or [],
+                    "forced": forced,
+                }
+            )
+            if forced:
+                changed.append(
+                    {
+                        "key": key,
+                        "from": target_value,
+                        "to": source_value,
+                        "applied": True,
+                        "reason": "forced review_required",
+                        "policy": "review_required",
+                    }
+                )
+                updates[key] = source_value
+                applied_changes += 1
+            continue
+
+        if rule.policy == "deprecated":
+            deprecated.append(
+                {
+                    "key": key,
+                    "reason": "deprecated key differs and must be reviewed manually",
+                }
+            )
+            continue
+
+    if not only_keys:
+        for key in sorted(target_keys_all):
+            if key in source_keys_all:
+                continue
+
+            rule = rules.keys.get(key)
+            extra_in_target.append({"key": key})
+            if rule and rule.policy == "deprecated":
+                deprecated.append({"key": key, "reason": "deprecated extra key in target"})
+
+    if verbose and not keys_to_process:
+        validation_errors.append("No keys available to process after filters.")
+
+    return SyncPlan(
+        mode=mode,
+        added=added,
+        changed=changed,
+        preserved_protected=preserved_protected,
+        review_required=review_required,
+        required_missing=required_missing,
+        extra_in_target=extra_in_target,
+        deprecated=deprecated,
+        ambiguous=ambiguous,
+        validation_errors=validation_errors,
+        ok_count=ok_count,
+        applied_changes=applied_changes,
+        updates=updates,
+        additions=additions,
+    )
+
+
+def render_value_for_line(value: str, quote_style: str) -> str:
+    if quote_style == "single" and "'" not in value:
+        return f"'{value}'"
+    if quote_style == "double":
+        return '"' + escape_double(value) + '"'
+    return render_value_for_new_key(value)
+
+
+def render_value_for_new_key(value: str) -> str:
+    if value == "":
+        return ""
+
+    safe = re.fullmatch(r"[A-Za-z0-9_./:=@+-]+", value)
+    if safe:
+        return value
+    return '"' + escape_double(value) + '"'
+
+
+def escape_double(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def apply_changes_to_target(target: ParsedEnv, plan: SyncPlan) -> str:
+    output_lines = [line.original_line for line in target.lines]
+
+    for key, new_value in plan.updates.items():
+        index = target.key_indices[key]
+        line = target.lines[index]
+        if line.prefix is None:
+            continue
+        rendered = render_value_for_line(new_value, line.quote_style)
+        output_lines[index] = f"{line.prefix}{rendered}{line.suffix}"
+
+    if plan.additions:
+        if output_lines and output_lines[-1].strip() != "":
+            output_lines.append("")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        output_lines.append(f"# Added by env-sync on {timestamp}")
+        for key, value in plan.additions:
+            output_lines.append(f"{key}={render_value_for_new_key(value)}")
+
+    rendered_text = "\n".join(output_lines)
+    if target.trailing_newline:
+        rendered_text += "\n"
+    return rendered_text
+
+
+def create_backup(target_path: Path, backup_dir: Path) -> Path:
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to create backup directory: {backup_dir}") from exc
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_file = backup_dir / f"{target_path.name}.backup.{stamp}"
+
+    try:
+        shutil.copy2(target_path, backup_file)
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to create backup file: {backup_file}") from exc
+
+    return backup_file
+
+
+def write_atomic(target_path: Path, content: str) -> None:
+    temp_fd = None
+    temp_path = None
+    try:
+        temp_fd, temp_path = tempfile.mkstemp(prefix=f".{target_path.name}.", dir=str(target_path.parent))
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        temp_fd = None
+
+        original_mode = target_path.stat().st_mode & 0o777
+        os.chmod(temp_path, original_mode)
+        os.replace(temp_path, target_path)
+        temp_path = None
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to write target file: {target_path}") from exc
+    finally:
+        if temp_fd is not None:
+            try:
+                os.close(temp_fd)
+            except OSError:
+                pass
+        if temp_path is not None:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def render_report(
+    plan: SyncPlan,
+    source_path: Path,
+    target_path: Path,
+    rules_path: Path,
+    rules: RulesConfig,
+    use_color: bool,
+    verbose: bool,
+) -> str:
+    painter = ReportBuilder(use_color=use_color)
+    lines: list[str] = []
+
+    lines.append("ENV SYNC REPORT")
+    lines.append("")
+    lines.append("SOURCE:")
+    lines.append(str(source_path))
+    lines.append("")
+    lines.append("TARGET:")
+    lines.append(str(target_path))
+    lines.append("")
+    lines.append("RULES:")
+    lines.append(str(rules_path))
+    lines.append("")
+    lines.append("MODE:")
+    lines.append(plan.mode)
+
+    append_section(lines, "ADDED", [
+        f"+ {item['key']}={mask_value(item['key'], item['value'], rules.keys.get(item['key']))}"
+        + ("" if item.get("applied") or plan.mode == "report" else f" (not applied: {item.get('reason')})")
+        for item in plan.added
+    ])
+
+    append_section(lines, "CHANGED", [
+        f"~ {item['key']}: {mask_value(item['key'], item['from'], rules.keys.get(item['key']))} -> "
+        f"{mask_value(item['key'], item['to'], rules.keys.get(item['key']))}"
+        + ("" if item.get("applied") or plan.mode == "report" else f" (not applied: {item.get('reason')})")
+        for item in plan.changed
+    ])
+
+    append_section(lines, "PRESERVED / PROTECTED", [
+        f"= {item['key']} kept"
+        for item in plan.preserved_protected
+    ])
+
+    review_lines: list[str] = []
+    for item in plan.review_required:
+        line = (
+            f"! {item['key']}: "
+            f"{mask_value(item['key'], item['from'], rules.keys.get(item['key']))} -> "
+            f"{mask_value(item['key'], item['to'], rules.keys.get(item['key']))}"
+        )
+        if item.get("forced"):
+            line += " (forced apply)"
+        review_lines.append(line)
+        if item.get("reason"):
+            review_lines.append(f"  Reason: {item['reason']}")
+        if item.get("impact"):
+            review_lines.append(f"  Impact: {item['impact']}")
+        validations = item.get("validation") or []
+        if validations:
+            review_lines.append("  Validation:")
+            for step in validations:
+                review_lines.append(f"  - {step}")
+
+    append_section(lines, "REVIEW REQUIRED", review_lines)
+
+    append_section(lines, "REQUIRED MISSING", [
+        f"! {item['key']} is missing or empty"
+        for item in plan.required_missing
+    ])
+
+    append_section(lines, "EXTRA IN TARGET", [
+        f"? {item['key']} exists in target but not in source"
+        for item in plan.extra_in_target
+    ])
+
+    append_section(lines, "DEPRECATED", [
+        f"? {item['key']} is deprecated and should be reviewed manually"
+        for item in plan.deprecated
+    ])
+
+    append_section(lines, "AMBIGUOUS", [
+        f"? {item['key']} {item['reason']}"
+        for item in plan.ambiguous
+    ])
+
+    append_section(lines, "VALIDATION ERRORS", [
+        f"! {item}"
+        for item in plan.validation_errors
+    ])
+
+    lines.append("")
+    lines.append("BACKUP:")
+    if plan.backup_path is None:
+        lines.append("Not created because mode is report or no changes were applied.")
+    else:
+        lines.append(str(plan.backup_path))
+
+    lines.append("")
+    lines.append("RESULT:")
+    lines.append(f"Mode: {plan.mode}")
+    lines.append(f"Applied changes: {plan.applied_changes}")
+    lines.append(f"Added keys: {len(plan.added)}")
+    lines.append(f"Changed keys: {len([item for item in plan.changed if item.get('applied')])}")
+    lines.append(f"Protected keys preserved: {len(plan.preserved_protected)}")
+    lines.append(
+        f"Manual review required: {len([item for item in plan.review_required if not item.get('forced')])}"
+    )
+    lines.append(f"Required missing: {len(plan.required_missing)}")
+    lines.append(f"Extra keys: {len(plan.extra_in_target)}")
+    lines.append(f"Deprecated keys: {len(plan.deprecated)}")
+    lines.append(f"Ambiguities: {len(plan.ambiguous)}")
+    lines.append(f"Validation errors: {len(plan.validation_errors)}")
+    lines.append(f"Equal keys: {plan.ok_count}")
+
+    if verbose:
+        lines.append("")
+        lines.append("VERBOSE:")
+        lines.append(f"Rules version: {rules.version}")
+        lines.append(f"defaults.add_missing: {bool(rules.defaults.get('add_missing', True))}")
+        lines.append(
+            f"defaults.apply_managed_changes: {bool(rules.defaults.get('apply_managed_changes', False))}"
+        )
+        lines.append(f"defaults.backup_dir: {rules.defaults.get('backup_dir', '.env-backups')}")
+
+    report = "\n".join(lines)
+
+    if not use_color:
+        return report
+
+    report = report.replace("ENV SYNC REPORT", painter.color("ENV SYNC REPORT", "blue"))
+    report = report.replace("VALIDATION ERRORS", painter.color("VALIDATION ERRORS", "red"))
+    report = report.replace("REVIEW REQUIRED", painter.color("REVIEW REQUIRED", "yellow"))
+    return report
+
+
+def append_section(lines: list[str], title: str, entries: list[str]) -> None:
+    lines.append("")
+    lines.append(f"{title}:")
+    if not entries:
+        lines.append("(none)")
+        return
+    lines.extend(entries)
+
+
+def write_report(path: Path, content: str) -> None:
+    try:
+        if path.parent != Path("."):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to write report file: {path}") from exc
+
+
+def has_differences(plan: SyncPlan) -> bool:
+    return any(
+        [
+            plan.added,
+            plan.changed,
+            plan.preserved_protected,
+            plan.review_required,
+            plan.required_missing,
+            plan.extra_in_target,
+            plan.deprecated,
+            plan.ambiguous,
+        ]
+    )
+
+
+def compute_exit_code(plan: SyncPlan) -> int:
+    if plan.validation_errors:
+        return EXIT_ERROR
+
+    unresolved_review = any(not item.get("forced") for item in plan.review_required)
+    if unresolved_review:
+        return EXIT_REVIEW_REQUIRED
+
+    if plan.mode == "report" and has_differences(plan):
+        return EXIT_DIFF
+
+    return EXIT_SUCCESS
+
+
+def main() -> int:
+    args = parse_args()
+
+    source_path = Path(args.source)
+    target_path = Path(args.target)
+    rules_path = Path(args.rules)
+
+    try:
+        ensure_readable_file(source_path, "source")
+        ensure_readable_file(target_path, "target")
+
+        rules = load_rules(rules_path)
+
+        source = parse_env_file(source_path, "source")
+        target = parse_env_file(target_path, "target")
+
+        only_keys = parse_key_list(args.only)
+        force_reviewed = parse_key_list(args.force_reviewed)
+
+        plan = build_sync_plan(
+            source=source,
+            target=target,
+            rules=rules,
+            mode=args.mode,
+            only_keys=only_keys,
+            allow_managed=args.allow_managed,
+            force_reviewed=force_reviewed,
+            verbose=args.verbose,
+        )
+
+        if args.mode == "apply" and not plan.validation_errors and (plan.updates or plan.additions):
+            backup_dir = Path(str(rules.defaults.get("backup_dir", ".env-backups")))
+            plan.backup_path = create_backup(target_path, backup_dir)
+            new_content = apply_changes_to_target(target, plan)
+            write_atomic(target_path, new_content)
+
+        report = render_report(
+            plan=plan,
+            source_path=source_path,
+            target_path=target_path,
+            rules_path=rules_path,
+            rules=rules,
+            use_color=not args.no_color,
+            verbose=args.verbose,
+        )
+        print(report)
+
+        if args.write_report:
+            # Always write plain text report without ANSI colors.
+            plain_report = render_report(
+                plan=plan,
+                source_path=source_path,
+                target_path=target_path,
+                rules_path=rules_path,
+                rules=rules,
+                use_color=False,
+                verbose=args.verbose,
+            )
+            write_report(Path(args.write_report), plain_report)
+
+        return compute_exit_code(plan)
+
+    except PermissionErrorSync as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_PERMISSION
+    except ValidationError as exc:
+        print(str(exc), file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:  # noqa: BLE001 - final safety catch without leaking data.
+        print(f"Execution error: {exc.__class__.__name__}", file=sys.stderr)
+        return EXIT_ERROR
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -27,6 +27,60 @@ cp config/product.env config/staging.env
 
 This creates your environment baseline. The scripts read this file automatically.
 
+## Environment file sync (env-sync)
+
+Use `scripts/env-sync.py` to compare `.env.example` against a real environment file (`development.env`, `staging.env`, or `production.env`) using policy rules from `.env.sync.yml`.
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode report
+```
+
+Apply only allowed changes:
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode apply \
+  --allow-managed
+```
+
+Force one reviewed key (explicit/manual operation):
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode apply \
+  --force-reviewed QUEUE_CONNECTION
+```
+
+Generate a report file:
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode report \
+  --write-report .runtime/reports/env-sync-production.txt
+```
+
+Operational notes:
+
+- Default mode is `report` (no file changes).
+- `apply` creates backup before any write (`.env-backups/` by default).
+- `protected` keys are preserved.
+- `review_required` keys are never changed unless explicitly listed in `--force-reviewed`.
+- Secrets are masked in terminal and file reports.
+- The tool does not rename or replace your current real environment file naming model.
+
 ## Core deployment commands
 
 ```bash

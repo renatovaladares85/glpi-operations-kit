@@ -27,6 +27,60 @@ cp config/product.env config/staging.env
 
 Esse comando cria o baseline do ambiente. Os scripts carregam esse arquivo automaticamente.
 
+## Sincronização de arquivos de ambiente (env-sync)
+
+Use `scripts/env-sync.py` para comparar `.env.example` com um arquivo real de ambiente (`development.env`, `staging.env` ou `production.env`) usando regras de política em `.env.sync.yml`.
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode report
+```
+
+Aplicar apenas alterações permitidas:
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode apply \
+  --allow-managed
+```
+
+Forçar uma chave de revisão manual (operação explícita):
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode apply \
+  --force-reviewed QUEUE_CONNECTION
+```
+
+Gerar relatório em arquivo:
+
+```bash
+python3 scripts/env-sync.py \
+  --source .env.example \
+  --target production.env \
+  --rules .env.sync.yml \
+  --mode report \
+  --write-report .runtime/reports/env-sync-production.txt
+```
+
+Notas operacionais:
+
+- O modo padrão é `report` (sem alteração de arquivo).
+- Em `apply`, o script cria backup antes de qualquer escrita (`.env-backups/` por padrão).
+- Chaves `protected` são preservadas.
+- Chaves `review_required` não são alteradas sem listagem explícita em `--force-reviewed`.
+- Segredos são mascarados no terminal e em relatórios.
+- A ferramenta não renomeia nem substitui a nomenclatura atual dos arquivos reais de ambiente.
+
 ## Comandos principais de implantação
 
 ```bash
