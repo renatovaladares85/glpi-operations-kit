@@ -1,6 +1,7 @@
 # Exemplos de Ambiente (PT-BR)
 
 Os exemplos abaixo são modelos de preenchimento com valores fictícios. Mantenha credenciais reais fora do Git.
+Valores de retenção, janelas e governança devem seguir a política local do projeto.
 
 ## Exemplo 1 - Homologação single-server
 
@@ -27,7 +28,7 @@ SECURITY_REQUIRE_TLS=false
 SECURITY_REQUIRE_HTTPS=false
 MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 BACKUP_BASE_DIR=/var/backups/glpi
-BACKUP_RETENTION_DAYS=14
+BACKUP_RETENTION_DAYS=21
 ```
 
 Fluxo:
@@ -73,7 +74,7 @@ TLS_PROVIDED_LOCAL_KEY_PATH=/secure-transfer/glpi-company.key
 SECURITY_REQUIRE_TLS=true
 SECURITY_REQUIRE_HTTPS=true
 MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
-BACKUP_RETENTION_DAYS=30
+BACKUP_RETENTION_DAYS=21
 ```
 
 Fluxo DB:

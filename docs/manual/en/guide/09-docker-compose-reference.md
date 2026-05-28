@@ -12,7 +12,7 @@ How to use this chapter:
 
 1. treat Docker/Compose as an alternative track;
 2. do not mix Docker instructions with Linux traditional deployment steps;
-3. keep production decisions aligned with approved architecture and policy.
+3. keep production decisions aligned with local architecture and policy.
 
 Go next:
 

@@ -5,7 +5,7 @@ O ciclo de vida de plugins é manual no baseline atual.
 Regra operacional:
 
 - não esperar instalação automática de plugin pelos scripts do repositório;
-- usar Marketplace do GLPI ou processo manual aprovado;
+- usar Marketplace do GLPI ou processo manual definido pela política local;
 - manter acesso de admin local disponível durante mudanças.
 
 Fluxo seguro:

@@ -12,7 +12,7 @@ Como usar este capítulo:
 
 1. tratar Docker/Compose como trilha alternativa;
 2. não misturar instruções Docker com passos de deploy Linux tradicional;
-3. manter decisões de produção alinhadas com arquitetura e política aprovadas.
+3. manter decisões de produção alinhadas com arquitetura e política local.
 
 Próximo passo:
 

@@ -1,6 +1,7 @@
 # Environment Examples (EN)
 
 The examples below are fill-in models with non-real values. Keep real credentials out of Git.
+Retention, windowing, and governance decisions must follow each project's local policy.
 
 ## Example 1 - Single-server staging
 
@@ -27,7 +28,7 @@ SECURITY_REQUIRE_TLS=false
 SECURITY_REQUIRE_HTTPS=false
 MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
 BACKUP_BASE_DIR=/var/backups/glpi
-BACKUP_RETENTION_DAYS=14
+BACKUP_RETENTION_DAYS=21
 ```
 
 Flow:
@@ -73,7 +74,7 @@ TLS_PROVIDED_LOCAL_KEY_PATH=/secure-transfer/glpi-company.key
 SECURITY_REQUIRE_TLS=true
 SECURITY_REQUIRE_HTTPS=true
 MONITORING_MYSQLD_EXPORTER_PASSWORD=kit-demo-Mon5@hR8tQ3y
-BACKUP_RETENTION_DAYS=30
+BACKUP_RETENTION_DAYS=21
 ```
 
 DB flow:

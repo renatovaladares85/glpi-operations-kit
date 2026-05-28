@@ -21,7 +21,7 @@ Requisitos recomendados:
 | Tipo | Certificado TLS de servidor para HTTPS. |
 | Uso estendido | `serverAuth`. |
 | CN | FQDN principal, por exemplo `glpi.company.com`. |
-| SAN | Deve conter o FQDN usado por `GLPI_DOMAIN`. Pode conter aliases aprovados. |
+| SAN | Deve conter o FQDN usado por `GLPI_DOMAIN`. Pode conter aliases definidos pela política local. |
 | Formato do certificado | PEM, normalmente `.crt` ou `.pem`. |
 | Cadeia | Preferir fullchain PEM com certificado do servidor + intermediárias. |
 | Chave privada | PEM correspondente ao certificado, protegida, não versionada. |
@@ -32,7 +32,7 @@ Se a CA pedir dados para CSR, forneça:
 | Campo | O que informar |
 |---|---|
 | Common Name | FQDN principal do GLPI. |
-| Subject Alternative Name | `DNS:glpi.company.com` e aliases aprovados. |
+| Subject Alternative Name | `DNS:glpi.company.com` e aliases definidos pela política local. |
 | Organization/Locality/Country | Valores corporativos se a CA exigir. |
 | Key usage | Digital Signature e Key Encipherment, conforme perfil da CA. |
 | Extended key usage | Server Authentication. |

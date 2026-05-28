@@ -120,7 +120,7 @@ bash scripts/release-readiness.sh staging
 
 ### When to use
 
-Before declaring staging complete and before requesting production approval.
+Before declaring staging complete and before final local release decision.
 
 ### Preconditions
 

@@ -64,7 +64,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 
 | Decision | Recommended default | Why it matters |
 |---|---|---|
-| `EXECUTION_MODE` | `local` unless remote SSH orchestration is approved. | Prevents implicit cross-host assumptions. |
+| `EXECUTION_MODE` | `local` unless remote SSH orchestration is allowed by local policy. | Prevents implicit cross-host assumptions. |
 | `TOPOLOGY_MODE` | Match the real host layout. | Wrong topology can apply DB/app actions to the wrong host. |
 | `DATABASE_DEPLOYMENT_MODE` | `self_hosted` for VM-managed DB, `managed` for AWS RDS/external DB. | Controls whether scripts expect Linux DB host operations or direct DB TCP validation. |
 | `WEB_SERVER_TYPE` | One of `nginx`, `apache`, `lighttpd`. | The Linux kit automates these engines only. |

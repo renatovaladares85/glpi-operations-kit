@@ -40,10 +40,10 @@ Use this guide before running `deploy check`, `tls check`, or any mutable operat
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `PRODUCT_NAME` | Product display name. | Keep default or use the approved internal product name. | Plain text. |
+| `PRODUCT_NAME` | Product display name. | Keep default or use the accepted internal product name. | Plain text. |
 | `PRODUCT_SLUG` | Lowercase short identifier. | Derive from `PRODUCT_NAME` using hyphens. | Avoid spaces and accents. |
 | `PRODUCT_DEPLOYMENT_LABEL` | Label for this deployment. | Use `staging-kit` or `production-kit`. | Must distinguish deployments. |
-| `CUSTOMER_DISPLAY_NAME` | Customer/environment display name. | Use generic or approved naming only. | Do not hardcode real customer names in reusable templates. |
+| `CUSTOMER_DISPLAY_NAME` | Customer/environment display name. | Use generic naming defined by local policy. | Do not hardcode real customer names in reusable templates. |
 | `CUSTOMER_SHORT_NAME` | Short customer identifier. | Use a slug, for example `example-customer`. | Used in labels and dashboards. |
 | `ENVIRONMENT_NAME` | CLI/runtime environment name. | Match the file name: `config/staging.env` uses `staging`. | `./scripts/glpictl.sh staging ...` must find the file. |
 | `ENVIRONMENT_STAGE` | Lifecycle stage. | Use `staging`, `production`, `dev`, or equivalent. | Must reflect operational risk. |
@@ -65,7 +65,7 @@ Use this guide before running `deploy check`, `tls check`, or any mutable operat
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `NETWORK_SSH_USER` | Linux SSH user. | Ask the Linux team; use an approved named or operational account. | Required only with `EXECUTION_MODE=ssh`. |
+| `NETWORK_SSH_USER` | Linux SSH user. | Ask the Linux team; use a named or operational account defined by local policy. | Required only with `EXECUTION_MODE=ssh`. |
 | `NETWORK_SSH_PRIVATE_KEY_PATH` | SSH private key path on executor. | Generate or request one key pair per environment; keep mode `0600`. | Required only with `EXECUTION_MODE=ssh`. |
 | `NETWORK_DATABASE_APP_ACCESS_HOST` | Source granted DB access in restricted mode. | Use the app host address as seen by DB. | Example: `NETWORK_DATABASE_APP_ACCESS_HOST=192.0.2.10`. |
 | `NETWORK_DATABASE_ACCESS_MODE` | DB access policy mode. | Use `restricted` for allowlist mode or `open` for unrestricted source mode. | Examples: `NETWORK_DATABASE_ACCESS_MODE=restricted` or `NETWORK_DATABASE_ACCESS_MODE=open`. |
@@ -78,7 +78,7 @@ Risk note:
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `GLPI_VERSION` | Target GLPI version. | Use the homologated version, for example `11.0.7` when that is the approved baseline. | Must be compatible with PHP minimum 8.2. |
+| `GLPI_VERSION` | Target GLPI version. | Use the homologated version, for example `11.0.7` when that is the accepted baseline for the project. | Must be compatible with PHP minimum 8.2. |
 | `GLPI_DOMAIN` | Hostname used to access GLPI. | Ask DNS/network team. | Must be present in certificate when TLS is enabled. |
 | `WEB_SERVER_TYPE` | `nginx`, `apache`, or `lighttpd`. | Choose according to environment standard. The Linux kit does not automate IIS. | Only one web engine should be active on the host. |
 | `GLPI_UPLOAD_MAX_FILESIZE` | PHP upload limit. | Size it for expected attachments. | PHP size syntax, e.g. `32M` or `128M`. |
@@ -100,7 +100,7 @@ Risk note:
 | `DATABASE_PASSWORD` | Password for GLPI SQL user. | Generate a strong random secret. | Required secret; do not commit. |
 | `DATABASE_ROOT_PASSWORD` | MariaDB root/provisioning password. | Generate or request from DBA. | Required when `DATABASE_DEPLOYMENT_MODE=self_hosted`; do not commit. |
 | `DATABASE_PORT` | MariaDB/MySQL TCP port. | Usually `3306`. | Firewall must allow APP source. |
-| `DATABASE_BIND_ADDRESS` | DB bind address. | Use `0.0.0.0` for all approved interfaces or the specific DB IP. | Must match firewall policy. |
+| `DATABASE_BIND_ADDRESS` | DB bind address. | Use `0.0.0.0` for all required interfaces or the specific DB IP. | Must match firewall policy. |
 | `DATABASE_PACKAGES` | CSV DB packages. | Keep default unless OS policy requires a change. | Current baseline: `mariadb-server,mariadb-client,python3-pymysql`. |
 
 ## PHP-FPM and web ports
@@ -130,7 +130,7 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 
 | Key | What to set | How to get or decide it | Common validation |
 |---|---|---|---|
-| `BACKUP_BASE_DIR` | Backup root on target host. | Ask infrastructure for the approved path; default `/var/backups/glpi`. | Must have space and restricted permissions. |
+| `BACKUP_BASE_DIR` | Backup root on target host. | Ask infrastructure for the path defined by local policy; default `/var/backups/glpi`. | Must have space and restricted permissions. |
 | `BACKUP_RETENTION_DAYS` | Retention in days. | Use local environment/project policy. | Positive integer. |
 
 ## Monitoring and alerting
@@ -143,7 +143,7 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `MONITORING_MYSQLD_EXPORTER_PASSWORD` | Exporter password. | Generate a strong random secret. | Required when `DATABASE_DEPLOYMENT_MODE=self_hosted`; do not commit. |
 | `MONITORING_LABELS_JSON` | One-line JSON labels. | Define product, service, customer, environment. | Must be a valid JSON object. |
 | `MONITORING_THRESHOLDS_JSON` | One-line JSON thresholds. | Ask observability/NOC. | Must contain coherent numbers. |
-| `MONITORING_SCRAPE_PROFILES_JSON` | JSON scrape profiles. | Use approved interval and timeout. | Valid JSON object, e.g. `{"default":{"interval":"30s","timeout":"10s"}}`. |
+| `MONITORING_SCRAPE_PROFILES_JSON` | JSON scrape profiles. | Use interval and timeout defined by local policy. | Valid JSON object, e.g. `{"default":{"interval":"30s","timeout":"10s"}}`. |
 | `MONITORING_DASHBOARD_PROFILE` | Dashboard profile name. | Use `glpi-standard` or agreed profile. | Plain text. |
 | `MONITORING_ALERT_ROUTES_JSON` | JSON alert routing. | Ask NOC for receiver/escalation. | Valid JSON object. |
 | `ALERTING_TLS_EXPIRY_WARNING_DAYS` | TLS expiry warning days. | Use security policy, default `30`. | Positive integer. |
@@ -183,7 +183,7 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `OPERATIONS_GLPI_CRON_SCHEDULE` | Operational cron schedule. | Usually same as `GLPI_CRON_SCHEDULE`. | Must be quoted. |
 | `OPERATIONS_REQUIRED_OPS_GROUP` | Linux operator group. | Default `glpiops`. | Operator must belong to this group. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure` or `permissive`. | Use `secure` by default. | `permissive` requires justification. |
-| `OPERATIONS_PERMISSIVE_JUSTIFICATION` | Justification for permissive. | Fill only when permissive is needed and approved. | Must explain accepted risk. |
+| `OPERATIONS_PERMISSIVE_JUSTIFICATION` | Justification for permissive. | Fill only when permissive is needed and authorized by local policy. | Must explain accepted risk. |
 
 ## Resource profiles
 
