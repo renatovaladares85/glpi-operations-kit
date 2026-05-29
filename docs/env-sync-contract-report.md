@@ -6,7 +6,7 @@
 
 ## Arquivos reais analisados
 
-- Nenhum `config/<ambiente>.env` encontrado.
+- `config/staging.env`
 
 ## Arquivos criados/atualizados
 
@@ -62,19 +62,36 @@
   - `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS`
 - Variáveis usadas no código e ausentes no template: nenhuma.
 - Variáveis extras em ambientes e com uso detectado no código: nenhuma.
-- Variáveis extras em ambientes sem uso claro no código: nenhuma.
-- Sem ambiguidades por arquivo de ambiente.
+- Variáveis extras em ambientes sem uso claro no código (candidatas a deprecated):
+  - `NGINX_HTTPS_PORT`
+  - `NGINX_HTTP_PORT`
+  - `SECURITY_REQUIRE_SSO`
+  - `SECURITY_SSO_ENABLED`
+- `staging.env`:
+  - extras ausentes no template:
+    - `NGINX_HTTPS_PORT`
+    - `NGINX_HTTP_PORT`
+    - `SECURITY_REQUIRE_SSO`
+    - `SECURITY_SSO_ENABLED`
 - Chaves com variação de valor entre ambientes: nenhuma detectada.
 
 ## Cobertura por ambiente
 
-- Não aplicável (nenhum ambiente real disponível).
+- `staging.env`: 8 chaves do template ausentes.
 
 ## Pós-geração: env-sync report
 
 - `config/.env.example`: code=2; missing=1; review_required=0; validation_errors=0; extras=0; ambiguous=0
   - required missing keys:
     - `DATABASE_PASSWORD`
+- `config/staging.env`: code=3; missing=2; review_required=3; validation_errors=0; extras=0; ambiguous=0
+  - required missing keys:
+    - `WEB_HTTPS_PORT`
+    - `WEB_HTTP_PORT`
+  - review_required keys:
+    - `GLPI_VERSION`
+    - `NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS`
+    - `NETWORK_DATABASE_APP_ACCESS_HOST`
 
 ## Validações executadas
 
