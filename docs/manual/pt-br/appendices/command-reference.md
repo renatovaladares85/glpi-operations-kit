@@ -2,7 +2,7 @@
 
 Este apêndice complementa o runbook principal com comandos diretos e finalidade operacional. A sintaxe é a mesma; o que muda é o ambiente e os valores em `config/<environment>.env`.
 
-Se sua tarefa agora é sincronizar `.env`, vá direto para a seção `Sincronização de arquivos de ambiente (env-sync)` neste arquivo.
+Se sua tarefa agora é sincronizar `.env`, vá direto para as seções `Gerar ou recuperar .env.sync.yml` e `Sincronização de arquivos de ambiente (env-sync)` neste arquivo.
 
 ## Preparar ferramentas do host
 
@@ -28,6 +28,54 @@ cp config/.env.example config/staging.env
 ```
 
 Esse comando cria o baseline do ambiente. Os scripts carregam esse arquivo automaticamente.
+
+## Gerar ou recuperar `.env.sync.yml`
+
+O `scripts/env-sync.py` depende do arquivo `.env.sync.yml` na raiz do repositório.
+
+Se esse arquivo foi removido localmente por engano, recupere a versão rastreada no Git:
+
+```bash
+git restore .env.sync.yml
+```
+
+Se você precisa criar o arquivo do zero, comece por uma estrutura mínima válida e depois expanda:
+
+```yaml
+version: 1
+defaults:
+  add_missing: true
+  remove_extra: false
+  backup: true
+  default_mode: report
+  apply_managed_changes: false
+  backup_dir: ".env-backups"
+
+keys:
+  GLPI_DOMAIN:
+    description: "Domínio público do GLPI."
+    required: true
+    policy: protected
+  DATABASE_NAME:
+    description: "Schema de banco do GLPI."
+    required: true
+    policy: protected
+```
+
+Os campos obrigatórios por chave são `description`, `required` e `policy`.
+As políticas suportadas são `protected`, `managed`, `review_required` e `deprecated`.
+
+Valide o arquivo antes de executar em modo apply:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/.env.example \
+  --rules .env.sync.yml \
+  --mode report
+```
+
+Se esse check ainda mostrar `no rule in .env.sync.yml`, adicione regras para as chaves faltantes e rode novamente.
 
 ## Sincronização de arquivos de ambiente (env-sync)
 

@@ -28,6 +28,7 @@ Use this page as a router:
 - I want to install GLPI: [Deploy on Linux](guide/03-deploy-linux-traditional.md)
 - I want to configure environment values: [Environment and Topology](guide/02-environment-and-topology.md)
 - I want to sync my `.env` with the baseline template (`env-sync.py`): [Environment and Topology](guide/02-environment-and-topology.md)
+- I need to generate or recover `.env.sync.yml`: [Command Reference](appendices/command-reference.md)
 - I want TLS/HTTPS: [TLS and Certificates](guide/04-tls-and-certificates.md)
 - I want backup: [Backup, Restore, and Restore Test](guide/05-backup-restore-and-restore-test.md)
 - I want restore: [Backup, Restore, and Restore Test](guide/05-backup-restore-and-restore-test.md)

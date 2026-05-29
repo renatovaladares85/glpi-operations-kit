@@ -2,7 +2,7 @@
 
 This appendix complements the main runbook with direct commands and richer operational intent. The command syntax is always the same; what changes is the environment name and the values in `config/<environment>.env`.
 
-If your current task is `.env` synchronization, go directly to the section `Environment file sync (env-sync)` in this file.
+If your current task is `.env` synchronization, go directly to the sections `Generate or recover .env.sync.yml` and `Environment file sync (env-sync)` in this file.
 
 ## Prepare host tooling
 
@@ -28,6 +28,54 @@ cp config/.env.example config/staging.env
 ```
 
 This creates your environment baseline. The scripts read this file automatically.
+
+## Generate or recover `.env.sync.yml`
+
+`scripts/env-sync.py` depends on `.env.sync.yml` at the repository root.
+
+If the file was removed locally by mistake, recover the version tracked by Git:
+
+```bash
+git restore .env.sync.yml
+```
+
+If you are creating a rules file from zero, start with a minimal valid structure and then expand it:
+
+```yaml
+version: 1
+defaults:
+  add_missing: true
+  remove_extra: false
+  backup: true
+  default_mode: report
+  apply_managed_changes: false
+  backup_dir: ".env-backups"
+
+keys:
+  GLPI_DOMAIN:
+    description: "Public GLPI domain."
+    required: true
+    policy: protected
+  DATABASE_NAME:
+    description: "GLPI database schema."
+    required: true
+    policy: protected
+```
+
+Required fields for each key are `description`, `required`, and `policy`.
+Supported policies are `protected`, `managed`, `review_required`, and `deprecated`.
+
+Validate the file before running apply mode:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/.env.example \
+  --rules .env.sync.yml \
+  --mode report
+```
+
+When this check still reports `no rule in .env.sync.yml`, add missing key rules and rerun.
 
 ## Environment file sync (env-sync)
 

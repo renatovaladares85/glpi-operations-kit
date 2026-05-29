@@ -36,6 +36,7 @@ Choose topology and execution mode carefully:
 - `EXECUTION_MODE=ssh`: centralized remote execution (policy dependent)
 
 Before running deployment checks, synchronize your environment file against the current baseline template using `env-sync.py`.
+If `.env.sync.yml` is missing, first follow `Generate or recover .env.sync.yml` in [Command Reference](../appendices/command-reference.md).
 
 Start with report mode (no file changes):
 

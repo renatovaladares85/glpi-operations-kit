@@ -18,6 +18,7 @@ This folder is the single central documentation hub for operators.
 - Install GLPI on Ubuntu (traditional Linux stack): [Deploy on Linux](en/guide/03-deploy-linux-traditional.md)
 - Fill environment and topology settings: [Environment and Topology](en/guide/02-environment-and-topology.md)
 - Sync environment file with baseline template (`env-sync.py`): [Environment and Topology](en/guide/02-environment-and-topology.md)
+- Generate or recover `.env.sync.yml` rules file: [Command Reference](en/appendices/command-reference.md)
 - Configure TLS/HTTPS: [TLS and Certificates](en/guide/04-tls-and-certificates.md)
 - Backup and restore: [Backup, Restore, and Restore Test](en/guide/05-backup-restore-and-restore-test.md)
 - Upgrade GLPI in place: [Upgrade In Place](en/guide/06-glpi-upgrade-in-place.md)

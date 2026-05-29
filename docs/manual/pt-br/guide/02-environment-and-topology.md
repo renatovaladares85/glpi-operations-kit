@@ -36,6 +36,7 @@ Escolha topologia e modo de execução com cuidado:
 - `EXECUTION_MODE=ssh`: execução remota centralizada (depende de política)
 
 Antes de rodar os checks de deploy, sincronize seu arquivo de ambiente com o template baseline atual usando `env-sync.py`.
+Se o `.env.sync.yml` não existir, siga primeiro `Gerar ou recuperar .env.sync.yml` na [Referência de Comandos](../appendices/command-reference.md).
 
 Comece em modo de relatório (sem alterar arquivo):
 
