@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "env-sync.py"
@@ -386,6 +387,116 @@ keys:
 """
         out = self.run_sync(source, target, rules, mode="report")
         self.assertEqual(out["result"].returncode, 0)
+
+
+class EnvSyncGenerateContractCLITest(unittest.TestCase):
+    def run_generate(self, template: str, env_files=None, extra_args=None):
+        env_files = env_files or {}
+        extra_args = extra_args or []
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config_dir = tmp_path / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            template_path = config_dir / ".env.example"
+            template_path.write_text(template, encoding="utf-8")
+
+            for env_name, env_content in env_files.items():
+                (config_dir / f"{env_name}.env").write_text(env_content, encoding="utf-8")
+
+            cmd = [
+                sys.executable,
+                str(SCRIPT),
+                "--generate-contract",
+                "--output",
+                ".env.sync.generated.yml",
+                "--report-output",
+                "docs/env-sync-contract-report.md",
+                "--no-color",
+            ]
+            cmd.extend(extra_args)
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=tmp_path)
+            output_path = tmp_path / ".env.sync.generated.yml"
+            publish_path = tmp_path / ".env.sync.yml"
+            report_path = tmp_path / "docs" / "env-sync-contract-report.md"
+
+            return {
+                "result": result,
+                "output_exists": output_path.exists(),
+                "output_text": output_path.read_text(encoding="utf-8") if output_path.exists() else "",
+                "output_yaml": yaml.safe_load(output_path.read_text(encoding="utf-8")) if output_path.exists() else {},
+                "publish_exists": publish_path.exists(),
+                "publish_text": publish_path.read_text(encoding="utf-8") if publish_path.exists() else "",
+                "report_exists": report_path.exists(),
+                "report_text": report_path.read_text(encoding="utf-8") if report_path.exists() else "",
+            }
+
+    def test_generate_without_real_env_files(self):
+        template = """PRODUCT_NAME=GLPI Kit
+#OPTIONAL_FLAG=true
+SECRET_TOKEN=
+TLS_MODE=none
+"""
+        out = self.run_generate(template)
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertTrue(out["output_exists"])
+        self.assertTrue(out["report_exists"])
+        self.assertIn("Nenhum `config/<ambiente>.env` encontrado.", out["report_text"])
+        self.assertIn("PRODUCT_NAME", out["output_yaml"]["keys"])
+        self.assertIn("OPTIONAL_FLAG", out["output_yaml"]["keys"])
+        self.assertFalse(out["publish_exists"])
+
+    def test_generate_discovers_staging_and_production_env_files(self):
+        template = """PRODUCT_NAME=GLPI Kit
+TLS_MODE=none
+MONITORING_MYSQLD_EXPORTER_PASSWORD=
+"""
+        out = self.run_generate(
+            template,
+            env_files={
+                "staging": "PRODUCT_NAME=GLPI Kit Staging\nTLS_MODE=self_signed\n",
+                "production": "PRODUCT_NAME=GLPI Kit Production\nTLS_MODE=provided\n",
+            },
+        )
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("Discovered environments: 2", out["result"].stdout)
+        self.assertIn("`config/staging.env`", out["report_text"])
+        self.assertIn("`config/production.env`", out["report_text"])
+
+    def test_generate_reports_extra_and_duplicate_keys(self):
+        template = """PRODUCT_NAME=GLPI Kit
+TLS_MODE=none
+"""
+        out = self.run_generate(
+            template,
+            env_files={
+                "staging": "PRODUCT_NAME=kit-a\nPRODUCT_NAME=kit-b\nLEGACY_FLAG=true\nTLS_MODE=none\n",
+            },
+        )
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("LEGACY_FLAG", out["report_text"])
+        self.assertIn("chaves duplicadas", out["report_text"])
+
+    def test_generate_publish_writes_env_sync_yml(self):
+        template = """PRODUCT_NAME=GLPI Kit
+TLS_MODE=none
+"""
+        out = self.run_generate(template, extra_args=["--publish"])
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertTrue(out["publish_exists"])
+        self.assertEqual(out["output_text"], out["publish_text"])
+
+    def test_generate_strict_post_checks_fails_on_pending_differences(self):
+        template = """PRODUCT_NAME=GLPI Kit
+TLS_MODE=none
+"""
+        out = self.run_generate(
+            template,
+            env_files={"staging": "PRODUCT_NAME=different-name\nTLS_MODE=none\n"},
+            extra_args=["--strict-post-checks"],
+        )
+        self.assertEqual(out["result"].returncode, 1)
+        self.assertIn("Strict post-check failed", out["result"].stderr)
 
 
 if __name__ == "__main__":

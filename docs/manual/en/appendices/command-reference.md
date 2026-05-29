@@ -31,51 +31,51 @@ This creates your environment baseline. The scripts read this file automatically
 
 ## Generate or recover `.env.sync.yml`
 
-`scripts/env-sync.py` depends on `.env.sync.yml` at the repository root.
+`scripts/env-sync.py` supports contract generation mode with automatic environment discovery.
 
-If the file was removed locally by mistake, recover the version tracked by Git:
+Default generation command (review-first output, no overwrite of `.env.sync.yml`):
+
+```bash
+python3 scripts/env-sync.py --generate-contract
+```
+
+What it does:
+
+- Uses `config/.env.example` as official key source.
+- Discovers real environments only from `config/*.env` (excluding `config/.env.example`).
+- Generates `.env.sync.generated.yml`.
+- Writes audit report to `docs/env-sync-contract-report.md`.
+- Runs post-check reports (self-check + discovered environments).
+
+Publish the generated contract to `.env.sync.yml` only when explicit:
+
+```bash
+python3 scripts/env-sync.py --generate-contract --publish
+```
+
+Useful options:
+
+```bash
+python3 scripts/env-sync.py \
+  --generate-contract \
+  --output .env.sync.generated.yml \
+  --report-output docs/env-sync-contract-report.md \
+  --strict-post-checks
+```
+
+Option notes:
+
+- `--output`: output contract path (default `.env.sync.generated.yml`)
+- `--publish`: copy generated output to `.env.sync.yml`
+- `--report-output`: report path (default `docs/env-sync-contract-report.md`)
+- `--no-report`: disable report file generation
+- `--strict-post-checks`: fail when post-check report finds pending differences/review items
+
+If `.env.sync.yml` was removed locally by mistake and you want the Git-tracked version:
 
 ```bash
 git restore .env.sync.yml
 ```
-
-If you are creating a rules file from zero, start with a minimal valid structure and then expand it:
-
-```yaml
-version: 1
-defaults:
-  add_missing: true
-  remove_extra: false
-  backup: true
-  default_mode: report
-  apply_managed_changes: false
-  backup_dir: ".env-backups"
-
-keys:
-  GLPI_DOMAIN:
-    description: "Public GLPI domain."
-    required: true
-    policy: protected
-  DATABASE_NAME:
-    description: "GLPI database schema."
-    required: true
-    policy: protected
-```
-
-Required fields for each key are `description`, `required`, and `policy`.
-Supported policies are `protected`, `managed`, `review_required`, and `deprecated`.
-
-Validate the file before running apply mode:
-
-```bash
-python3 scripts/env-sync.py \
-  --source config/.env.example \
-  --target config/.env.example \
-  --rules .env.sync.yml \
-  --mode report
-```
-
-When this check still reports `no rule in .env.sync.yml`, add missing key rules and rerun.
 
 ## Environment file sync (env-sync)
 

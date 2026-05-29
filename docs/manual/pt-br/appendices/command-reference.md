@@ -31,51 +31,51 @@ Esse comando cria o baseline do ambiente. Os scripts carregam esse arquivo autom
 
 ## Gerar ou recuperar `.env.sync.yml`
 
-O `scripts/env-sync.py` depende do arquivo `.env.sync.yml` na raiz do repositório.
+O `scripts/env-sync.py` possui modo de geração de contrato com descoberta automática de ambientes.
 
-Se esse arquivo foi removido localmente por engano, recupere a versão rastreada no Git:
+Comando padrão de geração (saída para revisão, sem sobrescrever `.env.sync.yml`):
+
+```bash
+python3 scripts/env-sync.py --generate-contract
+```
+
+O que esse comando faz:
+
+- Usa `config/.env.example` como fonte oficial das chaves.
+- Descobre ambientes reais somente em `config/*.env` (excluindo `config/.env.example`).
+- Gera `.env.sync.generated.yml`.
+- Escreve relatório de auditoria em `docs/env-sync-contract-report.md`.
+- Executa pós-checks em modo report (self-check + ambientes encontrados).
+
+Publicar o contrato gerado em `.env.sync.yml` apenas quando explícito:
+
+```bash
+python3 scripts/env-sync.py --generate-contract --publish
+```
+
+Opções úteis:
+
+```bash
+python3 scripts/env-sync.py \
+  --generate-contract \
+  --output .env.sync.generated.yml \
+  --report-output docs/env-sync-contract-report.md \
+  --strict-post-checks
+```
+
+Notas das opções:
+
+- `--output`: caminho do contrato gerado (default `.env.sync.generated.yml`)
+- `--publish`: copia a saída gerada para `.env.sync.yml`
+- `--report-output`: caminho do relatório (default `docs/env-sync-contract-report.md`)
+- `--no-report`: desativa geração de relatório em arquivo
+- `--strict-post-checks`: falha quando os pós-checks detectam pendências
+
+Se `.env.sync.yml` foi removido localmente por engano e você quer a versão rastreada no Git:
 
 ```bash
 git restore .env.sync.yml
 ```
-
-Se você precisa criar o arquivo do zero, comece por uma estrutura mínima válida e depois expanda:
-
-```yaml
-version: 1
-defaults:
-  add_missing: true
-  remove_extra: false
-  backup: true
-  default_mode: report
-  apply_managed_changes: false
-  backup_dir: ".env-backups"
-
-keys:
-  GLPI_DOMAIN:
-    description: "Domínio público do GLPI."
-    required: true
-    policy: protected
-  DATABASE_NAME:
-    description: "Schema de banco do GLPI."
-    required: true
-    policy: protected
-```
-
-Os campos obrigatórios por chave são `description`, `required` e `policy`.
-As políticas suportadas são `protected`, `managed`, `review_required` e `deprecated`.
-
-Valide o arquivo antes de executar em modo apply:
-
-```bash
-python3 scripts/env-sync.py \
-  --source config/.env.example \
-  --target config/.env.example \
-  --rules .env.sync.yml \
-  --mode report
-```
-
-Se esse check ainda mostrar `no rule in .env.sync.yml`, adicione regras para as chaves faltantes e rode novamente.
 
 ## Sincronização de arquivos de ambiente (env-sync)
 

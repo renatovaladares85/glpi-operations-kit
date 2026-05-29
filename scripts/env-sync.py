@@ -12,6 +12,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import re
 import shutil
@@ -41,6 +42,216 @@ EXIT_ERROR = 1
 EXIT_DIFF = 2
 EXIT_REVIEW_REQUIRED = 3
 EXIT_PERMISSION = 4
+
+DEFAULT_TEMPLATE_PATH = Path("config/.env.example")
+DEFAULT_GENERATED_RULES_PATH = Path(".env.sync.generated.yml")
+DEFAULT_PUBLISHED_RULES_PATH = Path(".env.sync.yml")
+DEFAULT_REPORT_PATH = Path("docs/env-sync-contract-report.md")
+DEFAULT_RULES_DEFAULTS = {
+    "add_missing": True,
+    "remove_extra": False,
+    "backup": True,
+    "default_mode": "report",
+    "apply_managed_changes": False,
+    "validate_rule_keys_in_source": True,
+    "backup_dir": ".env-backups",
+}
+
+KEY_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+TEMPLATE_KEY_PATTERN = re.compile(r"[A-Z_][A-Z0-9_]*")
+RENDER_KEY_USAGE_PATTERN = re.compile(r'(?:read_value|require_value)\(values,\s*"([A-Z0-9_]+)"')
+
+MANAGED_KEYS = {"PRODUCT_NAME"}
+REVIEW_REQUIRED_KEYS = {
+    "EXECUTION_MODE",
+    "EXECUTION_HOST_ROLE_DEFAULT",
+    "TOPOLOGY_MODE",
+    "NETWORK_DATABASE_APP_ACCESS_HOST",
+    "NETWORK_DATABASE_ACCESS_MODE",
+    "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS",
+    "GLPI_VERSION",
+    "WEB_SERVER_TYPE",
+    "WEB_HTTP_PORT",
+    "WEB_HTTPS_PORT",
+    "TLS_MODE",
+    "OPERATIONS_TIMEZONE",
+    "RESOURCE_PROFILE_ACTIVE",
+    "DATABASE_DEPLOYMENT_MODE",
+    "MONITORING_NODE_EXPORTER_ENABLED",
+    "MONITORING_MYSQLD_EXPORTER_ENABLED",
+    "GLPI_TIMEZONE_DB_MODE",
+    "GLPI_TIMEZONE_SUPPORT_ENABLED",
+    "GLPI_TIMEZONE_DB_LEGACY_GRANT",
+}
+EXPLICIT_SECRET_KEYS = {
+    "DATABASE_USER",
+    "MONITORING_MYSQLD_EXPORTER_USER",
+}
+CONDITIONAL_REQUIRED_REASON = {
+    "DATABASE_ROOT_PASSWORD": "Obrigatória quando DATABASE_DEPLOYMENT_MODE=self_hosted.",
+    "MONITORING_MYSQLD_EXPORTER_PASSWORD": "Obrigatória quando DATABASE_DEPLOYMENT_MODE=self_hosted.",
+    "DATABASE_MANAGED_ADMIN_PASSWORD": "Opcional para fallback de conectividade no modo managed.",
+}
+SAFE_DEFAULT_KEYS = {
+    "PRODUCT_NAME",
+    "ENVIRONMENT_NAME",
+    "WEB_SERVER_TYPE",
+    "WEB_HTTP_PORT",
+    "WEB_HTTPS_PORT",
+    "TLS_MODE",
+    "OPERATIONS_TIMEZONE",
+    "RESOURCE_PROFILE_ACTIVE",
+    "NETWORK_DATABASE_ACCESS_MODE",
+    "DATABASE_DEPLOYMENT_MODE",
+    "GLPI_TIMEZONE_DB_MODE",
+}
+
+REVIEW_REQUIRED_DETAILS = {
+    "EXECUTION_MODE": {
+        "reason": "Muda o modelo operacional (local/ssh) e pré-requisitos de execução.",
+        "impact": "Valor incorreto pode quebrar orquestração e impedir deploy/check.",
+        "validation": [
+            "Validar modo com a topologia operacional do ambiente.",
+            "Para ssh, validar usuário/chave e conectividade.",
+            "Executar deploy check após alteração.",
+        ],
+    },
+    "EXECUTION_HOST_ROLE_DEFAULT": {
+        "reason": "Controla escopo de ações mutáveis em execução local.",
+        "impact": "Papel incorreto pode aplicar etapas no host errado.",
+        "validation": [
+            "Confirmar se o host atual é app, db ou all.",
+            "Executar deploy check com escopo correspondente.",
+            "Validar sequência operacional no runbook.",
+        ],
+    },
+    "TOPOLOGY_MODE": {
+        "reason": "Altera fluxo entre single-server e dual-server.",
+        "impact": "Modo incorreto pode executar roles fora da topologia real.",
+        "validation": [
+            "Confirmar topologia real do ambiente alvo.",
+            "Validar aliases e endpoints app/db.",
+            "Executar pré-checks e smoke tests após alteração.",
+        ],
+    },
+    "NETWORK_DATABASE_APP_ACCESS_HOST": {
+        "reason": "Define origem de acesso APP->DB e impacta grants/firewall.",
+        "impact": "Valor incorreto bloqueia conexão com o banco.",
+        "validation": [
+            "Validar host de origem efetivo da aplicação.",
+            "Validar grants e firewall após alteração.",
+            "Executar teste de conectividade APP -> DB.",
+        ],
+    },
+    "NETWORK_DATABASE_ACCESS_MODE": {
+        "reason": "Altera modelo de exposição de rede e escopo de firewall/grants.",
+        "impact": "Configuração incorreta pode bloquear a aplicação ou ampliar exposição do banco.",
+        "validation": [
+            "Validar regras de firewall e grants após alteração.",
+            "Validar conectividade APP -> DB com testes de deploy.",
+            "Quando open, manter NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS vazio.",
+        ],
+    },
+    "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS": {
+        "reason": "Afeta superfície de acesso ao banco e depende de topologia/rede real.",
+        "impact": "Valor incorreto pode causar indisponibilidade ou exposição indevida.",
+        "validation": [
+            "Revisar lista de origens com equipe de rede.",
+            "Confirmar que hosts autorizados correspondem ao ambiente alvo.",
+            "Executar teste de conectividade após alteração.",
+        ],
+    },
+    "GLPI_VERSION": {
+        "reason": "Troca de versão implica mudança de release e potencial impacto funcional.",
+        "impact": "Versão incompatível pode causar falha de upgrade/deploy ou regressão.",
+        "validation": [
+            "Validar compatibilidade da versão com o runbook e plugins.",
+            "Executar deploy check e smoke tests após alteração.",
+            "Validar plano de rollback antes de promover.",
+        ],
+    },
+    "WEB_SERVER_TYPE": {
+        "reason": "Muda pacotes e templates aplicados no host de aplicação.",
+        "impact": "Escolha incorreta pode quebrar roteamento web e serviço HTTP(S).",
+        "validation": [
+            "Validar compatibilidade com o host alvo.",
+            "Executar validação de configuração web após deploy.",
+            "Executar smoke test de acesso à aplicação.",
+        ],
+    },
+    "WEB_HTTP_PORT": {
+        "reason": "Mudança de porta pode exigir ajuste de firewall, proxy e health checks.",
+        "impact": "Porta incorreta pode tornar a aplicação inacessível.",
+        "validation": [
+            "Verificar bind da porta no host da aplicação.",
+            "Validar regras de firewall e proxy reverso.",
+            "Executar smoke test HTTP após alteração.",
+        ],
+    },
+    "WEB_HTTPS_PORT": {
+        "reason": "Mudança de porta TLS impacta certificados, firewall e acesso externo.",
+        "impact": "Porta incorreta pode quebrar acesso seguro e validação de TLS.",
+        "validation": [
+            "Verificar bind da porta TLS no host da aplicação.",
+            "Validar firewall e balanceador/proxy.",
+            "Executar validação de certificado e acesso HTTPS.",
+        ],
+    },
+    "TLS_MODE": {
+        "reason": "Altera fluxo operacional de certificados e exposição HTTPS.",
+        "impact": "Modo incorreto pode interromper acesso seguro ou falhar validações de segurança.",
+        "validation": [
+            "Validar pré-requisitos do modo selecionado (arquivos/certificados).",
+            "Executar check de TLS e smoke test HTTPS.",
+            "Validar política de segurança do ambiente.",
+        ],
+    },
+    "OPERATIONS_TIMEZONE": {
+        "reason": "Afeta agendamentos, logs e consistência temporal operacional.",
+        "impact": "Timezone incorreta pode causar inconsistência de logs e execução em horário indevido.",
+        "validation": [
+            "Validar timezone no SO e no runtime após alteração.",
+            "Confirmar impacto em janelas operacionais e cron.",
+            "Revisar evidências e timestamps pós-deploy.",
+        ],
+    },
+    "RESOURCE_PROFILE_ACTIVE": {
+        "reason": "Muda limites de recursos e tuning de runtime.",
+        "impact": "Perfil inadequado pode degradar performance ou estabilidade.",
+        "validation": [
+            "Validar capacidade de CPU/memória do host.",
+            "Executar check de serviços após alteração de perfil.",
+            "Monitorar métricas e erros após deploy.",
+        ],
+    },
+    "DATABASE_DEPLOYMENT_MODE": {
+        "reason": "Alterna entre fluxo self-hosted e managed com diferenças operacionais relevantes.",
+        "impact": "Modo incorreto pode acionar automações incompatíveis com a infraestrutura.",
+        "validation": [
+            "Confirmar modelo de banco do ambiente alvo.",
+            "Validar conectividade e credenciais para o modo escolhido.",
+            "Executar checks completos de deploy após alteração.",
+        ],
+    },
+    "MONITORING_NODE_EXPORTER_ENABLED": {
+        "reason": "Ativa/desativa componente operacional de monitoramento.",
+        "impact": "Configuração incorreta pode reduzir observabilidade ou gerar ruído.",
+        "validation": [
+            "Validar política de monitoramento do ambiente.",
+            "Confirmar status do exporter após alteração.",
+            "Validar scrape e alertas relacionados.",
+        ],
+    },
+    "MONITORING_MYSQLD_EXPORTER_ENABLED": {
+        "reason": "Ativa/desativa exporter de banco com dependência de credenciais e grants.",
+        "impact": "Configuração incorreta pode ocultar métricas críticas de banco.",
+        "validation": [
+            "Validar modo de banco e necessidade do exporter.",
+            "Confirmar credenciais/grants quando habilitado.",
+            "Validar scrape e alertas relacionados ao banco.",
+        ],
+    },
+}
 
 ANSI = {
     "green": "\033[32m",
@@ -126,6 +337,23 @@ class SyncPlan:
     backup_path: Path | None = None
 
 
+@dataclass
+class TemplateKey:
+    key: str
+    value: str
+    description: str
+    line_number: int
+    commented: bool
+
+
+@dataclass
+class PostCheckResult:
+    target: Path
+    exists: bool
+    exit_code: int
+    summary: str
+
+
 class ReportBuilder:
     def __init__(self, use_color: bool) -> None:
         self.use_color = use_color
@@ -138,15 +366,15 @@ class ReportBuilder:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare and safely synchronize env files using .env.sync.yml rules.",
+        description="Sync environment files and generate .env.sync.yml contracts.",
         epilog=(
             "Exit codes: 0=success, 1=validation/execution error, "
             "2=differences in report mode, 3=manual review required, 4=permission/backup error"
         ),
     )
-    parser.add_argument("--source", required=True, help="Reference env file (example: .env.example)")
-    parser.add_argument("--target", required=True, help="Real environment file to analyze/apply")
-    parser.add_argument("--rules", required=True, help="YAML rules file (.env.sync.yml)")
+    parser.add_argument("--source", help="Reference env file (example: config/.env.example)")
+    parser.add_argument("--target", help="Real environment file to analyze/apply")
+    parser.add_argument("--rules", help="YAML rules file (.env.sync.yml)")
     parser.add_argument("--mode", choices=["report", "apply"], default="report", help="Execution mode")
     parser.add_argument("--only", default="", help="Comma-separated keys to analyze/apply")
     parser.add_argument(
@@ -162,6 +390,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--write-report", default="", help="Optional report output file")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     parser.add_argument("--verbose", action="store_true", help="Show extra validation context")
+    parser.add_argument(
+        "--generate-contract",
+        action="store_true",
+        help="Generate env-sync contract from config/.env.example and discovered config/<environment>.env files.",
+    )
+    parser.add_argument(
+        "--output",
+        default=str(DEFAULT_GENERATED_RULES_PATH),
+        help="Output path for generated contract (default: .env.sync.generated.yml).",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Copy generated contract to .env.sync.yml after generation.",
+    )
+    parser.add_argument(
+        "--report-output",
+        default=str(DEFAULT_REPORT_PATH),
+        help="Markdown report output path (default: docs/env-sync-contract-report.md).",
+    )
+    parser.add_argument(
+        "--no-report",
+        action="store_true",
+        help="Disable markdown report generation in --generate-contract mode.",
+    )
+    parser.add_argument(
+        "--strict-post-checks",
+        action="store_true",
+        help="Fail generation when post-check report finds differences or review-required items.",
+    )
     return parser.parse_args()
 
 
@@ -179,11 +437,577 @@ def parse_key_list(raw: str) -> set[str]:
     return keys
 
 
-def load_rules(path: Path) -> RulesConfig:
+def normalize_rule_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def load_yaml_module() -> Any:
     try:
         import yaml
     except ModuleNotFoundError as exc:
         raise ValidationError("Missing dependency: PyYAML.\nInstall with: pip install pyyaml") from exc
+    return yaml
+
+
+def render_contract_script_path() -> Path:
+    return Path(__file__).resolve().parent / "lib" / "render_product_config.py"
+
+
+def load_render_contract_module() -> Any:
+    script_path = render_contract_script_path()
+    if not script_path.is_file():
+        raise ValidationError(f"Missing render contract script: {script_path}")
+
+    spec = importlib.util.spec_from_file_location("render_product_config_contract", script_path)
+    if spec is None or spec.loader is None:
+        raise ValidationError(f"Unable to load render contract metadata: {script_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def discover_environment_files(config_dir: Path) -> list[Path]:
+    if not config_dir.is_dir():
+        return []
+    env_files = [
+        path
+        for path in sorted(config_dir.glob("*.env"))
+        if path.name != ".env.example"
+    ]
+    return env_files
+
+
+def extract_template_description(raw_lines: list[str], line_index: int) -> str:
+    comments: list[str] = []
+    cursor = line_index - 1
+    while cursor >= 0:
+        raw = raw_lines[cursor]
+        stripped = raw.strip()
+        if stripped == "":
+            if comments:
+                break
+            cursor -= 1
+            continue
+        if not stripped.startswith("#"):
+            break
+        comments.append(stripped[1:].strip())
+        cursor -= 1
+
+    for text in reversed(comments):
+        lowered = text.lower()
+        if not text:
+            continue
+        if lowered.startswith("format:") or lowered.startswith("example:"):
+            continue
+        if text.startswith("---"):
+            continue
+        return text
+    return ""
+
+
+def parse_template_assignment_line(raw_line: str, line_number: int) -> tuple[str, str] | None:
+    stripped = raw_line.strip()
+    if not stripped:
+        return None
+
+    normalized = stripped
+    if normalized.startswith("#"):
+        normalized = normalized[1:].lstrip()
+    if "=" not in normalized:
+        return None
+
+    left = normalized.split("=", 1)[0].strip()
+    if not TEMPLATE_KEY_PATTERN.fullmatch(left):
+        return None
+
+    parsed = parse_env_line(normalized, line_number)
+    if parsed.line_type != "key_value" or parsed.key is None:
+        return None
+    return parsed.key, parsed.value or ""
+
+
+def extract_template_keys(source_path: Path) -> tuple[list[TemplateKey], set[str]]:
+    raw_lines = source_path.read_text(encoding="utf-8").splitlines()
+    keys: list[TemplateKey] = []
+    seen: set[str] = set()
+    duplicated: set[str] = set()
+
+    for idx, raw_line in enumerate(raw_lines):
+        parsed = parse_template_assignment_line(raw_line, idx + 1)
+        if parsed is None:
+            continue
+
+        key, value = parsed
+        commented = raw_line.strip().startswith("#")
+        description = extract_template_description(raw_lines, idx)
+        if key in seen:
+            duplicated.add(key)
+            continue
+        seen.add(key)
+        keys.append(
+            TemplateKey(
+                key=key,
+                value=value,
+                description=description,
+                line_number=idx + 1,
+                commented=commented,
+            )
+        )
+
+    if not keys:
+        raise ValidationError(f"No KEY=value entries found in template: {source_path}")
+    return keys, duplicated
+
+
+def key_usage_from_render_code() -> set[str]:
+    script_path = render_contract_script_path()
+    code = script_path.read_text(encoding="utf-8")
+    return set(RENDER_KEY_USAGE_PATTERN.findall(code))
+
+
+def allowed_values_map(render_module: Any) -> dict[str, list[str]]:
+    allowed: dict[str, list[str]] = {}
+
+    def sorted_values(name: str) -> list[str]:
+        values = getattr(render_module, name, set())
+        return sorted(str(item) for item in values)
+
+    allowed["TLS_MODE"] = sorted_values("TLS_MODES")
+    allowed["WEB_SERVER_TYPE"] = sorted_values("WEB_SERVER_TYPES")
+    allowed["NETWORK_DATABASE_ACCESS_MODE"] = sorted_values("DB_ACCESS_MODES")
+    allowed["DATABASE_DEPLOYMENT_MODE"] = sorted_values("DB_DEPLOYMENT_MODES")
+    allowed["GLPI_TIMEZONE_DB_MODE"] = sorted_values("GLPI_TIMEZONE_DB_MODES")
+    allowed["EXECUTION_MODE"] = sorted_values("EXECUTION_MODES")
+    allowed["EXECUTION_HOST_ROLE_DEFAULT"] = sorted_values("HOST_ROLES")
+    allowed["TOPOLOGY_MODE"] = sorted_values("TOPOLOGY_MODES")
+    allowed["RESOURCE_PROFILE_ACTIVE"] = ["small", "medium", "large"]
+
+    bool_keys = set(getattr(render_module, "BOOL_KEYS", set()))
+    for key in bool_keys:
+        allowed[key] = ["true", "false"]
+
+    return {key: values for key, values in allowed.items() if values}
+
+
+def derive_description(key: str, template_description: str, required_public_keys: dict[str, Any]) -> str:
+    if template_description:
+        return template_description
+    metadata = required_public_keys.get(key)
+    if metadata and isinstance(metadata, dict):
+        purpose = str(metadata.get("purpose", "")).strip()
+        if purpose:
+            return purpose
+    return f"Configuração da variável de ambiente {key}."
+
+
+def key_is_secret(key: str) -> bool:
+    if key in EXPLICIT_SECRET_KEYS:
+        return True
+    upper = key.upper()
+    return any(hint in upper for hint in SECRET_NAME_HINTS)
+
+
+def determine_policy(key: str, secret: bool) -> str:
+    if secret:
+        return "protected"
+    if key in MANAGED_KEYS:
+        return "managed"
+    if key in REVIEW_REQUIRED_KEYS:
+        return "review_required"
+    return "protected"
+
+
+def determine_required(key: str, required_public_keys: dict[str, Any]) -> bool:
+    return key in required_public_keys
+
+
+def should_include_default(key: str, value: str, secret: bool, policy: str) -> bool:
+    if not value or secret:
+        return False
+    if policy == "protected":
+        return key in SAFE_DEFAULT_KEYS
+    return True
+
+
+def example_for_key(key: str, value: str) -> str | None:
+    upper = key.upper()
+    if upper.endswith("_URL"):
+        return "https://example.com"
+    if "DOMAIN" in upper:
+        return "glpi.example.internal"
+    if upper.endswith("_HOST"):
+        return "192.0.2.10"
+    if upper.endswith("_ALIAS"):
+        return "app-node"
+    if "TIMEZONE" in upper:
+        return "America/Sao_Paulo"
+    if upper.endswith("_NAME") and "ENVIRONMENT" in upper:
+        return "staging"
+    if value and KEY_PATTERN.fullmatch(value):
+        return value
+    return None
+
+
+def review_details_for_key(key: str) -> dict[str, Any]:
+    details = REVIEW_REQUIRED_DETAILS.get(key)
+    if details is not None:
+        return details
+    return {
+        "reason": f"Alterar {key} pode exigir revisão operacional do ambiente.",
+        "impact": "Configuração incorreta pode causar falha de deploy, indisponibilidade ou regressão.",
+        "validation": [
+            "Executar pré-checks e validações operacionais após a alteração.",
+            "Revisar conectividade e serviços dependentes do valor alterado.",
+            "Validar logs e smoke tests no ambiente alvo.",
+        ],
+    }
+
+
+def build_rule_entry(
+    item: TemplateKey,
+    required_public_keys: dict[str, Any],
+    allowed_values: dict[str, list[str]],
+) -> dict[str, Any]:
+    key = item.key
+    secret = key_is_secret(key)
+    policy = determine_policy(key, secret)
+    required = determine_required(key, required_public_keys)
+    if key in CONDITIONAL_REQUIRED_REASON:
+        required = False
+
+    entry: dict[str, Any] = {
+        "description": derive_description(key, item.description, required_public_keys),
+        "required": required,
+        "policy": policy,
+    }
+
+    if policy == "managed":
+        entry["auto_apply"] = True
+
+    defaults = item.value.strip()
+    if should_include_default(key, defaults, secret, policy):
+        entry["default"] = defaults
+
+    if key in allowed_values:
+        entry["allowed_values"] = allowed_values[key]
+
+    if secret:
+        entry["secret"] = True
+
+    if policy == "review_required":
+        details = review_details_for_key(key)
+        entry["reason"] = details["reason"]
+        entry["impact"] = details["impact"]
+        entry["validation"] = details["validation"]
+    elif key in CONDITIONAL_REQUIRED_REASON:
+        entry["reason"] = CONDITIONAL_REQUIRED_REASON[key]
+
+    if policy == "protected":
+        example = example_for_key(key, defaults)
+        if example:
+            entry["example"] = example
+
+    return entry
+
+
+def build_generated_rules_document(
+    template_items: list[TemplateKey],
+    required_public_keys: dict[str, Any],
+    allowed_values: dict[str, list[str]],
+) -> dict[str, Any]:
+    generated_keys: dict[str, Any] = {}
+    for item in template_items:
+        generated_keys[item.key] = build_rule_entry(
+            item=item,
+            required_public_keys=required_public_keys,
+            allowed_values=allowed_values,
+        )
+    defaults = dict(DEFAULT_RULES_DEFAULTS)
+    # Generated contracts include keys that can stay commented in template.
+    defaults["validate_rule_keys_in_source"] = False
+    return {
+        "version": 1,
+        "defaults": defaults,
+        "keys": generated_keys,
+    }
+
+
+def validate_generated_rules_document(rules_doc: dict[str, Any], template_keys: list[str]) -> None:
+    if rules_doc.get("version") != 1:
+        raise ValidationError("Generated contract has invalid version (expected 1).")
+    if not isinstance(rules_doc.get("defaults"), dict):
+        raise ValidationError("Generated contract has invalid defaults mapping.")
+    keys = rules_doc.get("keys")
+    if not isinstance(keys, dict) or not keys:
+        raise ValidationError("Generated contract has empty or invalid keys mapping.")
+
+    missing_from_contract = sorted(set(template_keys) - set(keys.keys()))
+    if missing_from_contract:
+        raise ValidationError(
+            "Generated contract missing template keys: " + ", ".join(missing_from_contract)
+        )
+
+    for key, meta in keys.items():
+        if not isinstance(meta, dict):
+            raise ValidationError(f"Generated contract key '{key}' is not a mapping.")
+        for field in ("description", "required", "policy"):
+            if field not in meta:
+                raise ValidationError(f"Generated contract key '{key}' missing field: {field}")
+        if meta["policy"] not in SUPPORTED_POLICIES:
+            raise ValidationError(f"Generated contract key '{key}' has invalid policy: {meta['policy']}")
+        if meta["policy"] == "review_required":
+            for field in ("reason", "impact", "validation"):
+                if field not in meta:
+                    raise ValidationError(
+                        f"Generated contract key '{key}' missing review field: {field}"
+                    )
+
+
+def analyze_env_files(
+    env_files: list[Path],
+    template_keys: set[str],
+) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[str]], dict[str, list[str]], set[str]]:
+    extras_by_env: dict[str, list[str]] = {}
+    missing_by_env: dict[str, list[str]] = {}
+    duplicates_by_env: dict[str, list[str]] = {}
+    values_by_key: dict[str, list[str]] = {}
+    env_extra_keys: set[str] = set()
+
+    for env_path in env_files:
+        parsed = parse_env_file(env_path, f"environment {env_path.name}")
+        all_keys = set(parsed.values.keys()) | parsed.duplicates
+        extras = sorted(all_keys - template_keys)
+        missing = sorted(template_keys - set(parsed.values.keys()))
+        duplicates = sorted(parsed.duplicates)
+
+        extras_by_env[env_path.name] = extras
+        missing_by_env[env_path.name] = missing
+        duplicates_by_env[env_path.name] = duplicates
+        env_extra_keys.update(extras)
+
+        for key, value in parsed.values.items():
+            if value == "":
+                continue
+            values_by_key.setdefault(key, [])
+            if value not in values_by_key[key]:
+                values_by_key[key].append(value)
+
+    return extras_by_env, missing_by_env, duplicates_by_env, values_by_key, env_extra_keys
+
+
+def detect_value_variations(values_by_key: dict[str, list[str]]) -> list[str]:
+    return sorted([key for key, values in values_by_key.items() if len(values) > 1])
+
+
+def run_post_check(
+    source_path: Path,
+    target_path: Path,
+    rules_path: Path,
+    verbose: bool,
+) -> PostCheckResult:
+    if not target_path.exists():
+        return PostCheckResult(target=target_path, exists=False, exit_code=EXIT_SUCCESS, summary="target-not-found")
+
+    rules = load_rules(rules_path)
+    source = parse_env_file(source_path, "source")
+    target = parse_env_file(target_path, "target")
+    # Post-checks operate over keys that are active in source. This keeps
+    # compatibility with templates where optional keys remain commented.
+    only_active_keys = set(source.values.keys())
+    plan = build_sync_plan(
+        source=source,
+        target=target,
+        rules=rules,
+        mode="report",
+        only_keys=only_active_keys,
+        allow_managed=False,
+        force_reviewed=set(),
+        verbose=verbose,
+    )
+    exit_code = compute_exit_code(plan)
+    summary = (
+        f"code={exit_code}; missing={len(plan.required_missing)}; review_required="
+        f"{len([item for item in plan.review_required if not item.get('forced')])}; "
+        f"validation_errors={len(plan.validation_errors)}; extras={len(plan.extra_in_target)}; "
+        f"ambiguous={len(plan.ambiguous)}"
+    )
+    return PostCheckResult(target=target_path, exists=True, exit_code=exit_code, summary=summary)
+
+
+def write_yaml_file(path: Path, data: dict[str, Any]) -> None:
+    yaml = load_yaml_module()
+    try:
+        if path.parent != Path("."):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to write YAML file: {path}") from exc
+
+
+def publish_generated_contract(source_path: Path, publish_path: Path) -> None:
+    try:
+        shutil.copy2(source_path, publish_path)
+    except OSError as exc:
+        raise PermissionErrorSync(f"Unable to publish generated contract to: {publish_path}") from exc
+
+
+def render_generate_report(
+    source_template: Path,
+    generated_output: Path,
+    published_output: Path | None,
+    env_files: list[Path],
+    rules_doc: dict[str, Any],
+    sensitive_keys: list[str],
+    review_required_keys: list[str],
+    missing_in_template_from_code: list[str],
+    extras_by_env: dict[str, list[str]],
+    missing_by_env: dict[str, list[str]],
+    duplicates_by_env: dict[str, list[str]],
+    duplicate_in_template: set[str],
+    varying_keys: list[str],
+    env_extra_keys_used_by_code: list[str],
+    env_extra_keys_without_usage: list[str],
+    post_checks: list[PostCheckResult],
+) -> str:
+    policy_counts = {"protected": 0, "managed": 0, "review_required": 0, "deprecated": 0}
+    for item in rules_doc["keys"].values():
+        policy_counts[item["policy"]] += 1
+
+    lines: list[str] = [
+        "# Relatório do contrato de ambiente",
+        "",
+        "## Fonte oficial",
+        "",
+        f"- `{source_template}`",
+        "",
+        "## Arquivos reais analisados",
+        "",
+    ]
+    if env_files:
+        for env_path in env_files:
+            lines.append(f"- `{env_path}`")
+    else:
+        lines.append("- Nenhum `config/<ambiente>.env` encontrado.")
+
+    lines.extend(
+        [
+            "",
+            "## Arquivos criados/atualizados",
+            "",
+            f"- `{generated_output}`",
+        ]
+    )
+    if published_output is not None:
+        lines.append(f"- `{published_output}`")
+
+    lines.extend(
+        [
+            "",
+            "## Quantidade de variáveis",
+            "",
+            f"- total no template oficial: {len(rules_doc['keys'])}",
+            f"- total no contrato gerado: {len(rules_doc['keys'])}",
+            f"- protected: {policy_counts['protected']}",
+            f"- managed: {policy_counts['managed']}",
+            f"- review_required: {policy_counts['review_required']}",
+            f"- deprecated: {policy_counts['deprecated']}",
+            f"- secret: {len(sensitive_keys)}",
+            "",
+            "## Variáveis sensíveis identificadas",
+            "",
+        ]
+    )
+
+    if sensitive_keys:
+        lines.extend([f"- `{key}`" for key in sensitive_keys])
+    else:
+        lines.append("- Nenhuma.")
+
+    lines.extend(["", "## Variáveis com revisão manual", ""])
+    if review_required_keys:
+        lines.extend([f"- `{key}`" for key in review_required_keys])
+    else:
+        lines.append("- Nenhuma.")
+
+    lines.extend(["", "## Ambiguidades", ""])
+    if duplicate_in_template:
+        lines.append("- Duplicidades no template oficial:")
+        lines.extend([f"  - `{key}`" for key in sorted(duplicate_in_template)])
+    else:
+        lines.append("- Duplicidades no template oficial: nenhuma.")
+
+    if missing_in_template_from_code:
+        lines.append("- Variáveis usadas no código e ausentes no template:")
+        lines.extend([f"  - `{key}`" for key in missing_in_template_from_code])
+    else:
+        lines.append("- Variáveis usadas no código e ausentes no template: nenhuma.")
+
+    if env_extra_keys_used_by_code:
+        lines.append("- Variáveis extras em ambientes e com uso detectado no código:")
+        lines.extend([f"  - `{key}`" for key in env_extra_keys_used_by_code])
+    else:
+        lines.append("- Variáveis extras em ambientes e com uso detectado no código: nenhuma.")
+
+    if env_extra_keys_without_usage:
+        lines.append("- Variáveis extras em ambientes sem uso claro no código (candidatas a deprecated):")
+        lines.extend([f"  - `{key}`" for key in env_extra_keys_without_usage])
+    else:
+        lines.append("- Variáveis extras em ambientes sem uso claro no código: nenhuma.")
+
+    has_env_ambiguous = False
+    for env_name, extras in extras_by_env.items():
+        duplicates = duplicates_by_env.get(env_name, [])
+        if extras or duplicates:
+            has_env_ambiguous = True
+            lines.append(f"- `{env_name}`:")
+            if extras:
+                lines.append("  - extras ausentes no template:")
+                lines.extend([f"    - `{key}`" for key in extras])
+            if duplicates:
+                lines.append("  - chaves duplicadas:")
+                lines.extend([f"    - `{key}`" for key in duplicates])
+    if not has_env_ambiguous:
+        lines.append("- Sem ambiguidades por arquivo de ambiente.")
+
+    if varying_keys:
+        lines.append("- Chaves com variação de valor entre ambientes:")
+        lines.extend([f"  - `{key}`" for key in varying_keys])
+    else:
+        lines.append("- Chaves com variação de valor entre ambientes: nenhuma detectada.")
+
+    lines.extend(["", "## Cobertura por ambiente", ""])
+    if env_files:
+        for env_path in env_files:
+            missing = missing_by_env.get(env_path.name, [])
+            lines.append(f"- `{env_path.name}`: {len(missing)} chaves do template ausentes.")
+    else:
+        lines.append("- Não aplicável (nenhum ambiente real disponível).")
+
+    lines.extend(["", "## Pós-geração: env-sync report", ""])
+    for item in post_checks:
+        if not item.exists:
+            lines.append(f"- `{item.target}`: target não encontrado.")
+            continue
+        lines.append(f"- `{item.target}`: {item.summary}")
+
+    lines.extend(
+        [
+            "",
+            "## Validações executadas",
+            "",
+            "- Validação estrutural do YAML gerado (campos obrigatórios e políticas permitidas): OK.",
+            "- Cobertura de chaves do template no contrato gerado: OK.",
+            "- Pós-checks `env-sync` em modo report: executado para template oficial e ambientes encontrados.",
+        ]
+    )
+
+    return "\n".join(lines) + "\n"
+
+def load_rules(path: Path) -> RulesConfig:
+    yaml = load_yaml_module()
 
     ensure_readable_file(path, "rules")
     try:
@@ -206,14 +1030,7 @@ def load_rules(path: Path) -> RulesConfig:
     if not isinstance(raw_defaults, dict):
         raise ValidationError("'defaults' must be a mapping when provided.")
 
-    defaults: dict[str, Any] = {
-        "add_missing": True,
-        "remove_extra": False,
-        "backup": True,
-        "default_mode": "report",
-        "apply_managed_changes": False,
-        "backup_dir": ".env-backups",
-    }
+    defaults: dict[str, Any] = dict(DEFAULT_RULES_DEFAULTS)
     defaults.update(raw_defaults)
 
     keys = loaded.get("keys")
@@ -268,8 +1085,12 @@ def load_rules(path: Path) -> RulesConfig:
             required=bool(spec.get("required", False)),
             policy=policy,
             auto_apply=auto_apply,
-            default=str(spec["default"]) if "default" in spec and spec["default"] is not None else None,
-            allowed_values=[str(item) for item in allowed_values] if isinstance(allowed_values, list) else None,
+            default=normalize_rule_value(spec["default"])
+            if "default" in spec and spec["default"] is not None
+            else None,
+            allowed_values=[normalize_rule_value(item) for item in allowed_values]
+            if isinstance(allowed_values, list)
+            else None,
             secret=secret,
             reason=str(spec["reason"]) if spec.get("reason") is not None else None,
             impact=str(spec["impact"]) if spec.get("impact") is not None else None,
@@ -509,7 +1330,8 @@ def build_sync_plan(
         if key in scope_for_global_checks and key not in rules.keys:
             ambiguous.append({"key": key, "reason": "no rule in .env.sync.yml"})
 
-    if not only_keys:
+    validate_rule_keys_in_source = bool(rules.defaults.get("validate_rule_keys_in_source", True))
+    if not only_keys and validate_rule_keys_in_source:
         for key in sorted(rules.keys.keys()):
             if key not in source_keys_all:
                 validation_errors.append(f"Rule key '{key}' not found in source file.")
@@ -998,68 +1820,203 @@ def compute_exit_code(plan: SyncPlan) -> int:
     return EXIT_SUCCESS
 
 
-def main() -> int:
-    args = parse_args()
+def run_generate_contract_mode(args: argparse.Namespace) -> int:
+    source_template = DEFAULT_TEMPLATE_PATH
+    output_path = Path(args.output)
+    publish_path = DEFAULT_PUBLISHED_RULES_PATH if args.publish else None
+    report_path = Path(args.report_output)
+
+    ensure_readable_file(source_template, "official template")
+
+    render_module = load_render_contract_module()
+    required_public_keys = getattr(render_module, "REQUIRED_PUBLIC_KEYS", {})
+    if not isinstance(required_public_keys, dict):
+        raise ValidationError("Invalid REQUIRED_PUBLIC_KEYS metadata in render_product_config.py")
+
+    template_items, template_duplicates = extract_template_keys(source_template)
+    template_key_list = [item.key for item in template_items]
+    template_key_set = set(template_key_list)
+    allowed_values = allowed_values_map(render_module)
+
+    rules_doc = build_generated_rules_document(
+        template_items=template_items,
+        required_public_keys=required_public_keys,
+        allowed_values=allowed_values,
+    )
+    validate_generated_rules_document(rules_doc, template_key_list)
+
+    write_yaml_file(output_path, rules_doc)
+    # Secondary parse validation to ensure generated file is consumable by sync flow.
+    load_rules(output_path)
+
+    env_files = discover_environment_files(source_template.parent)
+    extras_by_env, missing_by_env, duplicates_by_env, values_by_key, env_extra_keys = analyze_env_files(
+        env_files=env_files,
+        template_keys=template_key_set,
+    )
+    varying_keys = detect_value_variations(values_by_key)
+
+    code_usage_keys = key_usage_from_render_code()
+    missing_in_template_from_code = sorted(code_usage_keys - template_key_set)
+    env_extra_keys_used_by_code = sorted(env_extra_keys & code_usage_keys)
+    env_extra_keys_without_usage = sorted(env_extra_keys - code_usage_keys)
+
+    post_checks: list[PostCheckResult] = [
+        run_post_check(
+            source_path=source_template,
+            target_path=source_template,
+            rules_path=output_path,
+            verbose=args.verbose,
+        )
+    ]
+    for env_path in env_files:
+        post_checks.append(
+            run_post_check(
+                source_path=source_template,
+                target_path=env_path,
+                rules_path=output_path,
+                verbose=args.verbose,
+            )
+        )
+
+    if publish_path is not None:
+        publish_generated_contract(output_path, publish_path)
+
+    sensitive_keys = sorted([key for key, meta in rules_doc["keys"].items() if meta.get("secret") is True])
+    review_required_keys = sorted(
+        [key for key, meta in rules_doc["keys"].items() if meta.get("policy") == "review_required"]
+    )
+
+    if not args.no_report:
+        report = render_generate_report(
+            source_template=source_template,
+            generated_output=output_path,
+            published_output=publish_path,
+            env_files=env_files,
+            rules_doc=rules_doc,
+            sensitive_keys=sensitive_keys,
+            review_required_keys=review_required_keys,
+            missing_in_template_from_code=missing_in_template_from_code,
+            extras_by_env=extras_by_env,
+            missing_by_env=missing_by_env,
+            duplicates_by_env=duplicates_by_env,
+            duplicate_in_template=template_duplicates,
+            varying_keys=varying_keys,
+            env_extra_keys_used_by_code=env_extra_keys_used_by_code,
+            env_extra_keys_without_usage=env_extra_keys_without_usage,
+            post_checks=post_checks,
+        )
+        write_report(report_path, report.rstrip("\n"))
+
+    strict_failures = [item for item in post_checks if item.exists and item.exit_code != EXIT_SUCCESS]
+
+    print("ENV CONTRACT GENERATION RESULT")
+    print(f"Template: {source_template}")
+    print(f"Generated contract: {output_path}")
+    if publish_path is not None:
+        print(f"Published contract: {publish_path}")
+    if args.no_report:
+        print("Report: disabled (--no-report)")
+    else:
+        print(f"Report: {report_path}")
+    print(f"Discovered environments: {len(env_files)}")
+    print(f"Template keys: {len(template_key_list)}")
+    print(f"Sensitive keys: {len(sensitive_keys)}")
+    print(f"Review required keys: {len(review_required_keys)}")
+    print(f"Template duplicates: {len(template_duplicates)}")
+    print(f"Code keys missing in template: {len(missing_in_template_from_code)}")
+    print(f"Env extras without code usage: {len(env_extra_keys_without_usage)}")
+    print(f"Post-check failures: {len(strict_failures)}")
+
+    if args.strict_post_checks and strict_failures:
+        for item in strict_failures:
+            print(f"Strict post-check failed for {item.target}: {item.summary}", file=sys.stderr)
+        return EXIT_ERROR
+
+    return EXIT_SUCCESS
+
+
+def run_sync_mode(args: argparse.Namespace) -> int:
+    missing: list[str] = []
+    if not args.source:
+        missing.append("--source")
+    if not args.target:
+        missing.append("--target")
+    if not args.rules:
+        missing.append("--rules")
+    if missing:
+        raise ValidationError(
+            "Missing required arguments for sync mode: "
+            + ", ".join(missing)
+            + ". Use --generate-contract for contract generation mode."
+        )
 
     source_path = Path(args.source)
     target_path = Path(args.target)
     rules_path = Path(args.rules)
 
-    try:
-        ensure_readable_file(source_path, "source")
-        ensure_readable_file(target_path, "target")
+    ensure_readable_file(source_path, "source")
+    ensure_readable_file(target_path, "target")
 
-        rules = load_rules(rules_path)
+    rules = load_rules(rules_path)
 
-        source = parse_env_file(source_path, "source")
-        target = parse_env_file(target_path, "target")
+    source = parse_env_file(source_path, "source")
+    target = parse_env_file(target_path, "target")
 
-        only_keys = parse_key_list(args.only)
-        force_reviewed = parse_key_list(args.force_reviewed)
+    only_keys = parse_key_list(args.only)
+    force_reviewed = parse_key_list(args.force_reviewed)
 
-        plan = build_sync_plan(
-            source=source,
-            target=target,
-            rules=rules,
-            mode=args.mode,
-            only_keys=only_keys,
-            allow_managed=args.allow_managed,
-            force_reviewed=force_reviewed,
-            verbose=args.verbose,
-        )
+    plan = build_sync_plan(
+        source=source,
+        target=target,
+        rules=rules,
+        mode=args.mode,
+        only_keys=only_keys,
+        allow_managed=args.allow_managed,
+        force_reviewed=force_reviewed,
+        verbose=args.verbose,
+    )
 
-        if args.mode == "apply" and not plan.validation_errors and (plan.updates or plan.additions):
-            backup_dir = Path(str(rules.defaults.get("backup_dir", ".env-backups")))
-            plan.backup_path = create_backup(target_path, backup_dir)
-            new_content = apply_changes_to_target(target, plan)
-            write_atomic(target_path, new_content)
+    if args.mode == "apply" and not plan.validation_errors and (plan.updates or plan.additions):
+        backup_dir = Path(str(rules.defaults.get("backup_dir", ".env-backups")))
+        plan.backup_path = create_backup(target_path, backup_dir)
+        new_content = apply_changes_to_target(target, plan)
+        write_atomic(target_path, new_content)
 
-        report = render_report(
+    report = render_report(
+        plan=plan,
+        source_path=source_path,
+        target_path=target_path,
+        rules_path=rules_path,
+        rules=rules,
+        use_color=not args.no_color,
+        verbose=args.verbose,
+    )
+    print(report)
+
+    if args.write_report:
+        # Always write plain text report without ANSI colors.
+        plain_report = render_report(
             plan=plan,
             source_path=source_path,
             target_path=target_path,
             rules_path=rules_path,
             rules=rules,
-            use_color=not args.no_color,
+            use_color=False,
             verbose=args.verbose,
         )
-        print(report)
+        write_report(Path(args.write_report), plain_report)
 
-        if args.write_report:
-            # Always write plain text report without ANSI colors.
-            plain_report = render_report(
-                plan=plan,
-                source_path=source_path,
-                target_path=target_path,
-                rules_path=rules_path,
-                rules=rules,
-                use_color=False,
-                verbose=args.verbose,
-            )
-            write_report(Path(args.write_report), plain_report)
+    return compute_exit_code(plan)
 
-        return compute_exit_code(plan)
 
+def main() -> int:
+    args = parse_args()
+
+    try:
+        if args.generate_contract:
+            return run_generate_contract_mode(args)
+        return run_sync_mode(args)
     except PermissionErrorSync as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_PERMISSION
