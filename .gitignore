@@ -5,3 +5,5 @@
 *.tmp
 config/*.env
 !config/.env.example
+env-sync-contract-report.md
+render_product_config.cpython-312.pyc
