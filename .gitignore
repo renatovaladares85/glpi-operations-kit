@@ -1,9 +1,26 @@
+# Local environment files
+config/*.env
+!config/.env.example
+
+# Runtime artifacts generated per environment
 .runtime/
+.env-backups/
+.tmp/
 .secrets/
 .vault/
+
+# Generated env-sync outputs
+.env.sync.generated.yml
+docs/env-sync-contract-report.md
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary command artifacts
 *.retry
 *.tmp
 config/*.env
 !config/.env.example
-env-sync-contract-report.md
 render_product_config.cpython-312.pyc
