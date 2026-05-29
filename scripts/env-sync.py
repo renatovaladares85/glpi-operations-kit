@@ -1908,7 +1908,11 @@ def run_generate_contract_mode(args: argparse.Namespace) -> int:
         )
         write_report(report_path, report.rstrip("\n"))
 
-    strict_failures = [item for item in post_checks if item.exists and item.exit_code != EXIT_SUCCESS]
+    strict_failures = [
+        item
+        for item in post_checks
+        if item.exists and item.exit_code != EXIT_SUCCESS and item.target != source_template
+    ]
 
     print("ENV CONTRACT GENERATION RESULT")
     print(f"Template: {source_template}")
@@ -1927,6 +1931,8 @@ def run_generate_contract_mode(args: argparse.Namespace) -> int:
     print(f"Code keys missing in template: {len(missing_in_template_from_code)}")
     print(f"Env extras without code usage: {len(env_extra_keys_without_usage)}")
     print(f"Post-check failures: {len(strict_failures)}")
+    if not env_files:
+        print("Warning: no config/<environment>.env files discovered; strict gate skipped for environment files.")
 
     if args.strict_post_checks and strict_failures:
         for item in strict_failures:

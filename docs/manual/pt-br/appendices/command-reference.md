@@ -69,13 +69,57 @@ Notas das opções:
 - `--publish`: copia a saída gerada para `.env.sync.yml`
 - `--report-output`: caminho do relatório (default `docs/env-sync-contract-report.md`)
 - `--no-report`: desativa geração de relatório em arquivo
-- `--strict-post-checks`: falha quando os pós-checks detectam pendências
+- `--strict-post-checks`: falha quando arquivos reais descobertos (`config/<environment>.env`) tiverem pendências
 
 Se `.env.sync.yml` foi removido localmente por engano e você quer a versão rastreada no Git:
 
 ```bash
 git restore .env.sync.yml
 ```
+
+## Fluxo obrigatório após mudar `config/.env.example`
+
+Sempre que você adicionar, remover ou alterar qualquer chave em `config/.env.example`, execute este fluxo:
+
+1. Regenerar contrato e rodar checks estritos para os ambientes descobertos:
+
+```bash
+python3 scripts/env-sync.py \
+  --generate-contract \
+  --output .env.sync.generated.yml \
+  --report-output docs/env-sync-contract-report.md \
+  --strict-post-checks
+```
+
+2. Revisar o relatório:
+   - chaves obrigatórias ausentes em cada arquivo de ambiente;
+   - divergências `review_required` que exigem decisão operacional;
+   - chaves extras fora do template.
+
+3. Para cada ambiente, executar sync report/apply até limpar pendências:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.generated.yml \
+  --mode report
+```
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.generated.yml \
+  --mode apply \
+  --allow-managed
+```
+
+Notas:
+
+- `add_missing` fica habilitado por padrão no contrato gerado.
+- Chaves extras são reportadas para saneamento; não são removidas automaticamente por padrão (`remove_extra: false`).
+- O self-check do template continua no relatório, mas o bloqueio estrito considera os arquivos reais descobertos.
 
 ## Sincronização de arquivos de ambiente (env-sync)
 

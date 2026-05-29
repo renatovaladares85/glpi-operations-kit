@@ -69,13 +69,57 @@ Option notes:
 - `--publish`: copy generated output to `.env.sync.yml`
 - `--report-output`: report path (default `docs/env-sync-contract-report.md`)
 - `--no-report`: disable report file generation
-- `--strict-post-checks`: fail when post-check report finds pending differences/review items
+- `--strict-post-checks`: fail when discovered real environment files (`config/<environment>.env`) have pending differences/review items
 
 If `.env.sync.yml` was removed locally by mistake and you want the Git-tracked version:
 
 ```bash
 git restore .env.sync.yml
 ```
+
+## Mandatory workflow after changing `config/.env.example`
+
+Whenever you add, remove, or change any key in `config/.env.example`, run this flow:
+
+1. Regenerate contract and run strict checks for discovered environment files:
+
+```bash
+python3 scripts/env-sync.py \
+  --generate-contract \
+  --output .env.sync.generated.yml \
+  --report-output docs/env-sync-contract-report.md \
+  --strict-post-checks
+```
+
+2. Review the report:
+   - missing required keys in each environment file;
+   - `review_required` divergences that require operational decision;
+   - extra keys not present in template.
+
+3. For each environment, run explicit sync report/apply until clean:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.generated.yml \
+  --mode report
+```
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.generated.yml \
+  --mode apply \
+  --allow-managed
+```
+
+Notes:
+
+- `add_missing` is enabled by default in generated contract.
+- Extra keys are reported for cleanup; they are not auto-removed by default (`remove_extra: false`).
+- Template self-check still appears in report, but strict blocking is evaluated against discovered real environment files.
 
 ## Environment file sync (env-sync)
 
