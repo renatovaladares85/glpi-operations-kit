@@ -35,6 +35,47 @@ Choose topology and execution mode carefully:
 - `EXECUTION_MODE=local`: run commands from each target host
 - `EXECUTION_MODE=ssh`: centralized remote execution (policy dependent)
 
+Before running deployment checks, synchronize your environment file against the current baseline template using `env-sync.py`.
+
+Start with report mode (no file changes):
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.yml \
+  --mode report
+```
+
+If the report confirms only allowed managed updates, apply those changes:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.yml \
+  --mode apply \
+  --allow-managed
+```
+
+Generate a file report when you need evidence or review history:
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/staging.env \
+  --rules .env.sync.yml \
+  --mode report \
+  --write-report .runtime/reports/env-sync-staging.txt
+```
+
+How to interpret result quickly:
+
+- exit `0`: sync/check completed without actionable differences;
+- exit `2`: differences found in report mode (review before apply);
+- exit `3`: at least one key requires manual review (`review_required`);
+- exit `4`: permission or backup issue while trying to apply.
+
 Validate after edits:
 
 ```bash
@@ -45,6 +86,8 @@ Common error and quick action:
 
 - error: wrong host role in dual-server local flow
 - action: use DB role on DB host, APP role on APP host
+- error: `ModuleNotFoundError: No module named 'yaml'` while running `env-sync.py`
+- action: install local dependency with `sudo apt-get install -y python3-yaml` and rerun
 
 Go next:
 

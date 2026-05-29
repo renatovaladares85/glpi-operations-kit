@@ -2,6 +2,8 @@
 
 Este apêndice complementa o runbook principal com comandos diretos e finalidade operacional. A sintaxe é a mesma; o que muda é o ambiente e os valores em `config/<environment>.env`.
 
+Se sua tarefa agora é sincronizar `.env`, vá direto para a seção `Sincronização de arquivos de ambiente (env-sync)` neste arquivo.
+
 ## Preparar ferramentas do host
 
 ```bash

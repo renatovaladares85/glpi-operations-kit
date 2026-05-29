@@ -35,6 +35,7 @@ Common error and quick action:
 
 ```bash
 cp config/.env.example config/staging.env
+python3 scripts/env-sync.py --source config/.env.example --target config/staging.env --rules .env.sync.yml --mode report
 ./scripts/glpictl.sh staging deploy check all
 ```
 

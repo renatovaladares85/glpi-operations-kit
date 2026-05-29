@@ -27,6 +27,7 @@ Use esta página como roteador:
 
 - Quero instalar o GLPI: [Deploy em Linux](guide/03-deploy-linux-traditional.md)
 - Quero configurar variáveis de ambiente: [Ambiente e Topologia](guide/02-environment-and-topology.md)
+- Quero sincronizar meu `.env` com o template baseline (`env-sync.py`): [Ambiente e Topologia](guide/02-environment-and-topology.md)
 - Quero TLS/HTTPS: [TLS e Certificados](guide/04-tls-and-certificates.md)
 - Quero backup: [Backup, Restore e Teste de Restore](guide/05-backup-restore-and-restore-test.md)
 - Quero restore: [Backup, Restore e Teste de Restore](guide/05-backup-restore-and-restore-test.md)

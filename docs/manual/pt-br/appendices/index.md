@@ -23,6 +23,7 @@ Use estes apêndices quando precisar de mais profundidade durante execução ou 
 ## Operação
 
 - [Referência de Comandos](command-reference.md)
+- [Sincronização de Arquivo de Ambiente (`env-sync.py`)](command-reference.md)
 - [Checagens Operacionais](operational-checks.md)
 - [Matriz de Troubleshooting](troubleshooting-matrix.md)
 - [Funcionalidades Postergadas](deferred-features.md)

@@ -2,6 +2,8 @@
 
 This appendix complements the main runbook with direct commands and richer operational intent. The command syntax is always the same; what changes is the environment name and the values in `config/<environment>.env`.
 
+If your current task is `.env` synchronization, go directly to the section `Environment file sync (env-sync)` in this file.
+
 ## Prepare host tooling
 
 ```bash

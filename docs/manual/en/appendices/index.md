@@ -23,6 +23,7 @@ Use these appendices when you need deeper details while executing or troubleshoo
 ## Operations
 
 - [Command Reference](command-reference.md)
+- [Environment File Sync (`env-sync.py`)](command-reference.md)
 - [Operational Checks](operational-checks.md)
 - [Troubleshooting Matrix](troubleshooting-matrix.md)
 - [Deferred Features](deferred-features.md)
