@@ -21,7 +21,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 SUPPORTED_POLICIES = {"protected", "managed", "review_required", "deprecated"}
 SECRET_NAME_HINTS = (
@@ -295,6 +295,9 @@ class ParsedEnv:
     key_indices: dict[str, int]
     values: dict[str, str]
     duplicates: set[str]
+    commented_key_indices: dict[str, int]
+    commented_values: dict[str, str]
+    key_order: list[str]
 
 
 @dataclass
@@ -335,6 +338,7 @@ class SyncPlan:
     updates: dict[str, str]
     additions: list[tuple[str, str]]
     removals: list[str]
+    source_key_order: list[str]
     backup_path: Path | None = None
 
 
@@ -386,12 +390,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-managed",
         action="store_true",
-        help="Allow managed keys with auto_apply=true to be changed",
+        help="Allow managed missing keys with auto_apply=true to be added; existing target values are preserved.",
     )
     parser.add_argument(
         "--force-reviewed",
         default="",
-        help="Comma-separated review_required keys to force in apply mode",
+        help="Comma-separated review_required missing keys to force in apply mode; existing target values are preserved.",
     )
     parser.add_argument("--write-report", default="", help="Optional report output file")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
@@ -405,7 +409,7 @@ def parse_args() -> argparse.Namespace:
         "--extra-action",
         choices=["comment", "remove"],
         default="comment",
-        help="How to handle keys present in target but absent in source when using --reconcile-interactive (default: comment).",
+        help="How to handle extras in --reconcile-interactive; normal apply removes active keys absent from source.",
     )
     parser.add_argument(
         "--generate-contract",
@@ -549,7 +553,7 @@ def parse_template_assignment_line(raw_line: str, line_number: int) -> tuple[str
 def extract_template_keys(source_path: Path) -> tuple[list[TemplateKey], set[str]]:
     raw_lines = source_path.read_text(encoding="utf-8").splitlines()
     keys: list[TemplateKey] = []
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
     duplicated: set[str] = set()
 
     for idx, raw_line in enumerate(raw_lines):
@@ -561,9 +565,19 @@ def extract_template_keys(source_path: Path) -> tuple[list[TemplateKey], set[str
         commented = raw_line.strip().startswith("#")
         description = extract_template_description(raw_lines, idx)
         if key in seen:
-            duplicated.add(key)
+            existing = keys[seen[key]]
+            if existing.commented and not commented:
+                keys[seen[key]] = TemplateKey(
+                    key=key,
+                    value=value,
+                    description=description,
+                    line_number=idx + 1,
+                    commented=commented,
+                )
+            elif not existing.commented and not commented:
+                duplicated.add(key)
             continue
-        seen.add(key)
+        seen[key] = len(keys)
         keys.append(
             TemplateKey(
                 key=key,
@@ -1165,16 +1179,35 @@ def parse_env_file(path: Path, label: str) -> ParsedEnv:
 
     parsed_lines: list[EnvLine] = []
     key_occurrences: dict[str, list[int]] = {}
+    commented_key_occurrences: dict[str, list[int]] = {}
+    key_order: list[str] = []
+    key_order_seen: set[str] = set()
 
     for number, line in enumerate(raw_lines, start=1):
         parsed = parse_env_line(line, number)
         parsed_lines.append(parsed)
         if parsed.line_type == "key_value" and parsed.key is not None:
             key_occurrences.setdefault(parsed.key, []).append(len(parsed_lines) - 1)
+        elif parsed.line_type == "commented_key_value" and parsed.key is not None:
+            commented_key_occurrences.setdefault(parsed.key, []).append(len(parsed_lines) - 1)
+
+        if parsed.key is not None and parsed.line_type in {"key_value", "commented_key_value"}:
+            if parsed.key not in key_order_seen:
+                key_order_seen.add(parsed.key)
+                key_order.append(parsed.key)
 
     duplicates = {key for key, indices in key_occurrences.items() if len(indices) > 1}
     key_indices = {key: indices[0] for key, indices in key_occurrences.items() if len(indices) == 1}
     values = {key: parsed_lines[index].value or "" for key, index in key_indices.items()}
+    commented_key_indices = {
+        key: indices[0]
+        for key, indices in commented_key_occurrences.items()
+        if key not in key_indices
+    }
+    commented_values = {
+        key: parsed_lines[index].value or ""
+        for key, index in commented_key_indices.items()
+    }
 
     return ParsedEnv(
         path=path,
@@ -1183,6 +1216,9 @@ def parse_env_file(path: Path, label: str) -> ParsedEnv:
         key_indices=key_indices,
         values=values,
         duplicates=duplicates,
+        commented_key_indices=commented_key_indices,
+        commented_values=commented_values,
+        key_order=key_order,
     )
 
 
@@ -1191,6 +1227,9 @@ def parse_env_line(line: str, line_number: int) -> EnvLine:
     if stripped == "":
         return EnvLine("empty", line, line_number)
     if line.lstrip().startswith("#"):
+        commented = parse_commented_assignment_line(line, line_number)
+        if commented is not None:
+            return commented
         return EnvLine("comment", line, line_number)
 
     if "=" not in line:
@@ -1224,6 +1263,33 @@ def parse_env_line(line: str, line_number: int) -> EnvLine:
         prefix=f"{left}={ws_prefix}",
         suffix=suffix,
         quote_style=quote_style,
+    )
+
+
+def parse_commented_assignment_line(line: str, line_number: int) -> EnvLine | None:
+    leading_len = len(line) - len(line.lstrip(" \t"))
+    leading = line[:leading_len]
+    after_hash = line[leading_len + 1 :]
+    after_hash_ws_len = len(after_hash) - len(after_hash.lstrip(" \t"))
+    after_hash_ws = after_hash[:after_hash_ws_len]
+    candidate = after_hash[after_hash_ws_len:]
+
+    if "=" not in candidate:
+        return None
+
+    parsed = parse_env_line(candidate, line_number)
+    if parsed.line_type != "key_value" or parsed.key is None:
+        return None
+
+    return EnvLine(
+        line_type="commented_key_value",
+        original_line=line,
+        line_number=line_number,
+        key=parsed.key,
+        value=parsed.value,
+        prefix=f"{leading}#{after_hash_ws}{parsed.prefix}",
+        suffix=parsed.suffix,
+        quote_style=parsed.quote_style,
     )
 
 
@@ -1329,6 +1395,29 @@ def can_apply_managed(rule: KeyRule, allow_managed: bool, defaults: dict[str, An
     return bool(allow_managed or defaults.get("apply_managed_changes") is True)
 
 
+def known_env_keys(parsed: ParsedEnv) -> set[str]:
+    return set(parsed.values.keys()) | set(parsed.commented_values.keys()) | parsed.duplicates
+
+
+def active_env_keys(parsed: ParsedEnv) -> set[str]:
+    return set(parsed.values.keys()) | parsed.duplicates
+
+
+def contract_value(parsed: ParsedEnv, key: str) -> str | None:
+    if key in parsed.values:
+        return parsed.values[key]
+    return parsed.commented_values.get(key)
+
+
+def source_order_index(parsed: ParsedEnv) -> dict[str, int]:
+    return {key: index for index, key in enumerate(parsed.key_order)}
+
+
+def sort_by_env_order(keys: Iterable[str], parsed: ParsedEnv) -> list[str]:
+    order = source_order_index(parsed)
+    return sorted(keys, key=lambda key: (order.get(key, len(order)), key))
+
+
 def build_sync_plan(
     source: ParsedEnv,
     target: ParsedEnv,
@@ -1351,19 +1440,23 @@ def build_sync_plan(
 
     updates: dict[str, str] = {}
     additions: list[tuple[str, str]] = []
+    removals: list[str] = []
     applied_changes = 0
     ok_count = 0
 
-    source_keys_all = set(source.values.keys()) | source.duplicates
-    target_keys_all = set(target.values.keys()) | target.duplicates
+    source_keys_all = known_env_keys(source)
+    target_active_keys = active_env_keys(target)
 
     if only_keys:
         unknown_only = sorted([key for key in only_keys if key not in source_keys_all])
         for key in unknown_only:
             validation_errors.append(f"Key from --only not found in source: {key}")
-        keys_to_process = sorted([key for key in only_keys if key in source_keys_all])
+        keys_to_process = sort_by_env_order(
+            [key for key in only_keys if key in source_keys_all],
+            source,
+        )
     else:
-        keys_to_process = sorted(source_keys_all)
+        keys_to_process = sort_by_env_order(source_keys_all, source)
 
     scope_for_global_checks = set(keys_to_process) if only_keys else source_keys_all
 
@@ -1401,7 +1494,7 @@ def build_sync_plan(
         if key in source.duplicates or key in target.duplicates:
             continue
 
-        source_value = source.values.get(key)
+        source_value = contract_value(source, key)
         if source_value is None:
             continue
 
@@ -1484,15 +1577,12 @@ def build_sync_plan(
             continue
 
         if rule.policy == "managed":
-            can_apply = mode == "apply" and can_apply_managed(rule, allow_managed, rules.defaults)
-            reason = "managed policy allowed" if can_apply else "managed policy blocked"
-
+            reason = "environment value preserved"
             if rule.allowed_values and source_value not in rule.allowed_values:
                 allowed = ", ".join(rule.allowed_values)
                 validation_errors.append(
                     f"{key} has invalid source value: {mask_value(key, source_value, rule)} (allowed: {allowed})"
                 )
-                can_apply = False
                 reason = "invalid source value"
 
             changed.append(
@@ -1500,27 +1590,21 @@ def build_sync_plan(
                     "key": key,
                     "from": target_value,
                     "to": source_value,
-                    "applied": can_apply,
+                    "applied": False,
                     "reason": reason,
                     "policy": "managed",
                 }
             )
-            if can_apply:
-                updates[key] = source_value
-                applied_changes += 1
             continue
 
         if rule.policy == "review_required":
-            forced = mode == "apply" and key in force_reviewed
-            reason = "forced with --force-reviewed" if forced else "manual review required"
+            forced = False
 
             if rule.allowed_values and source_value not in rule.allowed_values:
                 allowed = ", ".join(rule.allowed_values)
                 validation_errors.append(
                     f"{key} has invalid source value: {mask_value(key, source_value, rule)} (allowed: {allowed})"
                 )
-                forced = False
-                reason = "invalid source value"
 
             review_required.append(
                 {
@@ -1531,21 +1615,9 @@ def build_sync_plan(
                     "impact": rule.impact,
                     "validation": rule.validation or [],
                     "forced": forced,
+                    "kept": True,
                 }
             )
-            if forced:
-                changed.append(
-                    {
-                        "key": key,
-                        "from": target_value,
-                        "to": source_value,
-                        "applied": True,
-                        "reason": "forced review_required",
-                        "policy": "review_required",
-                    }
-                )
-                updates[key] = source_value
-                applied_changes += 1
             continue
 
         if rule.policy == "deprecated":
@@ -1558,14 +1630,29 @@ def build_sync_plan(
             continue
 
     if not only_keys:
-        for key in sorted(target_keys_all):
+        for key in sorted(target_active_keys):
             if key in source_keys_all:
                 continue
 
             rule = rules.keys.get(key)
-            extra_in_target.append({"key": key})
+            applied = mode == "apply"
+            extra_in_target.append(
+                {
+                    "key": key,
+                    "applied": applied,
+                    "action": "remove" if applied else "remove on apply",
+                    "reason": "key absent from source contract",
+                }
+            )
+            if applied:
+                applied_changes += 1
+                removals.append(key)
             if rule and rule.policy == "deprecated":
                 deprecated.append({"key": key, "reason": "deprecated extra key in target"})
+
+    if additions:
+        added_keys = {key for key, _value in additions}
+        required_missing = [item for item in required_missing if item["key"] not in added_keys]
 
     if verbose and not keys_to_process:
         validation_errors.append("No keys available to process after filters.")
@@ -1585,7 +1672,8 @@ def build_sync_plan(
         applied_changes=applied_changes,
         updates=updates,
         additions=additions,
-        removals=[],
+        removals=removals,
+        source_key_order=source.key_order,
     )
 
 
@@ -1737,11 +1825,14 @@ def apply_reconcile_interactive(
 
     if plan.extra_in_target:
         for item in plan.extra_in_target:
+            was_applied = bool(item.get("applied"))
             item["applied"] = True
             item["action"] = extra_action
             item["reason"] = f"reconcile: {extra_action} key absent from source"
-            plan.removals.append(item["key"])
-        plan.applied_changes += len(plan.extra_in_target)
+            if item["key"] not in plan.removals:
+                plan.removals.append(item["key"])
+            if not was_applied:
+                plan.applied_changes += 1
 
 
 def render_value_for_line(value: str, quote_style: str) -> str:
@@ -1770,6 +1861,41 @@ def escape_double(value: str) -> str:
         .replace("\r", "\\r")
         .replace("\t", "\\t")
     )
+
+
+def render_assignment_line(key: str, value: str) -> str:
+    return f"{key}={render_value_for_new_key(value)}"
+
+
+def target_insertion_start(target: ParsedEnv, output_lines: list[str | None], index: int) -> int:
+    cursor = index
+    while cursor > 0:
+        previous = target.lines[cursor - 1]
+        if output_lines[cursor - 1] is None or previous.line_type != "comment":
+            break
+        cursor -= 1
+    return cursor
+
+
+def insertion_index_for_addition(
+    key: str,
+    target: ParsedEnv,
+    output_lines: list[str | None],
+    source_order: dict[str, int],
+) -> int | None:
+    key_order = source_order.get(key)
+    if key_order is None:
+        return None
+
+    for index, line in enumerate(target.lines):
+        if output_lines[index] is None:
+            continue
+        if line.line_type not in {"key_value", "commented_key_value"} or line.key is None:
+            continue
+        line_order = source_order.get(line.key)
+        if line_order is not None and line_order > key_order:
+            return target_insertion_start(target, output_lines, index)
+    return None
 
 
 def apply_changes_to_target(target: ParsedEnv, plan: SyncPlan) -> str:
@@ -1801,15 +1927,39 @@ def apply_changes_to_target(target: ParsedEnv, plan: SyncPlan) -> str:
             else:
                 output_lines[index] = None
 
-    output_lines_compact = [line for line in output_lines if line is not None]
-
+    source_order = {key: index for index, key in enumerate(plan.source_key_order)}
+    additions_to_insert: list[tuple[str, str]] = []
     if plan.additions:
+        for key, value in plan.additions:
+            if key in target.commented_key_indices:
+                index = target.commented_key_indices[key]
+                output_lines[index] = render_assignment_line(key, value)
+                continue
+            additions_to_insert.append((key, value))
+
+    insertion_map: dict[int, list[str]] = {}
+    append_lines: list[str] = []
+    for key, value in sorted(
+        additions_to_insert,
+        key=lambda item: (source_order.get(item[0], len(source_order)), item[0]),
+    ):
+        rendered = render_assignment_line(key, value)
+        insertion_index = insertion_index_for_addition(key, target, output_lines, source_order)
+        if insertion_index is None:
+            append_lines.append(rendered)
+        else:
+            insertion_map.setdefault(insertion_index, []).append(rendered)
+
+    output_lines_compact: list[str] = []
+    for index, line in enumerate(output_lines):
+        output_lines_compact.extend(insertion_map.get(index, []))
+        if line is not None:
+            output_lines_compact.append(line)
+
+    if append_lines:
         if output_lines_compact and output_lines_compact[-1].strip() != "":
             output_lines_compact.append("")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        output_lines_compact.append(f"# Added by env-sync on {timestamp}")
-        for key, value in plan.additions:
-            output_lines_compact.append(f"{key}={render_value_for_new_key(value)}")
+        output_lines_compact.extend(append_lines)
 
     rendered_text = "\n".join(output_lines_compact)
     if target.trailing_newline:
@@ -1897,7 +2047,11 @@ def render_report(
     append_section(lines, "CHANGED", [
         f"~ {item['key']}: {mask_value(item['key'], item['from'], rules.keys.get(item['key']))} -> "
         f"{mask_value(item['key'], item['to'], rules.keys.get(item['key']))}"
-        + ("" if item.get("applied") or plan.mode == "report" else f" (not applied: {item.get('reason')})")
+        + (
+            " (applied)"
+            if item.get("applied")
+            else f" (kept target: {item.get('reason', 'environment value preserved')})"
+        )
         for item in plan.changed
     ])
 
@@ -1915,6 +2069,8 @@ def render_report(
         )
         if item.get("forced"):
             line += " (forced apply)"
+        elif item.get("kept"):
+            line += " (kept target value)"
         review_lines.append(line)
         if item.get("reason"):
             review_lines.append(f"  Reason: {item['reason']}")
@@ -1935,7 +2091,7 @@ def render_report(
 
     append_section(lines, "EXTRA IN TARGET", [
         (
-            f"? {item['key']} exists in target but not in source"
+            f"? {item['key']} exists in target but not in source ({item.get('action', 'review')})"
             if not item.get("applied")
             else f"? {item['key']} exists in target but not in source ({item.get('action', 'handled')})"
         )

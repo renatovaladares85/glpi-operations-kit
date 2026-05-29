@@ -173,11 +173,11 @@ APP_DEBUG=true
 APP_URL=https://app.example.com
 DB_PASSWORD=real-secret
 QUEUE_CONNECTION=sync
-LOG_LEVEL=error
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
         self.assertEqual(out["result"].returncode, 3)
-        self.assertIn("APP_DEBUG=false", out["target"])
+        self.assertIn("APP_DEBUG=true", out["target"])
+        self.assertIn("LOG_LEVEL=error", out["target"])
         self.assertTrue(out["backup_files"])
 
     def test_protected_key_is_not_changed(self):
@@ -207,7 +207,7 @@ LOG_LEVEL=error
         self.assertEqual(out["result"].returncode, 0)
         self.assertIn("APP_DEBUG=true", out["target"])
 
-    def test_managed_changed_with_allow_managed(self):
+    def test_managed_existing_value_is_preserved_with_allow_managed(self):
         target = """APP_NAME=Application
 APP_ENV=production
 APP_DEBUG=true
@@ -218,7 +218,8 @@ LOG_LEVEL=error
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
         self.assertEqual(out["result"].returncode, 0)
-        self.assertIn("APP_DEBUG=false", out["target"])
+        self.assertIn("APP_DEBUG=true", out["target"])
+        self.assertIn("kept target: environment value preserved", out["result"].stdout)
 
     def test_review_required_not_changed_without_force(self):
         target = """APP_NAME=Application
@@ -233,7 +234,7 @@ LOG_LEVEL=error
         self.assertEqual(out["result"].returncode, 3)
         self.assertIn("QUEUE_CONNECTION=sync", out["target"])
 
-    def test_review_required_changed_with_force(self):
+    def test_review_required_existing_value_is_preserved_with_force(self):
         target = """APP_NAME=Application
 APP_ENV=production
 APP_DEBUG=false
@@ -249,8 +250,9 @@ LOG_LEVEL=error
             mode="apply",
             extra_args=["--allow-managed", "--force-reviewed", "QUEUE_CONNECTION"],
         )
-        self.assertEqual(out["result"].returncode, 0)
-        self.assertIn("QUEUE_CONNECTION=database", out["target"])
+        self.assertEqual(out["result"].returncode, 3)
+        self.assertIn("QUEUE_CONNECTION=sync", out["target"])
+        self.assertIn("QUEUE_CONNECTION: sync -> database (kept target value)", out["result"].stdout)
 
     def test_secret_is_masked_in_report(self):
         target = """APP_NAME=Application
@@ -274,10 +276,10 @@ DB_PASSWORD=real-secret
 QUEUE_CONNECTION=database
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
-        self.assertIn("# Added by env-sync on", out["target"])
         self.assertIn("LOG_LEVEL=error", out["target"])
+        self.assertLess(out["target"].index("QUEUE_CONNECTION=database"), out["target"].index("LOG_LEVEL=error"))
 
-    def test_extra_key_is_not_removed(self):
+    def test_extra_key_is_removed_on_apply(self):
         target = """APP_NAME=Application
 APP_ENV=production
 APP_DEBUG=true
@@ -288,7 +290,8 @@ LOG_LEVEL=error
 OLD_FEATURE_FLAG=true
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
-        self.assertIn("OLD_FEATURE_FLAG=true", out["target"])
+        self.assertNotIn("OLD_FEATURE_FLAG=true", out["target"])
+        self.assertIn("OLD_FEATURE_FLAG exists in target but not in source (remove)", out["result"].stdout)
 
     def test_duplicate_key_becomes_ambiguous(self):
         target = """APP_NAME=Application
@@ -358,7 +361,7 @@ LOG_LEVEL=error
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
         updated = out["target"]
         self.assertIn("# Header", updated)
-        self.assertIn("APP_DEBUG=false  # keep this comment", updated)
+        self.assertIn("APP_DEBUG=true  # keep this comment", updated)
         self.assertIn("\n\nAPP_NAME=Application", updated)
 
     def test_value_with_equal_sign_is_parsed(self):
@@ -402,6 +405,101 @@ keys:
 """
         out = self.run_sync(source, target, rules, mode="report")
         self.assertEqual(out["result"].returncode, 0)
+
+    def test_commented_source_key_is_contract_not_extra(self):
+        source = BASE_SOURCE + "#OPTIONAL_FLAG=true\n"
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+OPTIONAL_FLAG=false
+"""
+        out = self.run_sync(source, target, BASE_RULES, mode="report")
+        self.assertNotIn("OPTIONAL_FLAG exists in target but not in source", out["result"].stdout)
+
+    def test_commented_target_key_does_not_satisfy_required_active_key(self):
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+#APP_URL=https://app.example.com
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="report")
+        self.assertIn("APP_URL is missing or empty", out["result"].stdout)
+
+    def test_apply_activates_commented_missing_key(self):
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+#APP_URL=https://old.example.com
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
+        self.assertIn("APP_URL=https://app.example.com", out["target"])
+        self.assertNotIn("#APP_URL=https://old.example.com", out["target"])
+
+    def test_missing_key_is_inserted_in_source_order(self):
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_URL=https://app.example.com
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
+        self.assertIn("APP_DEBUG=false", out["target"])
+        self.assertLess(out["target"].index("APP_ENV=production"), out["target"].index("APP_DEBUG=false"))
+        self.assertLess(out["target"].index("APP_DEBUG=false"), out["target"].index("APP_URL=https://app.example.com"))
+
+    def test_glpi_review_values_are_preserved_from_environment(self):
+        source = """GLPI_VERSION=11.0.0
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10
+"""
+        target = """GLPI_VERSION=11.0.7
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=10.161.75.95;10.161.75.97
+"""
+        rules = """version: 1
+keys:
+  GLPI_VERSION:
+    description: "GLPI version"
+    required: true
+    policy: review_required
+    reason: "Version review"
+    impact: "Release impact"
+    validation:
+      - "Smoke test"
+
+  NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS:
+    description: "DB allowlist"
+    required: false
+    policy: review_required
+    reason: "Network review"
+    impact: "Access impact"
+    validation:
+      - "Connectivity test"
+"""
+        out = self.run_sync(
+            source,
+            target,
+            rules,
+            mode="apply",
+            extra_args=["--force-reviewed", "GLPI_VERSION,NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS"],
+        )
+        self.assertEqual(out["result"].returncode, 3)
+        self.assertIn("GLPI_VERSION=11.0.7", out["target"])
+        self.assertIn("NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=10.161.75.95;10.161.75.97", out["target"])
+        self.assertIn("GLPI_VERSION: 11.0.7 -> 11.0.0 (kept target value)", out["result"].stdout)
+        self.assertIn(
+            "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS: 10.161.75.95;10.161.75.97 -> 192.0.2.10 (kept target value)",
+            out["result"].stdout,
+        )
 
     def test_reconcile_interactive_adds_missing_chooses_source_and_comments_extra(self):
         source = """APP_NAME=Application
@@ -554,6 +652,16 @@ TLS_MODE=none
         self.assertEqual(out["result"].returncode, 0)
         self.assertIn("LEGACY_FLAG", out["report_text"])
         self.assertIn("chaves duplicadas", out["report_text"])
+
+    def test_generate_prefers_active_template_value_over_commented_example(self):
+        template = """#NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10,192.0.2.11
+NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10
+"""
+        out = self.run_generate(template)
+        self.assertEqual(out["result"].returncode, 0)
+        key = out["output_yaml"]["keys"]["NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS"]
+        self.assertEqual(key["default"], "192.0.2.10")
+        self.assertIn("Duplicidades no template oficial: nenhuma.", out["report_text"])
 
     def test_generate_publish_writes_env_sync_yml(self):
         template = """PRODUCT_NAME=GLPI Kit
