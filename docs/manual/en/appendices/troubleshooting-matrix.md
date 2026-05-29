@@ -29,8 +29,8 @@
 - Symptom: precheck fails with a mandatory message indicating missing environment config file.
 - Validate: `ls -l config/<env>.env`
   - Example: `ls -l config/staging.env`
-- Fix: `cp config/product.env config/<env>.env`, then edit the new file with your environment values.
-  - Example: `cp config/product.env config/staging.env`
+- Fix: `cp config/.env.example config/<env>.env`, then edit the new file with your environment values.
+  - Example: `cp config/.env.example config/staging.env`
 - Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all`.
   - Example: `./scripts/glpictl.sh staging deploy check all`
 

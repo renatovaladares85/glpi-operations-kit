@@ -6,13 +6,13 @@ This document defines the public configuration contract for the GLPI Operations 
 
 Canonical files:
 
-- `config/product.env` (versioned template)
+- `config/.env.example` (versioned template)
 - `config/<environment>.env` (operator-created environment copy; do not commit real copies)
 - `.runtime/<environment>/secrets.yml` (runtime secrets, never versioned)
 
 Template contract:
 
-- `config/product.env` keeps only mandatory baseline keys uncommented.
+- `config/.env.example` keeps only mandatory baseline keys uncommented.
 - Optional or scenario-specific keys stay commented by default and are activated only when explicitly uncommented.
 - Commented keys are treated as not configured.
 
@@ -23,7 +23,7 @@ For operator-oriented field-by-field guidance, use:
 
 ## Configuration flow
 
-1. Operator creates `config/<environment>.env` from `config/product.env`.
+1. Operator creates `config/<environment>.env` from `config/.env.example`.
 2. Scripts load `config/<environment>.env` automatically.
 3. Scripts render `.runtime/<environment>/public.runtime.yml` and `.runtime/<environment>/inventory.runtime.yml`.
 4. Deployment secrets read from the environment file are materialized into `.runtime/<environment>/secrets.yml` with restricted permissions.

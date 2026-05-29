@@ -29,8 +29,8 @@
 - Sintoma: o precheck falha com item obrigatório informando arquivo de configuração do ambiente ausente.
 - Validação: `ls -l config/<env>.env`
   - Exemplo: `ls -l config/staging.env`
-- Correção: `cp config/product.env config/<env>.env` e, em seguida, editar o novo arquivo com os valores do ambiente.
-  - Exemplo: `cp config/product.env config/staging.env`
+- Correção: `cp config/.env.example config/<env>.env` e, em seguida, editar o novo arquivo com os valores do ambiente.
+  - Exemplo: `cp config/.env.example config/staging.env`
 - Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all`.
   - Exemplo: `./scripts/glpictl.sh staging deploy check all`
 

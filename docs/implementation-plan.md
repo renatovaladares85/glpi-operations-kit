@@ -40,7 +40,7 @@ The current implementation targets:
 
 - All declarative state lives in Git.
 - Secrets do not live in Git.
-- Public configuration lives under `config/<environment>.env` (created from `config/product.env`).
+- Public configuration lives under `config/<environment>.env` (created from `config/.env.example`).
 - Guided Bash scripts collect only missing secret values at runtime.
 - Central execution CLI: `scripts/glpictl.sh <environment> <domain> <action> [target] [scope]`.
 - Specific scripts are supported as wrappers and follow the same central execution path.

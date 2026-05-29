@@ -22,18 +22,18 @@ Execute antes do primeiro comando de deploy em sessão nova de operador.
 ## Criar e editar configuração de ambiente
 
 ```bash
-cp config/product.env config/staging.env
+cp config/.env.example config/staging.env
 ```
 
 Esse comando cria o baseline do ambiente. Os scripts carregam esse arquivo automaticamente.
 
 ## Sincronização de arquivos de ambiente (env-sync)
 
-Use `scripts/env-sync.py` para comparar o template baseline do kit (`config/product.env`) com um arquivo de ambiente (`config/<environment>.env`) usando regras de política em `.env.sync.yml`.
+Use `scripts/env-sync.py` para comparar o template baseline do kit (`config/.env.example`) com um arquivo de ambiente (`config/<environment>.env`) usando regras de política em `.env.sync.yml`.
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode report
@@ -43,7 +43,7 @@ Aplicar apenas alterações permitidas:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
@@ -54,7 +54,7 @@ Forçar uma chave de revisão manual (operação explícita):
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
@@ -65,7 +65,7 @@ Gerar relatório em arquivo:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode report \

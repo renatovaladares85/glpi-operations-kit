@@ -26,4 +26,4 @@ ensure_directory_mode "$SCRIPT_ROOT/../.runtime" "700"
 write_bootstrap_marker
 
 echo "Bootstrap completed."
-echo "Next step example: cp config/product.env config/staging.env && ./scripts/glpictl.sh staging deploy check all"
+echo "Next step example: cp config/.env.example config/staging.env && ./scripts/glpictl.sh staging deploy check all"

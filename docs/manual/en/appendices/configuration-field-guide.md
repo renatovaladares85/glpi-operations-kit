@@ -1,13 +1,13 @@
 # Environment Configuration Field Guide (EN)
 
-This guide explains how to fill `config/<environment>.env` from `config/product.env`. It is written for operators who do not yet know the kit or the customer infrastructure.
+This guide explains how to fill `config/<environment>.env` from `config/.env.example`. It is written for operators who do not yet know the kit or the customer infrastructure.
 
 Use this guide before running `deploy check`, `tls check`, or any mutable operation.
 
 ## Golden rule
 
 - Public values stay in `config/<environment>.env`.
-- `config/product.env` keeps only mandatory baseline keys uncommented.
+- `config/.env.example` keeps only mandatory baseline keys uncommented.
 - Keys not used in the current scenario stay commented with a filled default example.
 - Keys used in the current scenario stay uncommented with real environment values.
 - Deployment secrets currently read from the environment file are `DATABASE_PASSWORD` (always), plus `DATABASE_ROOT_PASSWORD` and `MONITORING_MYSQLD_EXPORTER_PASSWORD` only when `DATABASE_DEPLOYMENT_MODE=self_hosted`.
@@ -16,7 +16,7 @@ Use this guide before running `deploy check`, `tls check`, or any mutable operat
 
 ## First steps
 
-1. Copy the template: `cp config/product.env config/staging.env`.
+1. Copy the template: `cp config/.env.example config/staging.env`.
 2. Fill identity, topology, network, DB, app, paths, and policy first.
 3. Choose TLS mode: `none`, `self_signed`, or `provided`.
 4. Configure SSO directly in GLPI/IdP when needed (outside script orchestration).

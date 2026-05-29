@@ -627,7 +627,7 @@ config_file_path() {
 }
 
 config_example_path() {
-  echo "$SCRIPT_ROOT/../config/product.env"
+  echo "$SCRIPT_ROOT/../config/.env.example"
 }
 
 require_python_yaml_support() {
@@ -1881,10 +1881,10 @@ run_preflight_checks() {
     fi
   else
     local copy_cmd
-    copy_cmd="cp config/product.env config/${environment}.env"
+    copy_cmd="cp config/.env.example config/${environment}.env"
     preflight_print_result "mandatory" "fail" "missing required environment file: config/${environment}.env"
     append_precheck_item "$environment" "product-config-file" "configuration" "all" "mandatory" \
-      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.env" "$copy_cmd" "true" "fail" "Create config/${environment}.env from config/product.env and adjust values."
+      "Runtime and policy checks depend on public environment config." "test -f config/<environment>.env" "$copy_cmd" "true" "fail" "Create config/${environment}.env from config/.env.example and adjust values."
     register_mandatory_failure
   fi
 

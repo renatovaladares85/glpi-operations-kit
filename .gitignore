@@ -4,4 +4,4 @@
 *.retry
 *.tmp
 config/*.env
-!config/product.env
+!config/.env.example

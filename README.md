@@ -8,7 +8,7 @@ Important: editing can happen on Windows, but operational execution must happen 
 
 Public baseline:
 
-- `config/product.env` (versioned template)
+- `config/.env.example` (versioned template)
 - `config/<environment>.env` (created by the operator from the template)
 
 Secrets (never in Git):
@@ -41,7 +41,7 @@ All scripts load `config/<environment>.env` automatically. Manual `export` is op
 ## Quick start
 
 ```bash
-cp config/product.env config/staging.env
+cp config/.env.example config/staging.env
 bash scripts/bootstrap-permissions.sh
 ./scripts/glpictl.sh staging deploy check all
 ```

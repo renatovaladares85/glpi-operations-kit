@@ -62,7 +62,7 @@ Core components:
 
 | Directory or file | Use |
 |---|---|
-| `config/product.env` | Versioned template for the public configuration contract. |
+| `config/.env.example` | Versioned template for the public configuration contract. |
 | `config/<environment>.env` | Operator-created environment copy; do not commit real values. |
 | `scripts/glpictl.sh` | Main operational interface. |
 | `scripts/lib/common.sh` | Common Bash library. |
@@ -83,7 +83,7 @@ Core components:
 
 ```mermaid
 flowchart TD
-  ProductEnv["config/product.env"] --> EnvFile["config/<environment>.env"]
+  ProductEnv["config/.env.example"] --> EnvFile["config/<environment>.env"]
   EnvFile --> Renderer["render_product_config.py"]
   Renderer --> PublicRuntime["public.runtime.yml"]
   Renderer --> Inventory["inventory.runtime.yml"]
@@ -103,7 +103,7 @@ Effective precedence:
 
 Important rules:
 
-- `config/product.env` is the versioned template.
+- `config/.env.example` is the versioned template.
 - `config/<environment>.env` is the environment input.
 - `.runtime/` is generated and must not be versioned.
 - `overrides.runtime.yml` stores mutable changes, such as TLS switches, without changing the public baseline.
@@ -260,7 +260,7 @@ The action must declare whether it is mutable. If mutable:
 
 ### Add a new `.env` key
 
-1. Add the key to `config/product.env` with comment, format, and safe example.
+1. Add the key to `config/.env.example` with comment, format, and safe example.
 2. Map it in `scripts/lib/render_product_config.py` when consumed by runtime.
 3. Validate format and defaults in the renderer or appropriate domain.
 4. Never make a new key mandatory without evaluating compatibility.

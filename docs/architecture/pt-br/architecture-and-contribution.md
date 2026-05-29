@@ -62,7 +62,7 @@ Componentes centrais:
 
 | Diretório ou arquivo | Uso |
 |---|---|
-| `config/product.env` | Template versionado do contrato público de configuração. |
+| `config/.env.example` | Template versionado do contrato público de configuração. |
 | `config/<environment>.env` | Cópia do ambiente criada pelo operador; não commitar valores reais. |
 | `scripts/glpictl.sh` | Interface operacional principal. |
 | `scripts/lib/common.sh` | Biblioteca Bash comum. |
@@ -83,7 +83,7 @@ Componentes centrais:
 
 ```mermaid
 flowchart TD
-  ProductEnv["config/product.env"] --> EnvFile["config/<environment>.env"]
+  ProductEnv["config/.env.example"] --> EnvFile["config/<environment>.env"]
   EnvFile --> Renderer["render_product_config.py"]
   Renderer --> PublicRuntime["public.runtime.yml"]
   Renderer --> Inventory["inventory.runtime.yml"]
@@ -103,7 +103,7 @@ A precedência efetiva é:
 
 Regras importantes:
 
-- `config/product.env` é o template versionado.
+- `config/.env.example` é o template versionado.
 - `config/<environment>.env` é a entrada do ambiente.
 - `.runtime/` é gerado e não deve ser versionado.
 - `overrides.runtime.yml` guarda mudanças mutáveis, como troca de TLS, sem alterar o baseline público.
@@ -260,7 +260,7 @@ A action deve declarar se é mutável. Se for mutável:
 
 ### Adicionar uma nova chave no `.env`
 
-1. Adicione a chave em `config/product.env` com comentário, formato e exemplo seguro.
+1. Adicione a chave em `config/.env.example` com comentário, formato e exemplo seguro.
 2. Mapeie em `scripts/lib/render_product_config.py` quando a chave for consumida por runtime.
 3. Valide formato e defaults no renderer ou no domínio apropriado.
 4. Nunca torne obrigatória uma chave nova sem avaliar compatibilidade.

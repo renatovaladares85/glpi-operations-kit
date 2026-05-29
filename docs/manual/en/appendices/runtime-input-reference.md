@@ -4,11 +4,11 @@ This appendix explains how configuration and runtime data flow through the proje
 
 ## Public vs secret input
 
-Public deployment values live in `config/<environment>.env`, created from `config/product.env`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment DB secrets read from that file (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`, and optional `DATABASE_MANAGED_ADMIN_PASSWORD`) are materialized into `.runtime/<environment>/secrets.yml`.
+Public deployment values live in `config/<environment>.env`, created from `config/.env.example`. This includes host endpoints, topology mode, TLS mode, package/tuning values, and policy flags. Deployment DB secrets read from that file (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD`, and optional `DATABASE_MANAGED_ADMIN_PASSWORD`) are materialized into `.runtime/<environment>/secrets.yml`.
 
 Template baseline behavior:
 
-- `config/product.env` keeps only mandatory baseline keys uncommented.
+- `config/.env.example` keeps only mandatory baseline keys uncommented.
 - Optional and scenario-specific keys stay commented until the scenario is explicitly enabled.
 
 ## How automatic `GLPI_APP_PACKAGES` works

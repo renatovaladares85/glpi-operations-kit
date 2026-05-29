@@ -22,18 +22,18 @@ Run this before the first deployment command in a new operator session.
 ## Create and edit environment configuration
 
 ```bash
-cp config/product.env config/staging.env
+cp config/.env.example config/staging.env
 ```
 
 This creates your environment baseline. The scripts read this file automatically.
 
 ## Environment file sync (env-sync)
 
-Use `scripts/env-sync.py` to compare the kit baseline template (`config/product.env`) against an environment file (`config/<environment>.env`) using policy rules from `.env.sync.yml`.
+Use `scripts/env-sync.py` to compare the kit baseline template (`config/.env.example`) against an environment file (`config/<environment>.env`) using policy rules from `.env.sync.yml`.
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode report
@@ -43,7 +43,7 @@ Apply only allowed changes:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
@@ -54,7 +54,7 @@ Force one reviewed key (explicit/manual operation):
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode apply \
@@ -65,7 +65,7 @@ Generate a report file:
 
 ```bash
 python3 scripts/env-sync.py \
-  --source config/product.env \
+  --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
   --mode report \

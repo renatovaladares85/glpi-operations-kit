@@ -6,7 +6,7 @@ A configuração principal fica em:
 
 - `config/<environment>.env`
 
-Use `config/product.env` apenas como template inicial.
+Use `config/.env.example` apenas como template inicial.
 
 Exemplo genérico:
 

@@ -2,11 +2,11 @@
 
 ## Fonte oficial
 
-- `config/product.env` (usado como fonte oficial nesta execução, pois `.env.example` não existe no repositório em 2026-05-28)
+- `config/.env.example` (template oficial versionado do projeto)
 
 ## Arquivos reais analisados
 
-- `config/product.env` (template baseline versionado)
+- `config/.env.example` (template baseline versionado)
 - `config/development.env` (não encontrado)
 - `config/staging.env` (não encontrado)
 - `config/production.env` (não encontrado)
@@ -21,8 +21,7 @@
 
 ## Arquivos preservados
 
-- `.env.example` (não encontrado; não criado)
-- `config/product.env` (preservado)
+- `config/.env.example` (preservado)
 - `config/development.env` (não encontrado)
 - `config/staging.env` (não encontrado)
 - `config/production.env` (não encontrado)
@@ -81,22 +80,20 @@
 
 ## Variáveis usadas no código mas ausentes no `.env.example`
 
-- Não aplicável literalmente porque `.env.example` não existe no repositório.
-- Usando `config/product.env` como fonte oficial desta execução: **não foram encontradas variáveis usadas em `scripts/lib/render_product_config.py` ausentes do template**.
+- Usando `config/.env.example` como fonte oficial desta execução: **não foram encontradas variáveis usadas em `scripts/lib/render_product_config.py` ausentes do template**.
 
 ## Variáveis presentes nos arquivos reais mas ausentes no `.env.example`
 
-- Não aplicável (não há `.env.example` e não há arquivos reais de ambiente disponíveis em `config/` para comparação nesta execução).
+- Não aplicável no momento porque não há arquivos reais de ambiente disponíveis em `config/` para comparação nesta execução.
 
 ## Ambiguidades
 
-- `.env.example` ausente no repositório; execução adaptada para `config/product.env`.
-- `config/product.env` tem 119 chaves totais, mas apenas 25 chaves ativas (descomentadas).
+- `config/.env.example` tem 119 chaves totais, mas apenas 25 chaves ativas (descomentadas).
 - Há 55 chaves usadas no renderer que estão comentadas/inativas no baseline e, por compatibilidade operacional com `env-sync.py`, não entraram neste contrato inicial.
 - As chaves opcionais comentadas devem ser cobertas em uma evolução futura do contrato (ou com expansão da estratégia de source para incluir opcionalidade comentada).
-- `product.env` encontrado: sim.
-- Classificação sugerida de `product.env`: **template oficial versionado** (não é arquivo real por ambiente).
-- Ação recomendada para `product.env`: **manter**.
+- `.env.example` encontrado: sim.
+- Classificação sugerida de `.env.example`: **template oficial versionado** (não é arquivo real por ambiente).
+- Ação recomendada para `.env.example`: **manter**.
 
 ## Decisões tomadas na execução dos próximos passos
 
@@ -106,15 +103,15 @@
   - `config/development.env`: não encontrado.
   - `config/staging.env`: não encontrado.
   - `config/production.env`: não encontrado.
-  - `config/product.env`: executado em `report`, `exit code 2` com `DATABASE_PASSWORD` ausenta/vazia no template baseline.
+  - `config/.env.example`: executado em `report`, `exit code 2` com `DATABASE_PASSWORD` ausenta/vazia no template baseline.
 
 ## Validações executadas
 
 - Validação sintática YAML de `.env.sync.yml` com `python3` e `yaml.safe_load`: **OK**.
 - Validação de campos obrigatórios por chave (`description`, `required`, `policy`): **OK**.
-- Cobertura de chaves ativas de `config/product.env` no contrato: **25/25**.
+- Cobertura de chaves ativas de `config/.env.example` no contrato: **25/25**.
 - Execução `env-sync` em modo `report` (sem apply):
-  - `python3 scripts/env-sync.py --source config/product.env --target config/product.env --rules .env.sync.yml --mode report --no-color`
+  - `python3 scripts/env-sync.py --source config/.env.example --target config/.env.example --rules .env.sync.yml --mode report --no-color`
   - Resultado: `exit code 2` (diferença esperada por `required missing` em `DATABASE_PASSWORD`, vazio no baseline).
 - Verificação de completude de metadados `review_required`:
   - Script de validação confirmou `reason`, `impact` e `validation` em 9/9 chaves.
@@ -123,6 +120,6 @@
 
 ## Próximos passos recomendados
 
-- Criar `config/development.env`, `config/staging.env` e `config/production.env` a partir de `config/product.env` quando o fluxo operacional do ambiente estiver pronto.
+- Criar `config/development.env`, `config/staging.env` e `config/production.env` a partir de `config/.env.example` quando o fluxo operacional do ambiente estiver pronto.
 - Preencher segredos obrigatórios de cada ambiente real (`DATABASE_PASSWORD` e demais condicionais).
 - Executar `env-sync` em modo `report` para cada `config/<environment>.env` real e revisar divergências antes de qualquer `apply`.

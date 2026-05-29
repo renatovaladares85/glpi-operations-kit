@@ -8,7 +8,7 @@ This is the compact product-level reference for `config/<environment>.env`. The 
 ## How to create an environment file
 
 ```bash
-cp config/product.env config/staging.env
+cp config/.env.example config/staging.env
 ```
 
 Edit public values in the environment copy. Real environment copies should not be committed.
@@ -18,7 +18,7 @@ Activation rule:
 - Commented key: not used in the current scenario.
 - Uncommented key: active and used in runtime rendering.
 - Conditional key guidance can keep a commented default line as an example for later activation.
-- In `config/product.env`, only mandatory baseline keys stay uncommented by default.
+- In `config/.env.example`, only mandatory baseline keys stay uncommented by default.
 
 ## Conditional checks by enabled feature
 

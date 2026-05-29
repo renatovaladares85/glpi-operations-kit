@@ -12,7 +12,7 @@ Primeiro confirme que você está em shell Linux e que o arquivo de ambiente já
 
 Onde verificar:
 
-- `config/product.env` (template)
+- `config/.env.example` (template)
 - `config/<environment>.env` (seu ambiente)
 
 Execute a preparação de baseline:
@@ -34,7 +34,7 @@ Erro comum e ação rápida:
 - ação: criar a partir do template e executar o precheck novamente
 
 ```bash
-cp config/product.env config/staging.env
+cp config/.env.example config/staging.env
 ./scripts/glpictl.sh staging deploy check all
 ```
 

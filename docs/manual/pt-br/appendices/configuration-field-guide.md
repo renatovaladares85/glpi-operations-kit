@@ -1,13 +1,13 @@
 # Guia de Preenchimento do Ambiente (PT-BR)
 
-Este guia explica como preencher `config/<environment>.env` a partir de `config/product.env`. Ele foi escrito para operadores que ainda não conhecem o kit nem a infraestrutura do cliente.
+Este guia explica como preencher `config/<environment>.env` a partir de `config/.env.example`. Ele foi escrito para operadores que ainda não conhecem o kit nem a infraestrutura do cliente.
 
 Use este guia antes de executar `deploy check`, `tls check` ou qualquer operação mutável.
 
 ## Regra de ouro
 
 - Valores públicos ficam em `config/<environment>.env`.
-- `config/product.env` mantém descomentadas apenas as chaves obrigatórias de baseline.
+- `config/.env.example` mantém descomentadas apenas as chaves obrigatórias de baseline.
 - Chaves não usadas no cenário atual ficam comentadas com exemplo default preenchido.
 - Chaves usadas no cenário atual ficam descomentadas com valores reais do ambiente.
 - Segredos obrigatórios de deploy atualmente lidos do ambiente são `DATABASE_PASSWORD` (sempre), além de `DATABASE_ROOT_PASSWORD` e `MONITORING_MYSQLD_EXPORTER_PASSWORD` somente quando `DATABASE_DEPLOYMENT_MODE=self_hosted`.
@@ -16,7 +16,7 @@ Use este guia antes de executar `deploy check`, `tls check` ou qualquer operaç�
 
 ## Como começar
 
-1. Copie o template: `cp config/product.env config/staging.env`.
+1. Copie o template: `cp config/.env.example config/staging.env`.
 2. Preencha primeiro identidade, topologia, rede, DB, app, paths e política.
 3. Escolha TLS: `none`, `self_signed` ou `provided`.
 4. Configure SSO diretamente no GLPI/IdP quando necessário (fora da orquestração do script).

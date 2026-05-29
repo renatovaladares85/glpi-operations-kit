@@ -4,7 +4,7 @@ Este apêndice explica como os dados de configuração e runtime circulam no pro
 
 ## Entrada pública versus segredo
 
-Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/product.env`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos de deploy lidos desse arquivo (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD` e `DATABASE_MANAGED_ADMIN_PASSWORD` opcional) são materializados em `.runtime/<environment>/secrets.yml`.
+Os valores públicos de deploy ficam em `config/<environment>.env`, criado a partir de `config/.env.example`. Isso inclui endpoints, topologia, modo TLS, tuning, pacotes e flags de política. Os segredos de deploy lidos desse arquivo (`DATABASE_PASSWORD`, `DATABASE_ROOT_PASSWORD`, `MONITORING_MYSQLD_EXPORTER_PASSWORD` e `DATABASE_MANAGED_ADMIN_PASSWORD` opcional) são materializados em `.runtime/<environment>/secrets.yml`.
 
 ## Como funciona o `GLPI_APP_PACKAGES` automático
 

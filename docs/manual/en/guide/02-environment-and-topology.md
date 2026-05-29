@@ -6,7 +6,7 @@ Configuration happens in one main file:
 
 - `config/<environment>.env`
 
-Use `config/product.env` only as your starting template.
+Use `config/.env.example` only as your starting template.
 
 Generic example:
 
