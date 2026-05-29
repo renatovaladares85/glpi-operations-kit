@@ -18,7 +18,7 @@ import re
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -352,6 +352,11 @@ class PostCheckResult:
     exists: bool
     exit_code: int
     summary: str
+    missing_keys: list[str] = field(default_factory=list)
+    review_required_keys: list[str] = field(default_factory=list)
+    extra_keys: list[str] = field(default_factory=list)
+    ambiguous_keys: list[str] = field(default_factory=list)
+    validation_errors: list[str] = field(default_factory=list)
 
 
 class ReportBuilder:
@@ -809,7 +814,12 @@ def run_post_check(
     verbose: bool,
 ) -> PostCheckResult:
     if not target_path.exists():
-        return PostCheckResult(target=target_path, exists=False, exit_code=EXIT_SUCCESS, summary="target-not-found")
+        return PostCheckResult(
+            target=target_path,
+            exists=False,
+            exit_code=EXIT_SUCCESS,
+            summary="target-not-found",
+        )
 
     rules = load_rules(rules_path)
     source = parse_env_file(source_path, "source")
@@ -834,7 +844,19 @@ def run_post_check(
         f"validation_errors={len(plan.validation_errors)}; extras={len(plan.extra_in_target)}; "
         f"ambiguous={len(plan.ambiguous)}"
     )
-    return PostCheckResult(target=target_path, exists=True, exit_code=exit_code, summary=summary)
+    return PostCheckResult(
+        target=target_path,
+        exists=True,
+        exit_code=exit_code,
+        summary=summary,
+        missing_keys=sorted(item["key"] for item in plan.required_missing),
+        review_required_keys=sorted(
+            item["key"] for item in plan.review_required if not item.get("forced")
+        ),
+        extra_keys=sorted(item["key"] for item in plan.extra_in_target),
+        ambiguous_keys=sorted(item["key"] for item in plan.ambiguous),
+        validation_errors=list(plan.validation_errors),
+    )
 
 
 def write_yaml_file(path: Path, data: dict[str, Any]) -> None:
@@ -992,6 +1014,21 @@ def render_generate_report(
             lines.append(f"- `{item.target}`: target não encontrado.")
             continue
         lines.append(f"- `{item.target}`: {item.summary}")
+        if item.missing_keys:
+            lines.append("  - required missing keys:")
+            lines.extend([f"    - `{key}`" for key in item.missing_keys])
+        if item.review_required_keys:
+            lines.append("  - review_required keys:")
+            lines.extend([f"    - `{key}`" for key in item.review_required_keys])
+        if item.extra_keys:
+            lines.append("  - extra keys:")
+            lines.extend([f"    - `{key}`" for key in item.extra_keys])
+        if item.ambiguous_keys:
+            lines.append("  - ambiguous keys:")
+            lines.extend([f"    - `{key}`" for key in item.ambiguous_keys])
+        if item.validation_errors:
+            lines.append("  - validation errors:")
+            lines.extend([f"    - {message}" for message in item.validation_errors])
 
     lines.extend(
         [
@@ -1937,6 +1974,30 @@ def run_generate_contract_mode(args: argparse.Namespace) -> int:
     if args.strict_post_checks and strict_failures:
         for item in strict_failures:
             print(f"Strict post-check failed for {item.target}: {item.summary}", file=sys.stderr)
+            if item.missing_keys:
+                print(
+                    "  missing keys: " + ", ".join(item.missing_keys),
+                    file=sys.stderr,
+                )
+            if item.review_required_keys:
+                print(
+                    "  review_required keys: " + ", ".join(item.review_required_keys),
+                    file=sys.stderr,
+                )
+            if item.extra_keys:
+                print(
+                    "  extra keys: " + ", ".join(item.extra_keys),
+                    file=sys.stderr,
+                )
+            if item.ambiguous_keys:
+                print(
+                    "  ambiguous keys: " + ", ".join(item.ambiguous_keys),
+                    file=sys.stderr,
+                )
+            if item.validation_errors:
+                print("  validation errors:", file=sys.stderr)
+                for message in item.validation_errors:
+                    print(f"    - {message}", file=sys.stderr)
         return EXIT_ERROR
 
     return EXIT_SUCCESS

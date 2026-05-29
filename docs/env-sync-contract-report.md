@@ -73,6 +73,8 @@
 ## Pós-geração: env-sync report
 
 - `config/.env.example`: code=2; missing=1; review_required=0; validation_errors=0; extras=0; ambiguous=0
+  - required missing keys:
+    - `DATABASE_PASSWORD`
 
 ## Validações executadas
 

@@ -70,6 +70,7 @@ Option notes:
 - `--report-output`: report path (default `docs/env-sync-contract-report.md`)
 - `--no-report`: disable report file generation
 - `--strict-post-checks`: fail when discovered real environment files (`config/<environment>.env`) have pending differences/review items
+- In strict failure, terminal output lists offending keys (`missing`, `review_required`, `extra`, `ambiguous`) for faster remediation.
 
 If `.env.sync.yml` was removed locally by mistake and you want the Git-tracked version:
 

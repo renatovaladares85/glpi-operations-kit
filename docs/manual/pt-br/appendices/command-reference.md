@@ -70,6 +70,7 @@ Notas das opções:
 - `--report-output`: caminho do relatório (default `docs/env-sync-contract-report.md`)
 - `--no-report`: desativa geração de relatório em arquivo
 - `--strict-post-checks`: falha quando arquivos reais descobertos (`config/<environment>.env`) tiverem pendências
+- Em falha estrita, a saída mostra as chaves afetadas (`missing`, `review_required`, `extra`, `ambiguous`) para correção rápida.
 
 Se `.env.sync.yml` foi removido localmente por engano e você quer a versão rastreada no Git:
 
