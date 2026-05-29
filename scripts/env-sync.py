@@ -334,6 +334,7 @@ class SyncPlan:
     applied_changes: int
     updates: dict[str, str]
     additions: list[tuple[str, str]]
+    removals: list[str]
     backup_path: Path | None = None
 
 
@@ -395,6 +396,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--write-report", default="", help="Optional report output file")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     parser.add_argument("--verbose", action="store_true", help="Show extra validation context")
+    parser.add_argument(
+        "--reconcile-interactive",
+        action="store_true",
+        help="Interactive reconcile in apply mode: add missing keys, prompt for divergent values, and handle extra keys.",
+    )
+    parser.add_argument(
+        "--extra-action",
+        choices=["comment", "remove"],
+        default="comment",
+        help="How to handle keys present in target but absent in source when using --reconcile-interactive (default: comment).",
+    )
     parser.add_argument(
         "--generate-contract",
         action="store_true",
@@ -1573,7 +1585,163 @@ def build_sync_plan(
         applied_changes=applied_changes,
         updates=updates,
         additions=additions,
+        removals=[],
     )
+
+
+def collect_divergent_keys(
+    source: ParsedEnv,
+    target: ParsedEnv,
+    rules: RulesConfig,
+    only_keys: set[str],
+) -> list[tuple[str, str, str, str]]:
+    source_keys = set(source.values.keys())
+    target_keys = set(target.values.keys())
+    scope = set(only_keys) if only_keys else (source_keys & target_keys)
+
+    divergences: list[tuple[str, str, str, str]] = []
+    for key in sorted(scope):
+        if key in source.duplicates or key in target.duplicates:
+            continue
+        rule = rules.keys.get(key)
+        if rule is None:
+            continue
+        source_value = source.values.get(key)
+        target_value = target.values.get(key)
+        if source_value is None or target_value is None:
+            continue
+        if source_value == target_value:
+            continue
+        divergences.append((key, source_value, target_value, rule.policy))
+    return divergences
+
+
+def prompt_reconcile_choice(
+    key: str,
+    source_value: str,
+    target_value: str,
+    rule: KeyRule,
+) -> str:
+    masked_source = mask_value(key, source_value, rule)
+    masked_target = mask_value(key, target_value, rule)
+
+    print("")
+    print(f"[RECONCILE] Divergence detected for '{key}'")
+    print(f"  source (.env.example): {masked_source}")
+    print(f"  target (environment): {masked_target}")
+
+    while True:
+        try:
+            answer = input("  Keep which value in target? [s=source/t=target]: ").strip().lower()
+        except EOFError as exc:
+            raise ValidationError(
+                f"Interactive input required for key '{key}' in --reconcile-interactive mode."
+            ) from exc
+
+        if answer in {"s", "source"}:
+            return "source"
+        if answer in {"t", "target"}:
+            return "target"
+        print("  Invalid choice. Use 's' (source) or 't' (target).")
+
+
+def apply_reconcile_interactive(
+    plan: SyncPlan,
+    source: ParsedEnv,
+    target: ParsedEnv,
+    rules: RulesConfig,
+    only_keys: set[str],
+    extra_action: str,
+) -> None:
+    if plan.validation_errors:
+        raise ValidationError("Cannot start interactive reconcile with validation errors in current plan.")
+
+    additions_index = {key: idx for idx, (key, _value) in enumerate(plan.additions)}
+    for item in plan.added:
+        key = item["key"]
+        value = source.values.get(key, item["value"])
+        item["value"] = value
+        if key in additions_index:
+            index = additions_index[key]
+            plan.additions[index] = (key, value)
+        else:
+            plan.additions.append((key, value))
+            plan.applied_changes += 1
+            additions_index[key] = len(plan.additions) - 1
+        item["applied"] = True
+        item["reason"] = "reconcile: missing key added from source"
+
+    if additions_index:
+        plan.required_missing = [item for item in plan.required_missing if item["key"] not in additions_index]
+
+    divergence_choices: dict[str, str] = {}
+    for key, source_value, target_value, _policy in collect_divergent_keys(source, target, rules, only_keys):
+        rule = rules.keys[key]
+        choice = prompt_reconcile_choice(
+            key=key,
+            source_value=source_value,
+            target_value=target_value,
+            rule=rule,
+        )
+        divergence_choices[key] = choice
+        if choice == "source":
+            if key not in plan.updates:
+                plan.applied_changes += 1
+            plan.updates[key] = source_value
+            found_change = False
+            for changed in plan.changed:
+                if changed["key"] == key:
+                    changed["applied"] = True
+                    changed["reason"] = "reconcile: chose source value"
+                    found_change = True
+                    break
+            if not found_change:
+                plan.changed.append(
+                    {
+                        "key": key,
+                        "from": target_value,
+                        "to": source_value,
+                        "applied": True,
+                        "reason": "reconcile: chose source value",
+                        "policy": rule.policy,
+                    }
+                )
+        else:
+            if key in plan.updates:
+                del plan.updates[key]
+                if plan.applied_changes > 0:
+                    plan.applied_changes -= 1
+            found_change = False
+            for changed in plan.changed:
+                if changed["key"] == key:
+                    changed["applied"] = False
+                    changed["reason"] = "reconcile: kept target value"
+                    found_change = True
+                    break
+            if not found_change:
+                plan.changed.append(
+                    {
+                        "key": key,
+                        "from": target_value,
+                        "to": source_value,
+                        "applied": False,
+                        "reason": "reconcile: kept target value",
+                        "policy": rule.policy,
+                    }
+                )
+
+    if divergence_choices:
+        chosen_keys = set(divergence_choices.keys())
+        plan.preserved_protected = [item for item in plan.preserved_protected if item["key"] not in chosen_keys]
+        plan.review_required = [item for item in plan.review_required if item["key"] not in chosen_keys]
+
+    if plan.extra_in_target:
+        for item in plan.extra_in_target:
+            item["applied"] = True
+            item["action"] = extra_action
+            item["reason"] = f"reconcile: {extra_action} key absent from source"
+            plan.removals.append(item["key"])
+        plan.applied_changes += len(plan.extra_in_target)
 
 
 def render_value_for_line(value: str, quote_style: str) -> str:
@@ -1605,7 +1773,7 @@ def escape_double(value: str) -> str:
 
 
 def apply_changes_to_target(target: ParsedEnv, plan: SyncPlan) -> str:
-    output_lines = [line.original_line for line in target.lines]
+    output_lines: list[str | None] = [line.original_line for line in target.lines]
 
     for key, new_value in plan.updates.items():
         index = target.key_indices[key]
@@ -1615,15 +1783,35 @@ def apply_changes_to_target(target: ParsedEnv, plan: SyncPlan) -> str:
         rendered = render_value_for_line(new_value, line.quote_style)
         output_lines[index] = f"{line.prefix}{rendered}{line.suffix}"
 
-    if plan.additions:
-        if output_lines and output_lines[-1].strip() != "":
-            output_lines.append("")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        output_lines.append(f"# Added by env-sync on {timestamp}")
-        for key, value in plan.additions:
-            output_lines.append(f"{key}={render_value_for_new_key(value)}")
+    for item in plan.extra_in_target:
+        if not item.get("applied"):
+            continue
+        action = item.get("action")
+        if action not in {"comment", "remove"}:
+            continue
+        key = item["key"]
+        for index, line in enumerate(target.lines):
+            if line.line_type != "key_value" or line.key != key:
+                continue
+            current = output_lines[index]
+            if current is None:
+                continue
+            if action == "comment":
+                output_lines[index] = f"# Removed by env-sync (not in source): {current}"
+            else:
+                output_lines[index] = None
 
-    rendered_text = "\n".join(output_lines)
+    output_lines_compact = [line for line in output_lines if line is not None]
+
+    if plan.additions:
+        if output_lines_compact and output_lines_compact[-1].strip() != "":
+            output_lines_compact.append("")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        output_lines_compact.append(f"# Added by env-sync on {timestamp}")
+        for key, value in plan.additions:
+            output_lines_compact.append(f"{key}={render_value_for_new_key(value)}")
+
+    rendered_text = "\n".join(output_lines_compact)
     if target.trailing_newline:
         rendered_text += "\n"
     return rendered_text
@@ -1746,7 +1934,11 @@ def render_report(
     ])
 
     append_section(lines, "EXTRA IN TARGET", [
-        f"? {item['key']} exists in target but not in source"
+        (
+            f"? {item['key']} exists in target but not in source"
+            if not item.get("applied")
+            else f"? {item['key']} exists in target but not in source ({item.get('action', 'handled')})"
+        )
         for item in plan.extra_in_target
     ])
 
@@ -2044,7 +2236,20 @@ def run_sync_mode(args: argparse.Namespace) -> int:
         verbose=args.verbose,
     )
 
-    if args.mode == "apply" and not plan.validation_errors and (plan.updates or plan.additions):
+    if args.reconcile_interactive:
+        if args.mode != "apply":
+            raise ValidationError("--reconcile-interactive requires --mode apply.")
+        apply_reconcile_interactive(
+            plan=plan,
+            source=source,
+            target=target,
+            rules=rules,
+            only_keys=only_keys,
+            extra_action=args.extra_action,
+        )
+
+    has_extra_actions = any(item.get("applied") and item.get("action") for item in plan.extra_in_target)
+    if args.mode == "apply" and not plan.validation_errors and (plan.updates or plan.additions or has_extra_actions):
         backup_dir = Path(str(rules.defaults.get("backup_dir", ".env-backups")))
         plan.backup_path = create_backup(target_path, backup_dir)
         new_content = apply_changes_to_target(target, plan)

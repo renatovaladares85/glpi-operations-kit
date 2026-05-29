@@ -71,6 +71,8 @@ Notas das opções:
 - `--no-report`: desativa geração de relatório em arquivo
 - `--strict-post-checks`: falha quando arquivos reais descobertos (`config/<environment>.env`) tiverem pendências
 - Em falha estrita, a saída mostra as chaves afetadas (`missing`, `review_required`, `extra`, `ambiguous`) para correção rápida.
+- `--reconcile-interactive`: resolução interativa de conflitos durante `--mode apply`
+- `--extra-action comment|remove`: como tratar chaves que existem só no target na reconciliação interativa
 
 Se `.env.sync.yml` foi removido localmente por engano e você quer a versão rastreada no Git:
 
@@ -144,6 +146,24 @@ python3 scripts/env-sync.py \
   --mode apply \
   --allow-managed
 ```
+
+Reconciliação interativa (recomendado após mudança de template):
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/production.env \
+  --rules .env.sync.generated.yml \
+  --mode apply \
+  --reconcile-interactive \
+  --extra-action comment
+```
+
+Comportamento da reconciliação interativa:
+
+- Chaves faltantes no ambiente são adicionadas a partir do source.
+- Para cada chave divergente, o script pergunta se mantém valor do source ou do target.
+- Chaves que existem só no target são comentadas (ou removidas com `--extra-action remove`).
 
 Forçar uma chave de revisão manual (operação explícita):
 

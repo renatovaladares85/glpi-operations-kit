@@ -99,7 +99,15 @@ keys:
 
 
 class EnvSyncCLITest(unittest.TestCase):
-    def run_sync(self, source: str, target: str, rules: str, mode: str = "report", extra_args=None):
+    def run_sync(
+        self,
+        source: str,
+        target: str,
+        rules: str,
+        mode: str = "report",
+        extra_args=None,
+        stdin_data: str | None = None,
+    ):
         extra_args = extra_args or []
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -124,7 +132,14 @@ class EnvSyncCLITest(unittest.TestCase):
                 "--no-color",
             ]
             cmd.extend(extra_args)
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=tmp_path)
+            result = subprocess.run(
+                cmd,
+                input=stdin_data,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=tmp_path,
+            )
 
             backup_files = sorted(
                 [path.name for path in (tmp_path / ".env-backups").glob("production.env.backup.*")]
@@ -387,6 +402,69 @@ keys:
 """
         out = self.run_sync(source, target, rules, mode="report")
         self.assertEqual(out["result"].returncode, 0)
+
+    def test_reconcile_interactive_adds_missing_chooses_source_and_comments_extra(self):
+        source = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=secret-from-source
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        target = """APP_NAME=Application
+APP_ENV=staging
+APP_DEBUG=true
+APP_URL=https://app.example.com
+QUEUE_CONNECTION=sync
+LOG_LEVEL=warning
+EXTRA_FLAG=true
+"""
+        stdin_data = "s\ns\ns\ns\n"
+        out = self.run_sync(
+            source,
+            target,
+            BASE_RULES,
+            mode="apply",
+            extra_args=["--reconcile-interactive", "--extra-action", "comment"],
+            stdin_data=stdin_data,
+        )
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("APP_ENV=production", out["target"])
+        self.assertIn("APP_DEBUG=false", out["target"])
+        self.assertIn("QUEUE_CONNECTION=database", out["target"])
+        self.assertIn("LOG_LEVEL=error", out["target"])
+        self.assertIn("DB_PASSWORD=secret-from-source", out["target"])
+        self.assertIn("# Removed by env-sync (not in source): EXTRA_FLAG=true", out["target"])
+
+    def test_reconcile_interactive_can_remove_extra_key(self):
+        source = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=source-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=source-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+LEGACY_FLAG=true
+"""
+        out = self.run_sync(
+            source,
+            target,
+            BASE_RULES,
+            mode="apply",
+            extra_args=["--reconcile-interactive", "--extra-action", "remove"],
+            stdin_data="",
+        )
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertNotIn("LEGACY_FLAG=true", out["target"])
 
 
 class EnvSyncGenerateContractCLITest(unittest.TestCase):

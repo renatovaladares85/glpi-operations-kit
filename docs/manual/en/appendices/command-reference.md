@@ -71,6 +71,8 @@ Option notes:
 - `--no-report`: disable report file generation
 - `--strict-post-checks`: fail when discovered real environment files (`config/<environment>.env`) have pending differences/review items
 - In strict failure, terminal output lists offending keys (`missing`, `review_required`, `extra`, `ambiguous`) for faster remediation.
+- `--reconcile-interactive`: interactive conflict resolution during `--mode apply`
+- `--extra-action comment|remove`: how to handle keys existing only in target during interactive reconcile
 
 If `.env.sync.yml` was removed locally by mistake and you want the Git-tracked version:
 
@@ -144,6 +146,24 @@ python3 scripts/env-sync.py \
   --mode apply \
   --allow-managed
 ```
+
+Interactive reconcile (recommended after template changes):
+
+```bash
+python3 scripts/env-sync.py \
+  --source config/.env.example \
+  --target config/production.env \
+  --rules .env.sync.generated.yml \
+  --mode apply \
+  --reconcile-interactive \
+  --extra-action comment
+```
+
+Behavior in interactive reconcile:
+
+- Missing keys from source are added to target.
+- For each divergent key, the script asks whether to keep source or target value.
+- Keys that exist only in target are commented (or removed with `--extra-action remove`).
 
 Force one reviewed key (explicit/manual operation):
 
