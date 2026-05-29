@@ -175,7 +175,7 @@ DB_PASSWORD=real-secret
 QUEUE_CONNECTION=sync
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
-        self.assertEqual(out["result"].returncode, 3)
+        self.assertEqual(out["result"].returncode, 0)
         self.assertIn("APP_DEBUG=true", out["target"])
         self.assertIn("LOG_LEVEL=error", out["target"])
         self.assertTrue(out["backup_files"])
@@ -219,7 +219,8 @@ LOG_LEVEL=error
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
         self.assertEqual(out["result"].returncode, 0)
         self.assertIn("APP_DEBUG=true", out["target"])
-        self.assertIn("kept target: environment value preserved", out["result"].stdout)
+        self.assertIn("KEPT TARGET VALUES", out["result"].stdout)
+        self.assertIn("APP_DEBUG kept target true (source: false)", out["result"].stdout)
 
     def test_review_required_not_changed_without_force(self):
         target = """APP_NAME=Application
@@ -231,8 +232,11 @@ QUEUE_CONNECTION=sync
 LOG_LEVEL=error
 """
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply", extra_args=["--allow-managed"])
-        self.assertEqual(out["result"].returncode, 3)
+        self.assertEqual(out["result"].returncode, 0)
         self.assertIn("QUEUE_CONNECTION=sync", out["target"])
+        self.assertIn("QUEUE_CONNECTION kept target sync (source: database)", out["result"].stdout)
+        self.assertIn("REVIEW REQUIRED:\n(none)", out["result"].stdout)
+        self.assertIn("Manual review required: 0", out["result"].stdout)
 
     def test_review_required_existing_value_is_preserved_with_force(self):
         target = """APP_NAME=Application
@@ -250,9 +254,10 @@ LOG_LEVEL=error
             mode="apply",
             extra_args=["--allow-managed", "--force-reviewed", "QUEUE_CONNECTION"],
         )
-        self.assertEqual(out["result"].returncode, 3)
+        self.assertEqual(out["result"].returncode, 0)
         self.assertIn("QUEUE_CONNECTION=sync", out["target"])
-        self.assertIn("QUEUE_CONNECTION: sync -> database (kept target value)", out["result"].stdout)
+        self.assertIn("QUEUE_CONNECTION kept target sync (source: database)", out["result"].stdout)
+        self.assertIn("REVIEW REQUIRED:\n(none)", out["result"].stdout)
 
     def test_secret_is_masked_in_report(self):
         target = """APP_NAME=Application
@@ -319,6 +324,20 @@ LOG_LEVEL=error
         out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="report")
         self.assertIn("REQUIRED MISSING", out["result"].stdout)
         self.assertIn("APP_URL is missing or empty", out["result"].stdout)
+
+    def test_required_empty_is_filled_on_apply(self):
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply")
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("APP_URL=https://app.example.com", out["target"])
+        self.assertIn("REQUIRED MISSING:\n(none)", out["result"].stdout)
 
     def test_invalid_allowed_value_generates_validation_error(self):
         target = """APP_NAME=Application
@@ -420,6 +439,20 @@ OPTIONAL_FLAG=false
         out = self.run_sync(source, target, BASE_RULES, mode="report")
         self.assertNotIn("OPTIONAL_FLAG exists in target but not in source", out["result"].stdout)
 
+    def test_commented_optional_source_key_is_not_added_when_missing(self):
+        source = BASE_SOURCE + "#OPTIONAL_FLAG=true\n"
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=real-secret
+QUEUE_CONNECTION=database
+LOG_LEVEL=error
+"""
+        out = self.run_sync(source, target, BASE_RULES, mode="apply")
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertNotIn("OPTIONAL_FLAG=true", out["target"])
+
     def test_commented_target_key_does_not_satisfy_required_active_key(self):
         target = """APP_NAME=Application
 APP_ENV=production
@@ -458,6 +491,49 @@ LOG_LEVEL=error
         self.assertLess(out["target"].index("APP_ENV=production"), out["target"].index("APP_DEBUG=false"))
         self.assertLess(out["target"].index("APP_DEBUG=false"), out["target"].index("APP_URL=https://app.example.com"))
 
+    def test_missing_review_required_key_is_added_without_force(self):
+        target = """APP_NAME=Application
+APP_ENV=production
+APP_DEBUG=false
+APP_URL=https://app.example.com
+DB_PASSWORD=real-secret
+LOG_LEVEL=error
+"""
+        out = self.run_sync(BASE_SOURCE, target, BASE_RULES, mode="apply")
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("QUEUE_CONNECTION=database", out["target"])
+        self.assertIn("+ QUEUE_CONNECTION=database", out["result"].stdout)
+        self.assertNotIn("review_required needs --force-reviewed", out["result"].stdout)
+        self.assertIn("Manual review required: 0", out["result"].stdout)
+
+    def test_commented_review_required_key_is_added_when_missing(self):
+        source = """APP_NAME=Application
+#QUEUE_CONNECTION=database
+"""
+        rules = """version: 1
+keys:
+  APP_NAME:
+    description: "App name"
+    required: true
+    policy: managed
+    auto_apply: true
+
+  QUEUE_CONNECTION:
+    description: "Queue connection"
+    required: false
+    policy: review_required
+    default: database
+    reason: "Can require worker/table/redis"
+    impact: "Jobs can fail"
+    validation:
+      - "Verify worker"
+"""
+        target = "APP_NAME=Application\n"
+        out = self.run_sync(source, target, rules, mode="apply")
+        self.assertEqual(out["result"].returncode, 0)
+        self.assertIn("QUEUE_CONNECTION=database", out["target"])
+        self.assertNotIn("review_required needs --force-reviewed", out["result"].stdout)
+
     def test_glpi_review_values_are_preserved_from_environment(self):
         source = """GLPI_VERSION=11.0.0
 NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=192.0.2.10
@@ -492,14 +568,16 @@ keys:
             mode="apply",
             extra_args=["--force-reviewed", "GLPI_VERSION,NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS"],
         )
-        self.assertEqual(out["result"].returncode, 3)
+        self.assertEqual(out["result"].returncode, 0)
         self.assertIn("GLPI_VERSION=11.0.7", out["target"])
         self.assertIn("NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS=10.161.75.95;10.161.75.97", out["target"])
-        self.assertIn("GLPI_VERSION: 11.0.7 -> 11.0.0 (kept target value)", out["result"].stdout)
+        self.assertIn("GLPI_VERSION kept target 11.0.7 (source: 11.0.0)", out["result"].stdout)
         self.assertIn(
-            "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS: 10.161.75.95;10.161.75.97 -> 192.0.2.10 (kept target value)",
+            "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS kept target 10.161.75.95;10.161.75.97 (source: 192.0.2.10)",
             out["result"].stdout,
         )
+        self.assertIn("REVIEW REQUIRED:\n(none)", out["result"].stdout)
+        self.assertIn("Manual review required: 0", out["result"].stdout)
 
     def test_reconcile_interactive_adds_missing_chooses_source_and_comments_extra(self):
         source = """APP_NAME=Application

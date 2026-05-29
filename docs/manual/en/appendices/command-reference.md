@@ -136,15 +136,14 @@ python3 scripts/env-sync.py \
   --mode report
 ```
 
-Apply only allowed changes:
+Apply contract corrections to the environment:
 
 ```bash
 python3 scripts/env-sync.py \
   --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
-  --mode apply \
-  --allow-managed
+  --mode apply
 ```
 
 Interactive reconcile (recommended after template changes):
@@ -165,17 +164,6 @@ Behavior in interactive reconcile:
 - For each divergent key, the script asks whether to keep source or target value.
 - Keys that exist only in target are commented (or removed with `--extra-action remove`).
 
-Force one reviewed key (explicit/manual operation):
-
-```bash
-python3 scripts/env-sync.py \
-  --source config/.env.example \
-  --target config/production.env \
-  --rules .env.sync.yml \
-  --mode apply \
-  --force-reviewed QUEUE_CONNECTION
-```
-
 Generate a report file:
 
 ```bash
@@ -190,9 +178,9 @@ python3 scripts/env-sync.py \
 Operational notes:
 
 - Default mode is `report` (no file changes).
+- `apply` adds missing keys, fills empty required keys, and removes real extras absent from the contract.
 - `apply` creates backup before any write (`.env-backups/` by default).
-- `protected` keys are preserved.
-- `review_required` keys are never changed unless explicitly listed in `--force-reviewed`.
+- Values already active in the environment take precedence over `.env.example` and appear under `KEPT TARGET VALUES`.
 - Secrets are masked in terminal and file reports.
 - The tool does not rename or replace your current real environment file naming model.
 

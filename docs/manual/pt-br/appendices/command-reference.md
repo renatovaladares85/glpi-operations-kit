@@ -136,15 +136,14 @@ python3 scripts/env-sync.py \
   --mode report
 ```
 
-Aplicar apenas alterações permitidas:
+Aplicar correções do contrato ao ambiente:
 
 ```bash
 python3 scripts/env-sync.py \
   --source config/.env.example \
   --target config/production.env \
   --rules .env.sync.yml \
-  --mode apply \
-  --allow-managed
+  --mode apply
 ```
 
 Reconciliação interativa (recomendado após mudança de template):
@@ -165,17 +164,6 @@ Comportamento da reconciliação interativa:
 - Para cada chave divergente, o script pergunta se mantém valor do source ou do target.
 - Chaves que existem só no target são comentadas (ou removidas com `--extra-action remove`).
 
-Forçar uma chave de revisão manual (operação explícita):
-
-```bash
-python3 scripts/env-sync.py \
-  --source config/.env.example \
-  --target config/production.env \
-  --rules .env.sync.yml \
-  --mode apply \
-  --force-reviewed QUEUE_CONNECTION
-```
-
 Gerar relatório em arquivo:
 
 ```bash
@@ -190,9 +178,9 @@ python3 scripts/env-sync.py \
 Notas operacionais:
 
 - O modo padrão é `report` (sem alteração de arquivo).
+- Em `apply`, o script adiciona chaves ausentes, preenche chaves obrigatórias vazias e remove extras reais ausentes do contrato.
 - Em `apply`, o script cria backup antes de qualquer escrita (`.env-backups/` por padrão).
-- Chaves `protected` são preservadas.
-- Chaves `review_required` não são alteradas sem listagem explícita em `--force-reviewed`.
+- Valores já ativos no ambiente têm precedência sobre o `.env.example` e aparecem em `KEPT TARGET VALUES`.
 - Segredos são mascarados no terminal e em relatórios.
 - A ferramenta não renomeia nem substitui a nomenclatura atual dos arquivos reais de ambiente.
 

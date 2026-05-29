@@ -12,17 +12,14 @@ config/*.env
 # Generated env-sync outputs
 .env.sync.generated.yml
 docs/env-sync-contract-report.md
+env-sync-contract-report.md
 
 # Python/runtime caches
 __pycache__/
 *.py[cod]
 *$py.class
+render_product_config.cpython-312.pyc
 
 # Temporary command artifacts
 *.retry
 *.tmp
-config/*.env
-!config/.env.example
-render_product_config.cpython-312.pyc
-env-sync-contract-report.md
-docs/env-sync-contract-report.md

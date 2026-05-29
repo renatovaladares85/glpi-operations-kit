@@ -326,6 +326,7 @@ class SyncPlan:
     mode: str
     added: list[dict[str, Any]]
     changed: list[dict[str, Any]]
+    kept_target_values: list[dict[str, Any]]
     preserved_protected: list[dict[str, Any]]
     review_required: list[dict[str, Any]]
     required_missing: list[dict[str, Any]]
@@ -390,12 +391,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-managed",
         action="store_true",
-        help="Allow managed missing keys with auto_apply=true to be added; existing target values are preserved.",
+        help="Compatibility flag; apply now adds missing non-deprecated keys and preserves existing target values.",
     )
     parser.add_argument(
         "--force-reviewed",
         default="",
-        help="Comma-separated review_required missing keys to force in apply mode; existing target values are preserved.",
+        help="Compatibility validation for review_required keys; existing target values are preserved.",
     )
     parser.add_argument("--write-report", default="", help="Optional report output file")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
@@ -1432,6 +1433,7 @@ def build_sync_plan(
     ambiguous: list[dict[str, Any]] = []
     added: list[dict[str, Any]] = []
     changed: list[dict[str, Any]] = []
+    kept_target_values: list[dict[str, Any]] = []
     preserved_protected: list[dict[str, Any]] = []
     review_required: list[dict[str, Any]] = []
     required_missing: list[dict[str, Any]] = []
@@ -1504,8 +1506,9 @@ def build_sync_plan(
 
         target_has_key = key in target.values
         target_value = target.values.get(key, "")
+        target_missing_or_empty = not target_has_key or (rule.required and target_value == "")
 
-        if rule.required and (not target_has_key or target_value == ""):
+        if rule.required and target_missing_or_empty:
             required_missing.append({"key": key})
 
         if target_has_key and rule.allowed_values and target_value not in rule.allowed_values and target_value != "":
@@ -1514,30 +1517,21 @@ def build_sync_plan(
                 f"{key} has invalid value in target: {mask_value(key, target_value, rule)} (allowed: {allowed})"
             )
 
-        if not target_has_key:
-            if add_missing:
+        if target_missing_or_empty:
+            should_consider_missing = key in source.values or rule.required or rule.policy == "review_required"
+            if add_missing and should_consider_missing:
                 new_value = choose_missing_value(key, source_value, rule)
                 should_apply = False
                 apply_reason = "report mode"
 
                 if mode == "apply":
-                    if rule.policy == "managed":
-                        if can_apply_managed(rule, allow_managed, rules.defaults):
-                            should_apply = True
-                            apply_reason = "managed policy allowed"
-                        else:
-                            apply_reason = "managed policy not allowed"
-                    elif rule.policy == "protected":
-                        should_apply = True
-                        apply_reason = "protected key added as missing"
-                    elif rule.policy == "review_required":
-                        if key in force_reviewed:
-                            should_apply = True
-                            apply_reason = "forced review_required key"
-                        else:
-                            apply_reason = "review_required needs --force-reviewed"
-                    elif rule.policy == "deprecated":
+                    if rule.policy == "deprecated":
                         apply_reason = "deprecated key is not auto-added"
+                    elif new_value == "":
+                        apply_reason = "missing key has no non-empty source/default value"
+                    else:
+                        should_apply = True
+                        apply_reason = "missing key added from source"
 
                 if rule.allowed_values and new_value not in ("", *rule.allowed_values):
                     allowed = ", ".join(rule.allowed_values)
@@ -1556,7 +1550,10 @@ def build_sync_plan(
                 )
 
                 if should_apply:
-                    additions.append((key, new_value))
+                    if target_has_key:
+                        updates[key] = new_value
+                    else:
+                        additions.append((key, new_value))
                     applied_changes += 1
             continue
 
@@ -1567,11 +1564,12 @@ def build_sync_plan(
             continue
 
         if rule.policy == "protected":
-            preserved_protected.append(
+            kept_target_values.append(
                 {
                     "key": key,
                     "current": target_value,
                     "incoming": source_value,
+                    "policy": rule.policy,
                 }
             )
             continue
@@ -1585,12 +1583,11 @@ def build_sync_plan(
                 )
                 reason = "invalid source value"
 
-            changed.append(
+            kept_target_values.append(
                 {
                     "key": key,
-                    "from": target_value,
-                    "to": source_value,
-                    "applied": False,
+                    "current": target_value,
+                    "incoming": source_value,
                     "reason": reason,
                     "policy": "managed",
                 }
@@ -1598,24 +1595,18 @@ def build_sync_plan(
             continue
 
         if rule.policy == "review_required":
-            forced = False
-
             if rule.allowed_values and source_value not in rule.allowed_values:
                 allowed = ", ".join(rule.allowed_values)
                 validation_errors.append(
                     f"{key} has invalid source value: {mask_value(key, source_value, rule)} (allowed: {allowed})"
                 )
 
-            review_required.append(
+            kept_target_values.append(
                 {
                     "key": key,
-                    "from": target_value,
-                    "to": source_value,
-                    "reason": rule.reason,
-                    "impact": rule.impact,
-                    "validation": rule.validation or [],
-                    "forced": forced,
-                    "kept": True,
+                    "current": target_value,
+                    "incoming": source_value,
+                    "policy": "review_required",
                 }
             )
             continue
@@ -1650,9 +1641,9 @@ def build_sync_plan(
             if rule and rule.policy == "deprecated":
                 deprecated.append({"key": key, "reason": "deprecated extra key in target"})
 
-    if additions:
-        added_keys = {key for key, _value in additions}
-        required_missing = [item for item in required_missing if item["key"] not in added_keys]
+    applied_missing_keys = {key for key, _value in additions} | set(updates.keys())
+    if applied_missing_keys:
+        required_missing = [item for item in required_missing if item["key"] not in applied_missing_keys]
 
     if verbose and not keys_to_process:
         validation_errors.append("No keys available to process after filters.")
@@ -1661,6 +1652,7 @@ def build_sync_plan(
         mode=mode,
         added=added,
         changed=changed,
+        kept_target_values=kept_target_values,
         preserved_protected=preserved_protected,
         review_required=review_required,
         required_missing=required_missing,
@@ -1822,6 +1814,9 @@ def apply_reconcile_interactive(
         chosen_keys = set(divergence_choices.keys())
         plan.preserved_protected = [item for item in plan.preserved_protected if item["key"] not in chosen_keys]
         plan.review_required = [item for item in plan.review_required if item["key"] not in chosen_keys]
+        plan.kept_target_values = [
+            item for item in plan.kept_target_values if item["key"] not in chosen_keys
+        ]
 
     if plan.extra_in_target:
         for item in plan.extra_in_target:
@@ -2055,6 +2050,13 @@ def render_report(
         for item in plan.changed
     ])
 
+    append_section(lines, "KEPT TARGET VALUES", [
+        f"= {item['key']} kept target "
+        f"{mask_value(item['key'], item['current'], rules.keys.get(item['key']))}"
+        f" (source: {mask_value(item['key'], item['incoming'], rules.keys.get(item['key']))})"
+        for item in plan.kept_target_values
+    ])
+
     append_section(lines, "PRESERVED / PROTECTED", [
         f"= {item['key']} kept"
         for item in plan.preserved_protected
@@ -2116,7 +2118,10 @@ def render_report(
     lines.append("")
     lines.append("BACKUP:")
     if plan.backup_path is None:
-        lines.append("Not created because mode is report or no changes were applied.")
+        if plan.mode == "report":
+            lines.append("Not created because mode is report.")
+        else:
+            lines.append("Not created because no changes were applied.")
     else:
         lines.append(str(plan.backup_path))
 
@@ -2126,6 +2131,7 @@ def render_report(
     lines.append(f"Applied changes: {plan.applied_changes}")
     lines.append(f"Added keys: {len(plan.added)}")
     lines.append(f"Changed keys: {len([item for item in plan.changed if item.get('applied')])}")
+    lines.append(f"Kept target values: {len(plan.kept_target_values)}")
     lines.append(f"Protected keys preserved: {len(plan.preserved_protected)}")
     lines.append(
         f"Manual review required: {len([item for item in plan.review_required if not item.get('forced')])}"
@@ -2181,6 +2187,7 @@ def has_differences(plan: SyncPlan) -> bool:
         [
             plan.added,
             plan.changed,
+            plan.kept_target_values,
             plan.preserved_protected,
             plan.review_required,
             plan.required_missing,
