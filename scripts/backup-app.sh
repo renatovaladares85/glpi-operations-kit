@@ -964,7 +964,7 @@ check_restore_app_directory_type_conflicts() {
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     path="/$path"
-    if [[ -e "$path" && ! -d "$path" ]]; then
+    if [[ ( -e "$path" || -L "$path" ) && ! -d "$path" ]]; then
       printf '%s\n' "$path" >> "$conflicts_file"
     fi
   done < "$required_dirs_file"
