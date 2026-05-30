@@ -89,9 +89,10 @@ Parâmetros comuns:
   --db-host <host|socket>    Host/socket do banco
   --db-port <port>           Porta do banco
   --db-user <user>           Usuário do banco
-  --db-password <password>   Senha do banco
+  --db-password <password>   Senha do banco (se omitida, solicita em runtime)
   --db-name <name>           Nome da base GLPI
   --passphrase-file <path>   Arquivo com passphrase para criptografia/descriptografia
+                             (se omitido com --encrypt ou .enc, solicita em runtime)
   -h, --help                 Exibe esta ajuda
 
 Opções de backup:
@@ -522,6 +523,18 @@ resolve_db_credentials_for_backup() {
 
   [[ -n "$DB_USER" ]] || die "Usuário DB não identificado. Informe --db-user."
   [[ -n "$DB_NAME" ]] || die "Nome da base DB não identificado. Informe --db-name."
+
+  if [[ -z "$DB_PASSWORD" ]]; then
+    if [[ ! -t 0 ]]; then
+      die "Senha do usuário DB não informada para backup. Use --db-password ou execute interativamente."
+    fi
+    if ! read -r -s -p "Senha do usuário DB para backup (${DB_USER}): " DB_PASSWORD; then
+      echo
+      die "Falha ao ler senha do usuário DB para backup."
+    fi
+    echo
+    [[ -n "$DB_PASSWORD" ]] || die "Senha do usuário DB para backup não pode ficar vazia."
+  fi
 }
 
 ensure_db_restore_params_explicit() {
@@ -530,8 +543,15 @@ ensure_db_restore_params_explicit() {
   [[ -n "$DB_NAME" ]] || die "No restore DB informe --db-name."
 
   if [[ -z "$DB_PASSWORD" ]]; then
-    read -r -s -p "Senha do usuário DB para restore (${DB_USER}): " DB_PASSWORD
+    if [[ ! -t 0 ]]; then
+      die "Senha do usuário DB não informada para restore. Use --db-password ou execute interativamente."
+    fi
+    if ! read -r -s -p "Senha do usuário DB para restore (${DB_USER}): " DB_PASSWORD; then
+      echo
+      die "Falha ao ler senha do usuário DB para restore."
+    fi
     echo
+    [[ -n "$DB_PASSWORD" ]] || die "Senha do usuário DB para restore não pode ficar vazia."
   fi
 
   if [[ ! "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]]; then
@@ -854,7 +874,7 @@ manifest_get() {
   local key="$1"
   local file="$2"
   [[ -f "$file" ]] || return 0
-  awk -F'=' -v k="$key" '$1==k { $1=""; sub(/^=/,""); print; exit }' "$file"
+  awk -v k="$key" '$0 ~ "^" k "=" { sub(/^[^=]*=/, ""); sub(/\r$/, ""); print; exit }' "$file"
 }
 
 verify_payload_checksums() {

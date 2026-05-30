@@ -300,11 +300,19 @@ A configuração SSO/SAML/OIDC é manual no GLPI e no IdP. O contrato atual da C
 sudo ./scripts/backup-app.sh backup --target all --encrypt
 sudo ./scripts/backup-app.sh backup --target app --exclude-app "var/_cache,var/_sessions"
 sudo ./scripts/backup-app.sh backup --target db --exclude-db-tables-data "glpi_logs,glpi_sessions"
+sudo ./scripts/backup-app.sh backup --target db --db-host 10.0.0.10 --db-port 3306 --db-user nehemiah --db-name glpi --db-password '<senha>'
+sudo ./scripts/backup-app.sh backup --target all --encrypt --passphrase-file /root/.secrets/glpi-backup-passphrase.txt
 
 sudo ./scripts/backup-app.sh restore --target app --artifact /tmp/glpi-backups/<arquivo>.tar.gz --force
 sudo ./scripts/backup-app.sh restore --target db --artifact /tmp/glpi-backups/<arquivo>.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 sudo ./scripts/backup-app.sh restore --target all --artifact /tmp/glpi-backups/<arquivo>.tar.gz --force --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 ```
+
+Notas operacionais:
+
+- Se `--db-password` não for informado no `backup` ou `restore` de DB, o script solicita a senha de forma interativa.
+- Se `--encrypt` for usado sem `--passphrase-file`, o script solicita a passphrase de criptografia em runtime.
+- No restore de artefato `.enc`, a passphrase também é solicitada (ou lida de `--passphrase-file`).
 
 ## Fallback manual com Ansible
 

@@ -300,11 +300,19 @@ SSO/SAML/OIDC setup is performed manually in GLPI and IdP. There is no `auth` do
 sudo ./scripts/backup-app.sh backup --target all --encrypt
 sudo ./scripts/backup-app.sh backup --target app --exclude-app "var/_cache,var/_sessions"
 sudo ./scripts/backup-app.sh backup --target db --exclude-db-tables-data "glpi_logs,glpi_sessions"
+sudo ./scripts/backup-app.sh backup --target db --db-host 10.0.0.10 --db-port 3306 --db-user nehemiah --db-name glpi --db-password '<password>'
+sudo ./scripts/backup-app.sh backup --target all --encrypt --passphrase-file /root/.secrets/glpi-backup-passphrase.txt
 
 sudo ./scripts/backup-app.sh restore --target app --artifact /tmp/glpi-backups/<file>.tar.gz --force
 sudo ./scripts/backup-app.sh restore --target db --artifact /tmp/glpi-backups/<file>.tar.gz --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 sudo ./scripts/backup-app.sh restore --target all --artifact /tmp/glpi-backups/<file>.tar.gz --force --db-host 127.0.0.1 --db-user root --db-name glpi --db-recreate
 ```
+
+Operational notes:
+
+- If `--db-password` is omitted on DB `backup` or `restore`, the script prompts for the password interactively.
+- If `--encrypt` is used without `--passphrase-file`, the script prompts for encryption passphrase at runtime.
+- For `.enc` restore, passphrase is also prompted (or read from `--passphrase-file`).
 
 ## Manual Ansible fallback
 
