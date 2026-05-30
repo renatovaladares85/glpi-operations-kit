@@ -923,15 +923,74 @@ check_restore_app_collisions() {
   fi
 }
 
+check_restore_app_directory_type_conflicts() {
+  [[ -f "$APP_PAYLOAD_PATH" ]] || return 0
+
+  local required_dirs_file="$WORKDIR/app-required-dirs.txt"
+  local conflicts_file="$WORKDIR/app-dir-type-conflicts.txt"
+  : > "$required_dirs_file"
+  : > "$conflicts_file"
+
+  local entry normalized path parent current
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    normalized="${entry#./}"
+    normalized="${normalized%/}"
+    [[ -n "$normalized" ]] || continue
+
+    if [[ "$entry" == */ ]]; then
+      printf '%s\n' "$normalized" >> "$required_dirs_file"
+      continue
+    fi
+
+    path="$normalized"
+    parent="${path%/*}"
+    if [[ "$parent" == "$path" ]]; then
+      continue
+    fi
+    current="$parent"
+    while [[ -n "$current" && "$current" != "." ]]; do
+      printf '%s\n' "$current" >> "$required_dirs_file"
+      if [[ "$current" == */* ]]; then
+        current="${current%/*}"
+      else
+        break
+      fi
+    done
+  done < <(tar -tf "$APP_PAYLOAD_PATH")
+
+  sort -u "$required_dirs_file" -o "$required_dirs_file"
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    path="/$path"
+    if [[ -e "$path" && ! -d "$path" ]]; then
+      printf '%s\n' "$path" >> "$conflicts_file"
+    fi
+  done < "$required_dirs_file"
+
+  if [[ -s "$conflicts_file" ]]; then
+    warn "Restore app detectou conflito de tipo de caminho (arquivo onde deveria existir diretório)."
+    sed 's/^/  - /' "$conflicts_file" >&2
+    die "Corrija os caminhos acima (mover/remover arquivo conflitante) e execute o restore novamente."
+  fi
+}
+
 restore_app_payload() {
   [[ -f "$APP_PAYLOAD_PATH" ]] || die "Payload de app ausente no artefato."
+
+  check_restore_app_directory_type_conflicts
 
   if [[ "$FORCE_RESTORE" != "1" ]]; then
     check_restore_app_collisions
   fi
 
   log "Restaurando payload de app em caminhos originais..."
-  tar -xpf "$APP_PAYLOAD_PATH" -C /
+  local -a tar_restore_args=()
+  if tar --help 2>/dev/null | grep -q -- '--warning'; then
+    tar_restore_args+=(--warning=no-timestamp)
+  fi
+  tar "${tar_restore_args[@]}" -xpf "$APP_PAYLOAD_PATH" -C /
   log "Restore de app concluído."
 }
 
