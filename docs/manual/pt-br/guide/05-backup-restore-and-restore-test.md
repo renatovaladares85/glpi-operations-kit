@@ -55,7 +55,7 @@ No restore de `db` ou `all`, `--db-host`, `--db-user` e `--db-name` são exigido
 ### Controles importantes
 
 - `--artifact`: arquivo de entrada/saída do artefato.
-- `--output-dir` e `--artifact-name`: controlam onde e como salvar o backup.
+- `--output-dir` e `--artifact-name`: controlam onde e como salvar o backup (padrão: `/tmp/glpi-backups`).
 - `--exclude-app`: exclui áreas do app por CSV (`core/`, `config/`, `var/`, `log/`, `plugins/`, `marketplace/` ou caminho absoluto).
 - `--exclude-db-tables-data`: exclui somente dados de tabelas específicas no dump.
 - `--encrypt` e `--passphrase-file`: criptografam o artefato final.
@@ -71,7 +71,7 @@ Atenção: `--force` pode sobrescrever conteúdo existente no restore de app.
 Backup completo criptografado:
 
 ```bash
-sudo ./scripts/backup-app.sh backup --target all --output-dir /var/backups/glpi --encrypt
+sudo ./scripts/backup-app.sh backup --target all --output-dir /tmp/glpi-backups --encrypt
 ```
 
 Backup apenas de banco com parâmetros explícitos:
@@ -83,14 +83,20 @@ sudo ./scripts/backup-app.sh backup --target db --db-host 127.0.0.1 --db-port 33
 Restore de banco recriando a base:
 
 ```bash
-sudo ./scripts/backup-app.sh restore --target db --artifact /var/backups/glpi/glpi-transfer.tar.gz --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target db --artifact /tmp/glpi-backups/glpi-transfer.tar.gz --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
 ```
 
 Restore completo (app + db):
 
 ```bash
-sudo ./scripts/backup-app.sh restore --target all --artifact /var/backups/glpi/glpi-transfer.tar.gz --force --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target all --artifact /tmp/glpi-backups/glpi-transfer.tar.gz --force --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
 ```
+
+Notas rápidas de execução:
+
+- Se `--db-password` não for informado em backup/restore de DB, o script solicita a senha via prompt seguro.
+- Se `--encrypt` for usado sem `--passphrase-file`, o script solicita a passphrase em runtime.
+- No restore de artefato `.enc`, a passphrase também é solicitada (ou lida de `--passphrase-file`).
 
 ## Validação pós-restore
 

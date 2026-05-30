@@ -55,7 +55,7 @@ For `restore` with `db` or `all`, `--db-host`, `--db-user`, and `--db-name` are 
 ### Important controls
 
 - `--artifact`: input/output artifact path.
-- `--output-dir` and `--artifact-name`: control backup destination and file name.
+- `--output-dir` and `--artifact-name`: control backup destination and file name (default: `/tmp/glpi-backups`).
 - `--exclude-app`: excludes app areas as CSV (`core/`, `config/`, `var/`, `log/`, `plugins/`, `marketplace/`, or absolute path).
 - `--exclude-db-tables-data`: excludes only data from selected tables in dump.
 - `--encrypt` and `--passphrase-file`: encrypt final artifact.
@@ -71,7 +71,7 @@ Warning: `--force` can overwrite existing content during app restore.
 Encrypted full backup:
 
 ```bash
-sudo ./scripts/backup-app.sh backup --target all --output-dir /var/backups/glpi --encrypt
+sudo ./scripts/backup-app.sh backup --target all --output-dir /tmp/glpi-backups --encrypt
 ```
 
 Database-only backup with explicit parameters:
@@ -83,14 +83,20 @@ sudo ./scripts/backup-app.sh backup --target db --db-host 127.0.0.1 --db-port 33
 Database restore with recreate:
 
 ```bash
-sudo ./scripts/backup-app.sh restore --target db --artifact /var/backups/glpi/glpi-transfer.tar.gz --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target db --artifact /tmp/glpi-backups/glpi-transfer.tar.gz --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
 ```
 
 Full restore (app + db):
 
 ```bash
-sudo ./scripts/backup-app.sh restore --target all --artifact /var/backups/glpi/glpi-transfer.tar.gz --force --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
+sudo ./scripts/backup-app.sh restore --target all --artifact /tmp/glpi-backups/glpi-transfer.tar.gz --force --db-host 127.0.0.1 --db-port 3306 --db-user glpi_restore --db-name glpi --db-recreate
 ```
+
+Quick runtime notes:
+
+- If `--db-password` is omitted on DB backup/restore, the script prompts for password in a secure prompt.
+- If `--encrypt` is used without `--passphrase-file`, the script prompts for passphrase at runtime.
+- For `.enc` restore, passphrase is also prompted (or read from `--passphrase-file`).
 
 ## Post-restore validation
 

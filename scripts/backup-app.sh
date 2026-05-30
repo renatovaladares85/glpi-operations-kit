@@ -44,6 +44,8 @@ GLPI_VAR_DIR=""
 GLPI_LOG_DIR=""
 GLPI_MARKETPLACE_DIR=""
 GLPI_CONFIG_DB_FILE=""
+GLPI_CORE_DATA_DIR=""
+GLPI_CORE_SYMLINK_PATH=""
 
 APP_PAYLOAD_PATH=""
 DB_DUMP_PATH=""
@@ -56,6 +58,7 @@ RESTORE_NOTES_PATH=""
 APP_PAYLOAD_SHA256=""
 DB_DUMP_SHA256=""
 FINAL_ARTIFACT_SHA256=""
+APP_RESTORE_MEMBER_FILTER_FILE=""
 
 REQUIRE_APP="0"
 REQUIRE_DB="0"
@@ -387,6 +390,17 @@ resolve_glpi_layout() {
   GLPI_LOG_DIR="$log_dir"
   GLPI_MARKETPLACE_DIR="$marketplace_dir"
   GLPI_CONFIG_DB_FILE="$config_db_file"
+
+  GLPI_CORE_DATA_DIR="$GLPI_DIR"
+  GLPI_CORE_SYMLINK_PATH=""
+  if [[ -L "$GLPI_DIR" ]]; then
+    local resolved_glpi_dir
+    resolved_glpi_dir="$(readlink -f "$GLPI_DIR" 2>/dev/null || true)"
+    if [[ -n "$resolved_glpi_dir" && -d "$resolved_glpi_dir" ]]; then
+      GLPI_CORE_DATA_DIR="${resolved_glpi_dir%/}"
+      GLPI_CORE_SYMLINK_PATH="$GLPI_DIR"
+    fi
+  fi
 }
 
 add_path_include() {
@@ -458,16 +472,16 @@ resolve_app_exclusion() {
   fi
 
   case "$prefix" in
-    core) base="$GLPI_DIR" ;;
+    core) base="${GLPI_CORE_DATA_DIR:-$GLPI_DIR}" ;;
     config) base="$GLPI_CONFIG_DIR" ;;
     var) base="$GLPI_VAR_DIR" ;;
     log) base="$GLPI_LOG_DIR" ;;
-    plugins) base="$GLPI_DIR/plugins" ;;
+    plugins) base="${GLPI_CORE_DATA_DIR:-$GLPI_DIR}/plugins" ;;
     marketplace)
       if [[ -n "$GLPI_MARKETPLACE_DIR" ]]; then
         base="$GLPI_MARKETPLACE_DIR"
       else
-        base="$GLPI_DIR/marketplace"
+        base="${GLPI_CORE_DATA_DIR:-$GLPI_DIR}/marketplace"
       fi
       ;;
     *)
@@ -610,6 +624,8 @@ write_manifest() {
     echo "mode=backup"
     echo "target=$TARGET"
     echo "glpi_dir=$GLPI_DIR"
+    echo "glpi_core_data_dir=$GLPI_CORE_DATA_DIR"
+    echo "glpi_core_symlink_path=$GLPI_CORE_SYMLINK_PATH"
     echo "config_dir=$GLPI_CONFIG_DIR"
     echo "var_dir=$GLPI_VAR_DIR"
     echo "log_dir=$GLPI_LOG_DIR"
@@ -651,12 +667,17 @@ create_app_payload() {
   local include_file="$WORKDIR/app-include.null"
   : > "$include_file"
 
-  add_path_include "$include_file" "$GLPI_DIR"
+  # Quando GLPI_DIR é symlink (ex.: /usr/share/glpi -> /usr/share/glpi-11.0.7),
+  # arquivamos o diretório real para evitar falha de restore com caminhos filhos.
+  add_path_include "$include_file" "$GLPI_CORE_DATA_DIR"
+  if [[ -n "$GLPI_CORE_SYMLINK_PATH" ]]; then
+    add_path_include "$include_file" "$GLPI_CORE_SYMLINK_PATH"
+  fi
   add_path_include "$include_file" "$GLPI_CONFIG_DIR"
   add_path_include "$include_file" "$GLPI_VAR_DIR"
   add_path_include "$include_file" "$GLPI_LOG_DIR"
-  add_path_include "$include_file" "$GLPI_DIR/plugins"
-  add_path_include "$include_file" "$GLPI_DIR/marketplace"
+  add_path_include "$include_file" "$GLPI_CORE_DATA_DIR/plugins"
+  add_path_include "$include_file" "$GLPI_CORE_DATA_DIR/marketplace"
 
   if [[ -n "$GLPI_MARKETPLACE_DIR" ]]; then
     add_path_include "$include_file" "$GLPI_MARKETPLACE_DIR"
@@ -897,6 +918,99 @@ verify_payload_checksums() {
   fi
 }
 
+prepare_legacy_symlink_compatible_member_filter() {
+  [[ -f "$APP_PAYLOAD_PATH" ]] || return 0
+  APP_RESTORE_MEMBER_FILTER_FILE=""
+
+  local entries_file symlink_entries_file skip_symlink_members_file filtered_members_file member
+  entries_file="$WORKDIR/app-payload-entries.txt"
+  symlink_entries_file="$WORKDIR/app-payload-symlink-members.txt"
+  skip_symlink_members_file="$WORKDIR/app-payload-skip-symlink-members.txt"
+  filtered_members_file="$WORKDIR/app-payload-members-filtered.txt"
+
+  tar -tf "$APP_PAYLOAD_PATH" > "$entries_file"
+  : > "$symlink_entries_file"
+  : > "$skip_symlink_members_file"
+
+  tar -tvf "$APP_PAYLOAD_PATH" | awk '
+    $1 ~ /^l/ {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "->" && i > 6) {
+          member = $6
+          for (j = 7; j < i; j++) {
+            member = member " " $j
+          }
+          print member
+          break
+        }
+      }
+    }
+  ' > "$symlink_entries_file"
+
+  while IFS= read -r member; do
+    [[ -n "$member" ]] || continue
+    if [[ -L "/$member" && -d "/$member" ]]; then
+      if awk -v p="${member}/" 'index($0, p) == 1 { found=1; exit } END { exit(found ? 0 : 1) }' "$entries_file"; then
+        printf '%s\n' "$member" >> "$skip_symlink_members_file"
+      fi
+    fi
+  done < "$symlink_entries_file"
+
+  if [[ -s "$skip_symlink_members_file" ]]; then
+    warn "Aplicando compatibilidade de restore para payload legado com symlink + subcaminhos."
+    while IFS= read -r member; do
+      [[ -n "$member" ]] || continue
+      warn "  - ignorando entrada de symlink conflitante no payload: $member"
+    done < "$skip_symlink_members_file"
+
+    awk '
+      FNR == NR {
+        skip[$0] = 1
+        next
+      }
+      {
+        entries[++n] = $0
+        if ($0 ~ /\/$/) {
+          dirs[$0] = 1
+        }
+      }
+      END {
+        for (i = 1; i <= n; i++) {
+          e = entries[i]
+          if (e in skip) {
+            continue
+          }
+          if (e ~ /\/$/) {
+            print e
+            continue
+          }
+          p = e
+          redundant = 0
+          while (p ~ /\//) {
+            sub(/\/[^\/]*$/, "", p)
+            if (p == "") {
+              break
+            }
+            if ((p "/") in dirs) {
+              redundant = 1
+              break
+            }
+          }
+          if (!redundant) {
+            print e
+          }
+        }
+      }
+    ' "$skip_symlink_members_file" "$entries_file" > "$filtered_members_file"
+
+    if [[ ! -s "$filtered_members_file" ]]; then
+      die "Falha ao preparar lista de membros do payload para modo compatível de restore."
+    fi
+
+    APP_RESTORE_MEMBER_FILTER_FILE="$filtered_members_file"
+  fi
+}
+
 check_restore_app_collisions() {
   [[ -f "$APP_PATHS_FILE" ]] || return 0
 
@@ -979,6 +1093,7 @@ check_restore_app_directory_type_conflicts() {
 restore_app_payload() {
   [[ -f "$APP_PAYLOAD_PATH" ]] || die "Payload de app ausente no artefato."
 
+  prepare_legacy_symlink_compatible_member_filter
   check_restore_app_directory_type_conflicts
 
   if [[ "$FORCE_RESTORE" != "1" ]]; then
@@ -990,7 +1105,17 @@ restore_app_payload() {
   if tar --help 2>/dev/null | grep -q -- '--warning'; then
     tar_restore_args+=(--warning=no-timestamp)
   fi
-  tar "${tar_restore_args[@]}" -xpf "$APP_PAYLOAD_PATH" -C /
+  if tar --help 2>/dev/null | grep -q -- '--keep-directory-symlink'; then
+    tar_restore_args+=(--keep-directory-symlink)
+  fi
+  if [[ -n "$APP_RESTORE_MEMBER_FILTER_FILE" ]]; then
+    if tar --help 2>/dev/null | grep -q -- '--verbatim-files-from'; then
+      tar_restore_args+=(--verbatim-files-from)
+    fi
+    tar "${tar_restore_args[@]}" -xpf "$APP_PAYLOAD_PATH" -C / --files-from "$APP_RESTORE_MEMBER_FILTER_FILE"
+  else
+    tar "${tar_restore_args[@]}" -xpf "$APP_PAYLOAD_PATH" -C /
+  fi
   log "Restore de app concluído."
 }
 
