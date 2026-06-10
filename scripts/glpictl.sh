@@ -18,7 +18,7 @@ TARGET="${4:-all}"
 SCOPE="${5:-}"
 
 if [[ -z "$ENVIRONMENT" || -z "$DOMAIN" || -z "$ACTION" ]]; then
-  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit> <action> [target] [scope]" >&2
+  echo "Usage: ./scripts/glpictl.sh <environment> <deploy|certify|promote|tls|ops|audit|email> <action> [target] [scope]" >&2
   echo "Execution contract: GLPI_ENVIRONMENT, GLPI_EXECUTION_MODE=local|ssh, GLPI_HOST_ROLE=app|db|all, SECURITY_MODE=secure|permissive" >&2
   exit 1
 fi
@@ -29,9 +29,9 @@ if [[ ! "$ENVIRONMENT" =~ ^[a-zA-Z0-9._-]+$ ]]; then
 fi
 
 case "$DOMAIN" in
-  deploy|certify|promote|tls|ops|audit) ;;
+  deploy|certify|promote|tls|ops|audit|email) ;;
   *)
-    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit)" >&2
+    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit|email)" >&2
     exit 1
     ;;
 esac
@@ -43,6 +43,11 @@ PUBLIC_RUNTIME_PATH="$(runtime_public_path "$ENVIRONMENT")"
 OVERRIDE_RUNTIME_PATH="$(runtime_override_path "$ENVIRONMENT")"
 SECRET_PATH="$(runtime_secret_path "$ENVIRONMENT")"
 CONFIG_PATH="$(config_file_path "$ENVIRONMENT")"
+EMAIL_RUNTIME_DIR="$RUNTIME_DIR/email"
+EMAIL_AUTH_DIR="$EMAIL_RUNTIME_DIR/auth"
+EMAIL_RUNTIME_PATH="$EMAIL_RUNTIME_DIR/mailpit.runtime.yml"
+EMAIL_UI_AUTH_FILE="$EMAIL_AUTH_DIR/ui.htpasswd"
+EMAIL_SMTP_AUTH_FILE="$EMAIL_AUTH_DIR/smtp.htpasswd"
 PROMOTION_GATE_PATH="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 DEPLOY_SEQUENCE_PATH="$(runtime_state_dir "$ENVIRONMENT")/deploy-sequence.yml"
 OPERATION_ID="glpictl-$(date +%Y%m%d-%H%M%S)-${DOMAIN}-${ACTION}-${TARGET}"
@@ -473,6 +478,7 @@ domain_action_requires_remote_app_snapshot() {
         return 0
       fi
       ;;
+    email/install|email/rollback) return 0 ;;
   esac
   return 1
 }
@@ -1295,6 +1301,7 @@ is_mutating_operation() {
     tls/check|tls/prepare|tls/apply|tls/post-check|tls/rollback|tls/disable|tls/self-signed|tls/install-provided|tls/reload|\
     promote/check|promote/prepare|promote/apply|promote/post-check|promote/rollback|promote/base|promote/app|promote/db|promote/monitoring|promote/backup|promote/all|\
     ops/check|ops/prepare|ops/rollback|ops/users|ops/cert|ops/audit|ops/resume|ops/timezone|\
+    email/check|email/prepare|email/install|email/post-check|email/rollback|\
     audit/check|audit/prepare|audit/rollback) return 0 ;;
     *) return 1 ;;
   esac
@@ -1627,17 +1634,21 @@ run_managed_admin_sql() {
 
 ensure_managed_db_schema_and_user() {
   local db_name_sql user_sql host_sql password_sql
+  local application_grants
   local provision_sql verify_sql
 
   db_name_sql="$(sql_escape_identifier "$MANAGED_DB_NAME")"
   user_sql="$(sql_escape_literal "$MANAGED_DB_USER")"
   host_sql="$(sql_escape_literal "$MANAGED_DB_GRANT_HOST")"
   password_sql="$(sql_escape_literal "$MANAGED_DB_PASSWORD")"
+  application_grants="SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES, CREATE VIEW, SHOW VIEW, TRIGGER, REFERENCES"
 
   write_step "Ensuring managed DB schema/user/grants for application"
   echo "Managed DB provisioning target: database=${MANAGED_DB_NAME} user=${MANAGED_DB_USER} host=${MANAGED_DB_GRANT_HOST}"
+  echo "Managed DB admin users root/admin are used only to provision schema/user/grants."
+  echo "Application grant scope: ${application_grants} ON ${MANAGED_DB_NAME}.*"
 
-  provision_sql="CREATE DATABASE IF NOT EXISTS \`${db_name_sql}\`; CREATE USER IF NOT EXISTS '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; ALTER USER '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; GRANT ALL PRIVILEGES ON \`${db_name_sql}\`.* TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
+  provision_sql="CREATE DATABASE IF NOT EXISTS \`${db_name_sql}\`; CREATE USER IF NOT EXISTS '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; ALTER USER '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; REVOKE ALL PRIVILEGES, GRANT OPTION FROM '${user_sql}'@'${host_sql}'; GRANT ${application_grants} ON \`${db_name_sql}\`.* TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
   if ! run_managed_admin_sql "provision" "$provision_sql"; then
     echo "Managed DB provisioning failed: unable to create/alter database user and grant permissions." >&2
     return 1
@@ -2028,6 +2039,158 @@ ensure_runtime_inputs_if_missing() {
     ssh_key_path="$(expand_home_path "$ssh_key_path")"
     enforce_ssh_private_key_permissions "$ssh_key_path"
   fi
+}
+
+email_read_value() {
+  local prompt="$1"
+  local reason="$2"
+  local target_path="$3"
+  local secret="${4:-false}"
+  local value=""
+  local input_device="/dev/stdin"
+
+  if [[ -r /dev/tty ]]; then
+    input_device="/dev/tty"
+  fi
+  while true; do
+    {
+      echo "$prompt"
+      echo "  Required because: $reason"
+      echo "  Will be written to: $target_path"
+    } >&2
+    if [[ "$secret" == "true" ]]; then
+      if [[ "$input_device" != "/dev/tty" ]]; then
+        echo "Interactive terminal is required to capture Mailpit secret input securely." >&2
+        return 1
+      fi
+      echo "  Waiting for secure input (hidden)..." >&2
+      read -r -s value <"$input_device"
+      printf '\n' >&2
+    else
+      read -r value <"$input_device"
+    fi
+    if [[ -z "${value// }" ]]; then
+      echo "This value is mandatory. Execution will not continue without it." >&2
+      continue
+    fi
+    printf '%s\n' "$value"
+    return 0
+  done
+}
+
+validate_mailpit_auth_username() {
+  local username="$1"
+  local normalized
+  normalized="${username,,}"
+  if [[ ! "$username" =~ ^[a-zA-Z0-9._-]{3,64}$ ]]; then
+    echo "Mailpit auth username must be 3-64 characters and use only letters, numbers, '.', '_' or '-'." >&2
+    return 1
+  fi
+  case "$normalized" in
+    admin|administrator|root|user|test|mailpit|glpi)
+      echo "Mailpit auth username '$username' is too common. Use a contextual non-obvious identifier." >&2
+      return 1
+      ;;
+  esac
+}
+
+write_mailpit_htpasswd_file() {
+  local output_path="$1"
+  local purpose="$2"
+  local username password hash
+
+  while true; do
+    username="$(email_read_value "Mailpit ${purpose} username" "Mailpit ${purpose} access must require explicit authentication." "$output_path")"
+    if validate_mailpit_auth_username "$username"; then
+      break
+    fi
+  done
+  password="$(email_read_value "Mailpit ${purpose} password" "Mailpit ${purpose} access must use a strong secret." "$output_path" "true")"
+  hash="$(printf '%s' "$password" | openssl passwd -apr1 -stdin)"
+  ensure_directory "$(dirname "$output_path")"
+  printf '%s:%s\n' "$username" "$hash" >"$output_path"
+  chmod 600 "$output_path"
+}
+
+ensure_email_runtime_auth_files() {
+  local prompt_missing="${1:-false}"
+  ensure_directory "$EMAIL_AUTH_DIR"
+  chmod 700 "$EMAIL_RUNTIME_DIR" "$EMAIL_AUTH_DIR" >/dev/null 2>&1 || true
+  if [[ -s "$EMAIL_UI_AUTH_FILE" && -s "$EMAIL_SMTP_AUTH_FILE" ]]; then
+    return 0
+  fi
+  if [[ "$prompt_missing" != "true" ]]; then
+    echo "Missing Mailpit runtime auth files." >&2
+    echo "Run './scripts/glpictl.sh $ENVIRONMENT email prepare mailpit' before install." >&2
+    echo "Expected files:" >&2
+    echo "  $EMAIL_UI_AUTH_FILE" >&2
+    echo "  $EMAIL_SMTP_AUTH_FILE" >&2
+    exit 1
+  fi
+  assert_command "openssl"
+  [[ -s "$EMAIL_UI_AUTH_FILE" ]] || write_mailpit_htpasswd_file "$EMAIL_UI_AUTH_FILE" "UI"
+  [[ -s "$EMAIL_SMTP_AUTH_FILE" ]] || write_mailpit_htpasswd_file "$EMAIL_SMTP_AUTH_FILE" "SMTP"
+}
+
+email_mailpit_access_url() {
+  local tls_mode glpi_domain http_port https_port scheme port path url
+  tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+  glpi_domain="$(read_effective_runtime_value "glpi_domain" "unknown-host")"
+  http_port="$(read_effective_runtime_value "web_http_port" "80")"
+  https_port="$(read_effective_runtime_value "web_https_port" "443")"
+  path="$(read_effective_runtime_value "email_mailpit_ui_path" "/mailpit")"
+  if [[ "$tls_mode" == "none" ]]; then
+    scheme="http"
+    port="$http_port"
+  else
+    scheme="https"
+    port="$https_port"
+  fi
+  url="${scheme}://${glpi_domain}"
+  if [[ "$scheme" == "http" && "$port" != "80" ]]; then
+    url="${url}:${port}"
+  fi
+  if [[ "$scheme" == "https" && "$port" != "443" ]]; then
+    url="${url}:${port}"
+  fi
+  printf '%s%s\n' "$url" "$path"
+}
+
+write_email_runtime_vars() {
+  local action_name="$1"
+  local access_url
+  ensure_directory "$EMAIL_RUNTIME_DIR"
+  chmod 700 "$EMAIL_RUNTIME_DIR" >/dev/null 2>&1 || true
+  access_url="$(email_mailpit_access_url)"
+  save_yaml_map "$EMAIL_RUNTIME_PATH" \
+    email_mailpit_action "$action_name" \
+    email_mailpit_local_ui_auth_file "$EMAIL_UI_AUTH_FILE" \
+    email_mailpit_local_smtp_auth_file "$EMAIL_SMTP_AUTH_FILE" \
+    email_mailpit_access_url "$access_url"
+}
+
+require_mailpit_enabled() {
+  local enabled
+  enabled="$(read_effective_runtime_value "email_mailpit_enabled" "false")"
+  enabled="$(normalize_bool "$enabled" "false")"
+  if [[ "$enabled" != "true" ]]; then
+    echo "Mailpit email service is disabled for this environment." >&2
+    echo "Set EMAIL_MAILPIT_ENABLED=true in config/$ENVIRONMENT.env and rerun." >&2
+    exit 1
+  fi
+}
+
+print_email_mailpit_summary() {
+  local access_url smtp_host smtp_port
+  access_url="$(email_mailpit_access_url)"
+  smtp_host="$(read_effective_runtime_value "email_mailpit_smtp_bind_host" "127.0.0.1")"
+  smtp_port="$(read_effective_runtime_value "email_mailpit_smtp_port" "1025")"
+  echo "Mailpit access summary:"
+  echo "  ui_url: $access_url"
+  echo "  smtp_host: $smtp_host"
+  echo "  smtp_port: $smtp_port"
+  echo "  smtp_starttls_required: true"
+  echo "  glpi_smtp_auto_configured: false"
 }
 
 run_deploy() {
@@ -2551,6 +2714,85 @@ run_ops() {
   esac
 }
 
+run_email() {
+  local email_action="$ACTION"
+  local email_target="$TARGET"
+  local notes
+
+  [[ -z "${email_target// }" || "$email_target" == "all" ]] && email_target="mailpit"
+  if [[ "$email_target" != "mailpit" ]]; then
+    echo "Unsupported email target: $email_target (expected mailpit)" >&2
+    exit 1
+  fi
+  case "$email_action" in
+    check|prepare|install|post-check|rollback) ;;
+    *)
+      echo "Unsupported email action: $email_action (expected check|prepare|install|post-check|rollback)" >&2
+      exit 1
+      ;;
+  esac
+
+  create_domain_backup_snapshot "email" "$email_action"
+  resolve_policy_contract
+  ensure_runtime_inputs_if_missing "false"
+  case "$email_action" in
+    check|install|post-check) enforce_security_policy_contract ;;
+  esac
+
+  case "$email_action" in
+    check)
+      write_email_runtime_vars "check"
+      export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+      invoke_ansible_or_fail "email check mailpit" "$ENVIRONMENT" "email" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$EMAIL_RUNTIME_PATH"
+      notes="Email check completed for Mailpit. No mutable system changes were applied."
+      write_domain_state "email" "check" "completed" "$notes"
+      write_domain_evidence_simple "email" "check" "pass" "$notes"
+      print_email_mailpit_summary
+      ;;
+    prepare)
+      require_mailpit_enabled
+      ensure_email_runtime_auth_files "true"
+      write_email_runtime_vars "check"
+      notes="Email prepare completed for Mailpit. Runtime auth files were prepared under .runtime/${ENVIRONMENT}/email."
+      write_domain_state "email" "prepare" "completed" "$notes"
+      write_domain_evidence_simple "email" "prepare" "pass" "$notes"
+      echo "Mailpit runtime auth files prepared."
+      ;;
+    install)
+      require_mailpit_enabled
+      enforce_promotion_gate_policy_if_required
+      ensure_email_runtime_auth_files "false"
+      write_email_runtime_vars "install"
+      create_remote_domain_backup_snapshot "email" "install" "mailpit" "$SCOPE"
+      export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+      invoke_ansible_or_fail "email install mailpit" "$ENVIRONMENT" "email" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$EMAIL_RUNTIME_PATH"
+      notes="Email install completed for Mailpit."
+      write_domain_state "email" "install" "completed" "$notes"
+      write_domain_evidence_simple "email" "install" "pass" "$notes"
+      print_email_mailpit_summary
+      ;;
+    post-check)
+      require_mailpit_enabled
+      write_email_runtime_vars "post-check"
+      export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+      invoke_ansible_or_fail "email post-check mailpit" "$ENVIRONMENT" "email" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$EMAIL_RUNTIME_PATH"
+      notes="Email post-check completed for Mailpit."
+      write_domain_state "email" "post-check" "completed" "$notes"
+      write_domain_evidence_simple "email" "post-check" "pass" "$notes"
+      print_email_mailpit_summary
+      ;;
+    rollback)
+      write_email_runtime_vars "rollback"
+      create_remote_domain_backup_snapshot "email" "rollback" "mailpit" "$SCOPE"
+      export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"
+      invoke_ansible_or_fail "email rollback mailpit" "$ENVIRONMENT" "email" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$EMAIL_RUNTIME_PATH"
+      notes="Email rollback completed for Mailpit. Compose service and proxy blocks were removed; captured data/auth files were preserved."
+      write_domain_state "email" "rollback" "completed" "$notes"
+      write_domain_evidence_simple "email" "rollback" "pass" "$notes"
+      ;;
+  esac
+}
+
 run_audit() {
   local audit_action="$ACTION"
   local notes backup_dir
@@ -2692,9 +2934,10 @@ case "$DOMAIN" in
   promote) run_promote ;;
   tls) run_tls ;;
   ops) run_ops ;;
+  email) run_email ;;
   audit) run_audit ;;
   *)
-    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit)" >&2
+    echo "Unsupported domain: $DOMAIN (expected deploy|certify|promote|tls|ops|audit|email)" >&2
     exit 1
     ;;
 esac

@@ -1,0 +1,8 @@
+ProxyPreserveHost On
+ProxyPass {{ email_mailpit_webroot }} http://{{ email_mailpit_ui_bind_host }}:{{ email_mailpit_ui_internal_port }}{{ email_mailpit_webroot }}
+ProxyPassReverse {{ email_mailpit_webroot }} http://{{ email_mailpit_ui_bind_host }}:{{ email_mailpit_ui_internal_port }}{{ email_mailpit_webroot }}
+RedirectMatch 302 ^{{ email_mailpit_ui_path_normalized }}$ {{ email_mailpit_webroot }}
+
+<Location "{{ email_mailpit_webroot }}">
+    Require all granted
+</Location>

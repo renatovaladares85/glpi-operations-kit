@@ -1,0 +1,45 @@
+name: {{ email_mailpit_compose_project }}
+
+services:
+  mailpit:
+    image: {{ email_mailpit_image }}
+    container_name: {{ email_mailpit_container_name }}
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    ports:
+      - "{{ email_mailpit_ui_bind_host }}:{{ email_mailpit_ui_internal_port }}:{{ email_mailpit_ui_internal_port }}"
+      - "{{ email_mailpit_smtp_bind_host }}:{{ email_mailpit_smtp_port }}:{{ email_mailpit_smtp_port }}"
+    volumes:
+      - {{ email_mailpit_remote_data_dir }}:/data
+      - {{ email_mailpit_remote_ui_auth_file }}:/run/secrets/mailpit_ui_auth:ro
+      - {{ email_mailpit_remote_smtp_auth_file }}:/run/secrets/mailpit_smtp_auth:ro
+      - {{ email_mailpit_remote_smtp_cert_file }}:/run/secrets/mailpit_smtp_cert:ro
+      - {{ email_mailpit_remote_smtp_key_file }}:/run/secrets/mailpit_smtp_key:ro
+    environment:
+      TZ: "{{ timezone_name }}"
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: "{{ email_mailpit_max_messages }}"
+      MP_WEBROOT: "{{ email_mailpit_webroot }}"
+      MP_UI_BIND_ADDR: "0.0.0.0:{{ email_mailpit_ui_internal_port }}"
+      MP_UI_AUTH_FILE: /run/secrets/mailpit_ui_auth
+      MP_SMTP_BIND_ADDR: "0.0.0.0:{{ email_mailpit_smtp_port }}"
+      MP_SMTP_AUTH_FILE: /run/secrets/mailpit_smtp_auth
+      MP_SMTP_TLS_CERT: /run/secrets/mailpit_smtp_cert
+      MP_SMTP_TLS_KEY: /run/secrets/mailpit_smtp_key
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_BLOCK_REMOTE_CSS_AND_FONTS: "true"
+      MP_ALLOW_INTERNAL_HTTP_REQUESTS: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    pids_limit: 128
+    mem_limit: 512m

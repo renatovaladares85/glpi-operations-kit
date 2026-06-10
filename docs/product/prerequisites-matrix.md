@@ -36,6 +36,9 @@ Each item defines:
 | TLS mode policy | Security policy | all | `SECURITY_REQUIRE_TLS=true` | conditional-mandatory | Requires valid provided certificate mode when policy is enabled | `TLS_MODE=provided` | No | Yes in `secure`; No in `permissive` |
 | HTTPS policy | Security policy | all | `SECURITY_REQUIRE_HTTPS=true` | conditional-mandatory | Requires encrypted transport when policy is enabled | `TLS_MODE!=none` | No | Yes in `secure`; No in `permissive` |
 | Ordered execution policy | Workflow policy | all | `SECURITY_REQUIRE_ORDERED_EXECUTION=true` | conditional-mandatory | Prevents out-of-order deployment state | deploy sequence state file | No | Yes in `secure`; No in `permissive` |
+| Docker daemon | Container runtime | app | `email install mailpit` | conditional-mandatory | Required to run the post-deploy Mailpit compose service | `docker info` | No | Yes |
+| Docker Compose plugin | Container runtime | app | `email install mailpit` | conditional-mandatory | Required to manage the Mailpit compose file | `docker compose version` | No | Yes |
+| Mailpit UI/SMTP ports free | Network/runtime | app | `email check/install mailpit` | conditional-mandatory | Prevents collision with local processes or published Docker ports | `ss -ltn` and `docker ps` | No | Yes |
 | `ssh` client | Diagnostic tooling | all | always | optional | Useful for diagnostics and manual checks | `command -v ssh` | Yes (`apt`) | No |
 | Free local disk >= 1 GB | Local host health | all | always | mandatory | Required for runtime artifacts and evidence | `df -Pk .` | No | Yes |
 

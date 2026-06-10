@@ -290,6 +290,25 @@ bash scripts/release-readiness.sh staging
 ./scripts/glpictl.sh <env> audit rollback
 ```
 
+## Post-deploy email with Mailpit
+
+Use this after the GLPI environment is installed and validated. The UI access follows the environment `TLS_MODE`, `WEB_HTTP_PORT`, `WEB_HTTPS_PORT`, and `GLPI_DOMAIN`.
+
+```bash
+./scripts/glpictl.sh <env> email check mailpit
+./scripts/glpictl.sh <env> email prepare mailpit
+./scripts/glpictl.sh <env> email install mailpit
+./scripts/glpictl.sh <env> email post-check mailpit
+./scripts/glpictl.sh <env> email rollback mailpit
+```
+
+Operational notes:
+
+- `EMAIL_MAILPIT_ENABLED=true` must be active in `config/<env>.env` before `prepare` and `install`.
+- `prepare` prompts for UI and SMTP credentials and writes only protected files under `.runtime/<env>/email`.
+- `install` requires Docker and Docker Compose to already be available; the kit validates and blocks on port conflicts.
+- GLPI SMTP is not configured automatically; the final summary prints host, port, and STARTTLS details.
+
 ## SSO operation note
 
 SSO/SAML/OIDC setup is performed manually in GLPI and IdP. There is no `auth` domain in the current CLI contract.

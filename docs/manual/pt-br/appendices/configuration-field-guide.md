@@ -150,6 +150,21 @@ Para certificado `provided`, solicite um certificado de servidor HTTPS, não de 
 | `ALERTING_BACKUP_FAILURE_ENABLED` | `true` ou `false`. | Mantenha `true` salvo exceção formal. | Booleano. |
 | `ALERTING_SERVICE_DOWN_ENABLED` | `true` ou `false`. | Mantenha `true` salvo exceção formal. | Booleano. |
 
+## E-mail pós-deploy com Mailpit
+
+Essas chaves habilitam uma opção separada para instalar Mailpit após o GLPI estar pronto. O comando não altera o SMTP dentro do GLPI; ele apenas instala o capturador e informa os parâmetros de conexão.
+
+| Chave | O que colocar | Como obter ou definir | Validação comum |
+|---|---|---|---|
+| `EMAIL_MAILPIT_ENABLED` | `true` para permitir `email prepare/install`. | Ative somente quando o ambiente precisar do capturador. | `email install` bloqueia se estiver `false`. |
+| `EMAIL_MAILPIT_IMAGE` | Imagem com tag fixa. | Use a versão homologada, exemplo `axllent/mailpit:v1.30.1`. | Nunca use `latest` em produção. |
+| `EMAIL_MAILPIT_UI_PATH` | Caminho público da UI. | Padrão `/mailpit`, publicado no mesmo protocolo/porta do GLPI. | O path não pode conflitar com rota existente. |
+| `EMAIL_MAILPIT_UI_BIND_HOST` | Bind local da UI interna. | Use `127.0.0.1` em produção. | Evita exposição direta fora do proxy. |
+| `EMAIL_MAILPIT_UI_INTERNAL_PORT` | Porta interna da UI. | Padrão `8025`. | `email check` valida conflito local e Docker. |
+| `EMAIL_MAILPIT_SMTP_BIND_HOST` | Bind local do SMTP. | Use `127.0.0.1` em produção. | Evita SMTP aberto na rede. |
+| `EMAIL_MAILPIT_SMTP_PORT` | Porta SMTP. | Padrão `1025`. | Deve ser diferente da porta UI. |
+| `EMAIL_MAILPIT_MAX_MESSAGES` | Retenção máxima de mensagens. | Use valor baixo conforme política; padrão `1000`. | Mensagens podem conter dados sensíveis. |
+
 ## Política e segurança operacional
 
 | Chave | O que colocar | Como obter ou definir | Validação comum |

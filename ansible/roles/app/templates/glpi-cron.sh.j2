@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd {{ glpi_install_dir }}
-php bin/console glpi:cron --force
+
+cd {{ glpi_install_dir | quote }}
+exec /usr/bin/php front/cron.php

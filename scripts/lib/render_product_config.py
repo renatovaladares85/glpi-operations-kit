@@ -13,6 +13,7 @@ TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
 GLPI_TIMEZONE_DB_MODES = {"disabled", "validate", "apply"}
+DEFAULT_MAILPIT_IMAGE = "axllent/mailpit:v1.30.1"
 
 DEFAULT_GLPI_APP_PACKAGES = [
     "php-fpm",
@@ -226,6 +227,14 @@ DOTTED_KEY_MAP = {
     "operations.glpi_cron_schedule": "OPERATIONS_GLPI_CRON_SCHEDULE",
     "operations.required_ops_group": "OPERATIONS_REQUIRED_OPS_GROUP",
     "operations.security_mode_default": "OPERATIONS_SECURITY_MODE_DEFAULT",
+    "email.mailpit.enabled": "EMAIL_MAILPIT_ENABLED",
+    "email.mailpit.image": "EMAIL_MAILPIT_IMAGE",
+    "email.mailpit.ui_path": "EMAIL_MAILPIT_UI_PATH",
+    "email.mailpit.ui_bind_host": "EMAIL_MAILPIT_UI_BIND_HOST",
+    "email.mailpit.ui_internal_port": "EMAIL_MAILPIT_UI_INTERNAL_PORT",
+    "email.mailpit.smtp_bind_host": "EMAIL_MAILPIT_SMTP_BIND_HOST",
+    "email.mailpit.smtp_port": "EMAIL_MAILPIT_SMTP_PORT",
+    "email.mailpit.max_messages": "EMAIL_MAILPIT_MAX_MESSAGES",
     "resource_profiles.active": "RESOURCE_PROFILE_ACTIVE",
 }
 
@@ -241,6 +250,7 @@ BOOL_KEYS = {
     "SECURITY_REQUIRE_ORDERED_EXECUTION",
     "GLPI_TIMEZONE_SUPPORT_ENABLED",
     "GLPI_TIMEZONE_DB_LEGACY_GRANT",
+    "EMAIL_MAILPIT_ENABLED",
 }
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -312,6 +322,17 @@ def as_list(value: str, default: list) -> list:
         except json.JSONDecodeError as exc:
             fail(f"Invalid JSON list value: {exc}")
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
+
+
+def normalize_http_path(value: str, default: str) -> str:
+    path = (value or "").strip() or default
+    if not path.startswith("/"):
+        fail("EMAIL_MAILPIT_UI_PATH must start with '/'.")
+    if path == "/":
+        fail("EMAIL_MAILPIT_UI_PATH cannot be '/'.")
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    return path
 
 
 def as_json_object(value: str, default: dict) -> dict:
@@ -415,6 +436,20 @@ def validate_feature_contract(values: dict, execution_mode: str, db_deployment_m
             fail(f"TLS_PROVIDED_LOCAL_CERT_PATH is not available or is not a file: {local_cert_path}")
         if not Path(local_key_path).is_file():
             fail(f"TLS_PROVIDED_LOCAL_KEY_PATH is not available or is not a file: {local_key_path}")
+
+    normalize_http_path(read_value(values, "EMAIL_MAILPIT_UI_PATH", "/mailpit"), "/mailpit")
+    for key in ("EMAIL_MAILPIT_UI_INTERNAL_PORT", "EMAIL_MAILPIT_SMTP_PORT", "EMAIL_MAILPIT_MAX_MESSAGES"):
+        raw_value = read_value(values, key, "").strip()
+        if raw_value and not raw_value.isdigit():
+            fail(f"{key} must be an integer.")
+    ui_port = as_int(read_value(values, "EMAIL_MAILPIT_UI_INTERNAL_PORT", "8025"), 8025)
+    smtp_port = as_int(read_value(values, "EMAIL_MAILPIT_SMTP_PORT", "1025"), 1025)
+    if not (1 <= ui_port <= 65535):
+        fail("EMAIL_MAILPIT_UI_INTERNAL_PORT must be between 1 and 65535.")
+    if not (1 <= smtp_port <= 65535):
+        fail("EMAIL_MAILPIT_SMTP_PORT must be between 1 and 65535.")
+    if ui_port == smtp_port:
+        fail("EMAIL_MAILPIT_UI_INTERNAL_PORT and EMAIL_MAILPIT_SMTP_PORT must be different.")
 
 
 def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_deployment_mode: str) -> dict:
@@ -534,6 +569,17 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "security_require_promotion_gate": as_bool(read_value(values, "SECURITY_REQUIRE_PROMOTION_GATE", "false"), False),
         "security_require_ordered_execution": as_bool(read_value(values, "SECURITY_REQUIRE_ORDERED_EXECUTION", "true"), True),
         "operations_security_mode_default": read_value(values, "OPERATIONS_SECURITY_MODE_DEFAULT", "secure"),
+        "email_mailpit_enabled": as_bool(read_value(values, "EMAIL_MAILPIT_ENABLED", "false"), False),
+        "email_mailpit_image": read_value(values, "EMAIL_MAILPIT_IMAGE", DEFAULT_MAILPIT_IMAGE).strip() or DEFAULT_MAILPIT_IMAGE,
+        "email_mailpit_ui_path": normalize_http_path(read_value(values, "EMAIL_MAILPIT_UI_PATH", "/mailpit"), "/mailpit"),
+        "email_mailpit_ui_bind_host": read_value(values, "EMAIL_MAILPIT_UI_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "email_mailpit_ui_internal_port": as_int(read_value(values, "EMAIL_MAILPIT_UI_INTERNAL_PORT", "8025"), 8025),
+        "email_mailpit_smtp_bind_host": read_value(values, "EMAIL_MAILPIT_SMTP_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "email_mailpit_smtp_port": as_int(read_value(values, "EMAIL_MAILPIT_SMTP_PORT", "1025"), 1025),
+        "email_mailpit_max_messages": as_int(read_value(values, "EMAIL_MAILPIT_MAX_MESSAGES", "1000"), 1000),
+        "email_mailpit_remote_base_dir": "/opt/glpi-mailpit",
+        "email_mailpit_compose_project": "glpi-mailpit",
+        "email_mailpit_container_name": "mailpit",
         "mariadb_bind_address": read_value(values, "DATABASE_BIND_ADDRESS", "0.0.0.0"),
         "mariadb_port": as_int(read_value(values, "DATABASE_PORT", "3306"), 3306),
         "mariadb_version_packages": as_list(read_value(values, "DATABASE_PACKAGES", ""), DEFAULT_DATABASE_PACKAGES),

@@ -150,6 +150,21 @@ For `provided` mode, request an HTTPS server certificate, not a client certifica
 | `ALERTING_BACKUP_FAILURE_ENABLED` | `true` or `false`. | Keep `true` unless formally excepted. | Boolean. |
 | `ALERTING_SERVICE_DOWN_ENABLED` | `true` or `false`. | Keep `true` unless formally excepted. | Boolean. |
 
+## Post-deploy email with Mailpit
+
+These keys enable a separate option to install Mailpit after GLPI is ready. The command does not change SMTP inside GLPI; it only installs the capture service and prints connection parameters.
+
+| Key | What to set | How to get or decide it | Common validation |
+|---|---|---|---|
+| `EMAIL_MAILPIT_ENABLED` | `true` to allow `email prepare/install`. | Enable only when the environment needs the capture service. | `email install` blocks when it is `false`. |
+| `EMAIL_MAILPIT_IMAGE` | Image with a fixed tag. | Use the approved version, e.g. `axllent/mailpit:v1.30.1`. | Never use `latest` in production. |
+| `EMAIL_MAILPIT_UI_PATH` | Public UI path. | Default `/mailpit`, exposed through the same protocol/port as GLPI. | The path must not conflict with an existing route. |
+| `EMAIL_MAILPIT_UI_BIND_HOST` | Internal UI bind host. | Use `127.0.0.1` in production. | Avoids direct exposure outside the proxy. |
+| `EMAIL_MAILPIT_UI_INTERNAL_PORT` | Internal UI port. | Default `8025`. | `email check` validates local and Docker conflicts. |
+| `EMAIL_MAILPIT_SMTP_BIND_HOST` | SMTP bind host. | Use `127.0.0.1` in production. | Avoids open SMTP on the network. |
+| `EMAIL_MAILPIT_SMTP_PORT` | SMTP port. | Default `1025`. | Must differ from the UI port. |
+| `EMAIL_MAILPIT_MAX_MESSAGES` | Maximum retained messages. | Keep low according to policy; default `1000`. | Messages can contain sensitive data. |
+
 ## Policy and operational security
 
 | Key | What to set | How to get or decide it | Common validation |

@@ -90,6 +90,15 @@ ensure_execute_permission() {
   if [[ -x "$path" ]]; then
     return 0
   fi
+  if [[ ! -t 0 ]]; then
+    echo "Missing execute permission on '$path'."
+    echo "Suggested fix command:"
+    printf '  chmod +x %q\n' "$path"
+    echo "No interactive input available; applying safe mandatory script permission fix."
+    chmod +x "$path"
+    [[ -x "$path" ]]
+    return
+  fi
   if offer_fix_then_execute "Missing execute permission on '$path'." "chmod +x '$path'"; then
     [[ -x "$path" ]]
     return

@@ -224,3 +224,31 @@ Before migration, clone, or full environment copy where application files and da
 
 - high data exposure impact if artifact/passphrase handling is weak
 - backup can become partial if exclusions are used intentionally
+
+### Objective
+
+Validate and install the post-deploy Mailpit email capture service.
+
+### Command
+
+```bash
+./scripts/glpictl.sh <env> email check mailpit
+./scripts/glpictl.sh <env> email prepare mailpit
+./scripts/glpictl.sh <env> email install mailpit
+./scripts/glpictl.sh <env> email post-check mailpit
+```
+
+### When to use
+
+After GLPI deploy and post-check are complete, when the environment needs a controlled SMTP capture service.
+
+### Preconditions
+
+- `EMAIL_MAILPIT_ENABLED=true` in `config/<env>.env`
+- Docker and Docker Compose already available on the app host
+- no conflict on configured Mailpit UI/SMTP ports
+
+### Risks
+
+- captured e-mails may contain sensitive data
+- wrong bind host can expose UI or SMTP outside the intended proxy/local boundary

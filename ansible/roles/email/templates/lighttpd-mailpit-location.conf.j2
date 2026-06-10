@@ -1,0 +1,10 @@
+$HTTP["url"] =~ "^{{ email_mailpit_ui_path_normalized }}($|/)" {
+    proxy.server = (
+        "" => (
+            (
+                "host" => "{{ email_mailpit_ui_bind_host }}",
+                "port" => {{ email_mailpit_ui_internal_port }}
+            )
+        )
+    )
+}

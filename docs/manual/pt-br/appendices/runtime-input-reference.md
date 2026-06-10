@@ -23,6 +23,8 @@ No modo automático, o renderer `scripts/lib/render_product_config.py` monta `WE
 | `.runtime/<env>/public.runtime.yml` | renderizador via `glpictl` | Converte `key=value` público em variáveis de role | `ansible-playbook` |
 | `.runtime/<env>/overrides.runtime.yml` | scripts e operador | Sobrescritas mutáveis (ex.: TLS) | `ansible-playbook` |
 | `.runtime/<env>/secrets.yml` | renderizador de `config/<env>.env` | Segredos fora do Git com permissão restrita | `ansible-playbook` |
+| `.runtime/<env>/email/mailpit.runtime.yml` | `glpictl email` | Variáveis runtime específicas do Mailpit | role Ansible `email` |
+| `.runtime/<env>/email/auth/*.htpasswd` | `glpictl email prepare` | Credenciais UI/SMTP do Mailpit com permissão restrita | role Ansible `email` |
 | `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Status técnico do precheck/política | operadores, auditoria |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Resumo legível do precheck | operadores, auditoria |
 | `.runtime/<env>/state/deploy-sequence.yml` | fluxo deploy | Estado de execução ordenada | `glpictl` |
@@ -69,5 +71,7 @@ Quando `TLS_MODE=provided`, os caminhos locais de certificado e chave devem exis
 - `TLS_PROVIDED_LOCAL_KEY_PATH`
 
 As flags de política (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) são sempre avaliadas; o bloqueio depende do `SECURITY_MODE` efetivo.
+
+Quando `EMAIL_MAILPIT_ENABLED=true`, o fluxo `email` valida Docker/Compose, conflito de portas e proxy web antes de instalar Mailpit. A UI segue o protocolo e porta efetivos do GLPI, e as credenciais são solicitadas por `email prepare`, não por `config/<environment>.env`.
 
 Chaves legadas `AUTH_*` / `SSO_*` podem existir em `.env` antigo e são ignoradas pelos fluxos de execução.

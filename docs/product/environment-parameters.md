@@ -28,6 +28,7 @@ Validation checks global mandatory keys and scenario-specific keys:
 - `TLS_MODE=provided`: `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` must be active and point to real local files.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB host Linux operations are disabled; DB validation uses direct MySQL TCP connectivity.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates PHP/system timezone and DB timezone readiness according to `GLPI_TIMEZONE_DB_MODE`.
+- `EMAIL_MAILPIT_ENABLED=true`: enables the post-deploy `email` workflow; Docker/Compose must already exist on the app host.
 
 ## Secret handling
 
@@ -39,6 +40,8 @@ Deployment secrets currently read from `config/<environment>.env` and materializ
 - `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, managed-mode fallback credential)
 
 Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sensitive evidence.
+
+Mailpit UI/SMTP credentials are collected by `./scripts/glpictl.sh <env> email prepare mailpit` and stored under `.runtime/<environment>/email/auth/`, not in the public environment file.
 
 ## Parameter groups
 
@@ -56,6 +59,7 @@ Never commit `.runtime/`, private keys, tokens, real passwords, or customer-sens
 | `PATH_*` | Secure GLPI filesystem layout outside webroot. | Manual field guide. |
 | `OPERATIONS_*` | Timezone, cron, operator group, default security mode. | Manual field guide. |
 | `GLPI_TIMEZONE_*` | Optional GLPI timezone support and DB timezone workflow. | Manual field guide. |
+| `EMAIL_MAILPIT_*` | Optional post-deploy Mailpit capture service. | Manual field guide. |
 | `RESOURCE_PROFILE_*` | PHP-FPM and MariaDB tuning profiles for `small`, `medium`, `large`. | Manual field guide. |
 
 Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ignored by execution flows.
@@ -71,6 +75,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `TLS_MODE` | `provided` for production. | Enforces secure public access defaults. |
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure`. | Prevents silent risk acceptance. |
+| `EMAIL_MAILPIT_UI_BIND_HOST` / `EMAIL_MAILPIT_SMTP_BIND_HOST` | `127.0.0.1`. | Keeps Mailpit behind the GLPI proxy and prevents open SMTP/UI exposure. |
 | `RESOURCE_PROFILE_ACTIVE` | `small` until sized by real workload. | Avoids overcommitting small hosts. |
 
 ## DB access mode examples

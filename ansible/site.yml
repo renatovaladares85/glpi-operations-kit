@@ -33,3 +33,10 @@
   roles:
     - role: backup
       tags: ["backup"]
+
+- name: Configure post-deploy email capture
+  hosts: glpi_app
+  become: true
+  roles:
+    - role: email
+      tags: ["email"]

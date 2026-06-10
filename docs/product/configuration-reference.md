@@ -48,6 +48,7 @@ Runtime values are merged in this order:
 - `BACKUP_*`: backup base directory and retention
 - `MONITORING_*`, `ALERTING_*`: exporter toggles, labels, thresholds, routes
 - `SECURITY_*`: policy flags and controls
+- `EMAIL_MAILPIT_*`: optional post-deploy Mailpit service controls
 - `PATH_*`: secure filesystem layout
 - `OPERATIONS_*`: timezone, cron, ops group, security mode default
 - `GLPI_TIMEZONE_*`: optional GLPI timezone support controls (PHP + DB readiness workflow)
@@ -73,6 +74,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables timezone readiness workflow. | `true`, `false` |
 | `GLPI_TIMEZONE_DB_MODE` | Defines DB timezone behavior. | `disabled`, `validate`, `apply` |
 | `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Enables optional legacy grant on `mysql.time_zone_name`. | `true`, `false` |
+| `EMAIL_MAILPIT_ENABLED` | Enables the post-deploy Mailpit install workflow. | `true`, `false` |
+| `EMAIL_MAILPIT_UI_PATH` | Publishes Mailpit UI through the GLPI web protocol/port. | `/mailpit` |
 
 ## Conditional activation and validation contract
 
@@ -80,6 +83,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
+- `EMAIL_MAILPIT_ENABLED=true`: enables `glpictl email prepare/install mailpit`; Docker/Compose must already exist on the app host.
 
 ## Secret contract
 
@@ -91,6 +95,8 @@ Deployment secrets required by renderer/precheck from `config/<environment>.env`
 - `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, managed-mode fallback for connectivity checks)
 
 Do not commit real environment files, `.runtime/`, private keys, tokens, passwords, certificates with private material, or customer-sensitive evidence.
+
+Mailpit UI/SMTP auth is prompted by `glpictl email prepare mailpit` and stored as protected htpasswd files under `.runtime/<environment>/email/auth/`, not in `config/<environment>.env`.
 
 ## Web engine and package resolution contract
 

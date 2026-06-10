@@ -28,6 +28,8 @@ When automatic mode is used, package resolution is done by `scripts/lib/render_p
 | `.runtime/<env>/public.runtime.yml` | config renderer via `glpictl` | Converts public `key=value` settings into role-ready variables | `ansible-playbook` |
 | `.runtime/<env>/overrides.runtime.yml` | scripts and operator actions | Stores mutable runtime overrides (for example TLS changes) | `ansible-playbook` |
 | `.runtime/<env>/secrets.yml` | renderer from `config/<env>.env` | Stores secret values outside Git with restricted permissions | `ansible-playbook` |
+| `.runtime/<env>/email/mailpit.runtime.yml` | `glpictl email` | Mailpit-specific runtime variables | Ansible `email` role |
+| `.runtime/<env>/email/auth/*.htpasswd` | `glpictl email prepare` | Restricted UI/SMTP Mailpit credentials | Ansible `email` role |
 | `.runtime/<env>/state/precheck-report-latest.yml` | precheck | Machine-readable precheck and policy status | operators, audit flow |
 | `.runtime/<env>/evidence/precheck-report-latest.md` | precheck | Human-readable precheck summary | operators, audit flow |
 | `.runtime/<env>/state/deploy-sequence.yml` | deploy workflow | Tracks ordered execution state | `glpictl` |
@@ -74,5 +76,7 @@ When `TLS_MODE=provided`, local certificate and key paths must be active and poi
 - `TLS_PROVIDED_LOCAL_KEY_PATH`
 
 Policy flags (`SECURITY_REQUIRE_TLS`, `SECURITY_REQUIRE_HTTPS`, `SECURITY_REQUIRE_PROMOTION_GATE`, `SECURITY_REQUIRE_ORDERED_EXECUTION`) are always evaluated, and their blocking behavior depends on effective `SECURITY_MODE`.
+
+When `EMAIL_MAILPIT_ENABLED=true`, the `email` workflow validates Docker/Compose, port conflicts, and the web proxy before installing Mailpit. UI access follows the effective GLPI protocol and port, and credentials are prompted by `email prepare`, not stored in `config/<environment>.env`.
 
 Legacy `AUTH_*` / `SSO_*` keys may exist in older environment files and are ignored by execution flows.
