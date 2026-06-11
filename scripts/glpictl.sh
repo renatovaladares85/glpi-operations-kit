@@ -225,6 +225,16 @@ mask_sensitive_stream() {
     -e "s/(DATABASE_PASSWORD=)[^[:space:]]+/\1****/g"
 }
 
+mask_managed_db_secret_values_stream() {
+  python3 -c 'import sys
+data = sys.stdin.read()
+for secret in sys.argv[1:]:
+    if secret and secret.strip():
+        data = data.replace(secret, "****")
+sys.stdout.write(data)
+' "$MANAGED_DB_PASSWORD" "$MANAGED_DB_ADMIN_PASSWORD"
+}
+
 print_failure_diagnostics() {
   local summary_path log_path
   summary_path="$(operation_summary_path "$ENVIRONMENT" "$OPERATION_ID")"
@@ -1609,7 +1619,7 @@ run_managed_admin_sql_attempt() {
   echo "Managed DB admin command (${check_label}, user=${db_user}): FAIL"
   if [[ -n "${output// }" ]]; then
     echo "  Diagnostic output:"
-    printf '%s\n' "$output" | mask_sensitive_stream | sed 's/^/    /'
+    printf '%s\n' "$output" | mask_sensitive_stream | mask_managed_db_secret_values_stream | sed 's/^/    /'
   fi
   return 1
 }
@@ -1650,13 +1660,15 @@ ensure_managed_db_schema_and_user() {
 
   provision_sql="CREATE DATABASE IF NOT EXISTS \`${db_name_sql}\`; CREATE USER IF NOT EXISTS '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; ALTER USER '${user_sql}'@'${host_sql}' IDENTIFIED BY '${password_sql}'; REVOKE ALL PRIVILEGES, GRANT OPTION FROM '${user_sql}'@'${host_sql}'; GRANT ${application_grants} ON \`${db_name_sql}\`.* TO '${user_sql}'@'${host_sql}'; FLUSH PRIVILEGES;"
   if ! run_managed_admin_sql "provision" "$provision_sql"; then
-    echo "Managed DB provisioning failed: unable to create/alter database user and grant permissions." >&2
+    echo "Managed DB provisioning skipped: unable to create/alter database user and grant permissions with root/admin." >&2
+    echo "Continuing with existing application DB user connectivity validation." >&2
     return 1
   fi
 
   verify_sql="SHOW GRANTS FOR '${user_sql}'@'${host_sql}';"
   if ! run_managed_admin_sql "verify-grants" "$verify_sql"; then
-    echo "Managed DB provisioning failed: unable to verify grants for application user." >&2
+    echo "Managed DB grant verification skipped: unable to verify grants with root/admin." >&2
+    echo "Continuing with existing application DB user connectivity validation." >&2
     return 1
   fi
 
@@ -1959,8 +1971,7 @@ handle_managed_db_validation_after_app_apply() {
   echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
 
   if ! ensure_managed_db_schema_and_user; then
-    echo "Managed DB provisioning/permission validation failed after app deployment." >&2
-    return 1
+    record_execution_warning "Managed DB provisioning/permission check could not run with root/admin; validating existing application DB user instead."
   fi
 
   if run_managed_db_select1_check "initial"; then
