@@ -463,7 +463,7 @@ timezone_apply_php() {
   php_version_major_minor="$(read_runtime_effective_value "glpi_php_fpm_socket" "/run/php/php8.3-fpm.sock" | sed -n "s|.*php\\([0-9]\\+\\.[0-9]\\+\\)-fpm.*|\\1|p")"
   [[ -z "${php_version_major_minor// }" ]] && php_version_major_minor="8.3"
   timezone_escaped="$(shell_escape_single_quotes "$TIMEZONE_TARGET")"
-  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "printf '%s\n' 'date.timezone = ${timezone_escaped}' > /etc/php/${php_version_major_minor}/fpm/conf.d/99-glpi-timezone.ini; systemctl restart '${php_service}'" -o >/dev/null
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -e; for sapi in fpm cli; do install -d -m 0755 /etc/php/${php_version_major_minor}/\${sapi}/conf.d; printf '%s\n' 'date.timezone = ${timezone_escaped}' > /etc/php/${php_version_major_minor}/\${sapi}/conf.d/99-glpi-timezone.ini; done; systemctl restart '${php_service}'" -o >/dev/null
   echo "PHP timezone apply: PASS (${TIMEZONE_TARGET})"
 }
 

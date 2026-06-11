@@ -144,6 +144,14 @@
     mode: "0644"
   notify: Restart php-fpm
 
+- name: Deploy php.ini overrides for GLPI CLI
+  ansible.builtin.template:
+    src: glpi-php.ini.j2
+    dest: /etc/php/8.3/cli/conf.d/99-glpi.ini
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Deploy PHP-FPM pool configuration
   ansible.builtin.template:
     src: glpi-pool.conf.j2
