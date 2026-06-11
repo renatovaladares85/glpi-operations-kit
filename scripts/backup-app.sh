@@ -770,16 +770,36 @@ create_db_dump_payload() {
   done
 
   log "Gerando dump da base '$DB_NAME'..."
-  mysqldump \
-    --defaults-extra-file="$mysql_cnf" \
-    --single-transaction \
-    --quick \
-    --routines \
-    --triggers \
-    --events \
-    --hex-blob \
-    "${ignore_table_data_args[@]}" \
-    "$DB_NAME" | gzip -9 > "$DB_DUMP_PATH"
+  local dump_error_file="$WORKDIR/mysqldump.err"
+  if ! mysqldump \
+      --defaults-extra-file="$mysql_cnf" \
+      --single-transaction \
+      --quick \
+      --routines \
+      --triggers \
+      --events \
+      --hex-blob \
+      "${ignore_table_data_args[@]}" \
+      "$DB_NAME" 2>"$dump_error_file" | gzip -9 > "$DB_DUMP_PATH"; then
+    if grep -Eiq 'PROCESS privilege|tablespaces' "$dump_error_file"; then
+      warn "mysqldump falhou ao exportar tablespaces sem privilégio PROCESS; tentando novamente com --no-tablespaces."
+      rm -f "$DB_DUMP_PATH"
+      mysqldump \
+        --defaults-extra-file="$mysql_cnf" \
+        --single-transaction \
+        --quick \
+        --routines \
+        --triggers \
+        --events \
+        --hex-blob \
+        --no-tablespaces \
+        "${ignore_table_data_args[@]}" \
+        "$DB_NAME" | gzip -9 > "$DB_DUMP_PATH"
+    else
+      cat "$dump_error_file" >&2
+      return 1
+    fi
+  fi
 
   chmod 600 "$DB_DUMP_PATH"
   DB_DUMP_SHA256="$(compute_sha256 "$DB_DUMP_PATH" || true)"
