@@ -1142,6 +1142,20 @@ validate_app_runtime_contract() {
   echo "Runtime contract loaded: glpi_domain=$rt_glpi_domain, glpi_php_fpm_socket=$rt_fpm_socket, glpi_install_dir=$rt_install_dir, web_http_port=$rt_http_port, glpi_web_server_type=$rt_web_server_type"
 }
 
+validate_monitoring_runtime_contract() {
+  local profile prometheus_enabled grafana_enabled exporter_bind_host grafana_public_mode
+
+  write_step "Validating rendered monitoring configuration contract"
+
+  profile="$(read_effective_runtime_value "monitoring_profile" "minimal")"
+  prometheus_enabled="$(read_effective_runtime_value "monitoring_prometheus_enabled" "false")"
+  grafana_enabled="$(read_effective_runtime_value "monitoring_grafana_enabled" "false")"
+  exporter_bind_host="$(read_effective_runtime_value "monitoring_exporter_bind_host" "127.0.0.1")"
+  grafana_public_mode="$(read_effective_runtime_value "monitoring_grafana_public_mode" "disabled")"
+
+  echo "Monitoring contract loaded: profile=$profile, prometheus=$prometheus_enabled, grafana=$grafana_enabled, exporters_bind=$exporter_bind_host, grafana_public_mode=$grafana_public_mode"
+}
+
 is_service_active() {
   local service_name="$1"
   if command -v systemctl >/dev/null 2>&1; then
@@ -2262,6 +2276,9 @@ run_deploy() {
     case "$target" in
       app|all) enforce_single_web_server_contract ;;
     esac
+    case "$target" in
+      monitoring|all) validate_monitoring_runtime_contract ;;
+    esac
     write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
     mark_apply_sequence "$mode" "$target"
@@ -2277,6 +2294,9 @@ run_deploy() {
   if [[ "$mode" == "prepare" ]]; then
     case "$target" in
       app|all) enforce_single_web_server_contract ;;
+    esac
+    case "$target" in
+      monitoring|all) validate_monitoring_runtime_contract ;;
     esac
     write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
@@ -2295,6 +2315,9 @@ run_deploy() {
         validate_app_runtime_contract
         enforce_single_web_server_contract
         ;;
+    esac
+    case "$target" in
+      monitoring|all) validate_monitoring_runtime_contract ;;
     esac
   fi
 

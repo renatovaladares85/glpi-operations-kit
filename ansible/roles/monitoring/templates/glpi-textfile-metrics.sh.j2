@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/etc/glpi-monitoring/glpi-textfile-metrics.cnf"
+if [[ ! -r "$CONFIG_FILE" ]]; then
+  echo "Missing metrics config: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$CONFIG_FILE"
+
+OUT_DIR="$(dirname "$TEXTFILE_OUTPUT")"
+TMP_FILE="$(mktemp "${OUT_DIR}/glpi.prom.XXXXXX")"
+trap 'rm -f "$TMP_FILE"' EXIT
+
+mysql_scalar() {
+  local query="$1"
+  local fallback="${2:-0}"
+  local result
+  if result="$(MYSQL_PWD="$DB_PASSWORD" mysql --protocol=TCP --host="$DB_HOST" --port="$DB_PORT" --user="$DB_USER" --database="$DB_NAME" --batch --skip-column-names --raw --silent --execute="$query" 2>/dev/null | head -n1)"; then
+    if [[ -n "${result// }" ]]; then
+      printf '%s' "$result"
+      return 0
+    fi
+  fi
+  printf '%s' "$fallback"
+}
+
+table_exists() {
+  local table_name="$1"
+  [[ "$(mysql_scalar "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = '${table_name}';" "0")" == "1" ]]
+}
+
+column_exists() {
+  local table_name="$1"
+  local column_name="$2"
+  [[ "$(mysql_scalar "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = '${table_name}' AND column_name = '${column_name}';" "0")" == "1" ]]
+}
+
+write_metric() {
+  local name="$1"
+  local value="$2"
+  printf '%s %s\n' "$name" "$value" >>"$TMP_FILE"
+}
+
+late_crontasks="0"
+if table_exists "glpi_crontasks" && column_exists "glpi_crontasks" "lastrun" && column_exists "glpi_crontasks" "frequency"; then
+  late_crontasks="$(mysql_scalar "SELECT COUNT(*) FROM glpi_crontasks WHERE state = 1 AND frequency > 0 AND lastrun IS NOT NULL AND TIMESTAMPDIFF(SECOND, lastrun, NOW()) > frequency;" "0")"
+fi
+write_metric "glpi_crontask_late_total" "$late_crontasks"
+
+pending_notifications="0"
+error_notifications="0"
+if table_exists "glpi_queuednotifications"; then
+  if column_exists "glpi_queuednotifications" "sent_time"; then
+    pending_notifications="$(mysql_scalar "SELECT COUNT(*) FROM glpi_queuednotifications WHERE sent_time IS NULL;" "0")"
+  fi
+  if column_exists "glpi_queuednotifications" "sent_try"; then
+    error_notifications="$(mysql_scalar "SELECT COUNT(*) FROM glpi_queuednotifications WHERE sent_try > 0;" "0")"
+  fi
+fi
+write_metric "glpi_queuednotifications_pending_total" "$pending_notifications"
+write_metric "glpi_queuednotifications_error_total" "$error_notifications"
+
+mailcollector_errors="0"
+if table_exists "glpi_mailcollectors" && column_exists "glpi_mailcollectors" "errors"; then
+  mailcollector_errors="$(mysql_scalar "SELECT COUNT(*) FROM glpi_mailcollectors WHERE errors > 0;" "0")"
+fi
+write_metric "glpi_mailcollector_error_total" "$mailcollector_errors"
+
+database_size="$(mysql_scalar "SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE();" "0")"
+write_metric "glpi_database_size_bytes" "$database_size"
+
+backup_timestamp="0"
+backup_age="-1"
+if [[ "$BACKUP_FRESHNESS_ENABLED" == "True" || "$BACKUP_FRESHNESS_ENABLED" == "true" ]]; then
+  latest_backup="$(find "$BACKUP_BASE_DIR" -type f \( -name '*.gz' -o -name '*.tgz' -o -name '*.tar.gz' \) -printf '%T@\n' 2>/dev/null | sort -nr | head -n1 || true)"
+  if [[ -n "${latest_backup// }" ]]; then
+    backup_timestamp="${latest_backup%.*}"
+    backup_age="$(( $(date +%s) - backup_timestamp ))"
+  fi
+fi
+write_metric "glpi_backup_last_success_timestamp" "$backup_timestamp"
+write_metric "glpi_backup_age_seconds" "$backup_age"
+
+chmod 0644 "$TMP_FILE"
+mv "$TMP_FILE" "$TEXTFILE_OUTPUT"
+trap - EXIT

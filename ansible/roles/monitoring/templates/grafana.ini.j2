@@ -1,0 +1,18 @@
+[server]
+http_addr = {{ monitoring_grafana_bind_host | default('127.0.0.1') }}
+http_port = {{ monitoring_grafana_port | default(3000) }}
+domain = {{ monitoring_grafana_public_fqdn | default(glpi_domain) if monitoring_grafana_public_mode == 'subdomain' else glpi_domain }}
+root_url = {% if monitoring_grafana_public_mode == 'path' %}%(protocol)s://%(domain)s{{ monitoring_grafana_public_path | default('/monitoring') }}/{% elif monitoring_grafana_public_mode == 'subdomain' %}%(protocol)s://{{ monitoring_grafana_public_fqdn }}/{% else %}http://{{ monitoring_grafana_bind_host | default('127.0.0.1') }}:{{ monitoring_grafana_port | default(3000) }}/{% endif %}
+serve_from_sub_path = {{ 'true' if monitoring_grafana_public_mode == 'path' else 'false' }}
+
+[security]
+admin_user = {{ monitoring_grafana_admin_user | default('daniel_monitor') }}
+admin_password = {{ grafana_admin_password }}
+disable_gravatar = true
+cookie_secure = {{ 'true' if (monitoring_grafana_public_mode != 'disabled' and (monitoring_grafana_require_https | default(true))) else 'false' }}
+
+[auth.anonymous]
+enabled = false
+
+[users]
+allow_sign_up = false

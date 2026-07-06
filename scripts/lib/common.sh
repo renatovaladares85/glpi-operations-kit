@@ -785,6 +785,8 @@ ensure_secret_keys() {
   local environment="$1"
   local secret_path
   local glpi_db_password glpi_db_root_password glpi_db_managed_admin_password mysqld_exporter_password db_deployment_mode
+  local grafana_admin_password glpi_metrics_db_password
+  local monitoring_grafana_enabled monitoring_glpi_custom_metrics_enabled monitoring_mysqld_exporter_enabled
   local auth_saml_x509_certificate ldap_bind_password oidc_client_secret
   secret_path="$(runtime_secret_path "$environment")"
   ensure_runtime_foundation "$environment"
@@ -795,15 +797,25 @@ ensure_secret_keys() {
   glpi_db_root_password="$(read_product_config_value "$environment" "DATABASE_ROOT_PASSWORD" || true)"
   glpi_db_managed_admin_password="$(read_product_config_value "$environment" "DATABASE_MANAGED_ADMIN_PASSWORD" || true)"
   mysqld_exporter_password="$(read_product_config_value "$environment" "MONITORING_MYSQLD_EXPORTER_PASSWORD" || true)"
+  monitoring_mysqld_exporter_enabled="$(read_product_config_value "$environment" "monitoring.exporters.mysqld.enabled" || true)"
+  monitoring_grafana_enabled="$(read_product_config_value "$environment" "monitoring.grafana.enabled" || true)"
+  monitoring_glpi_custom_metrics_enabled="$(read_product_config_value "$environment" "monitoring.glpi_custom_metrics.enabled" || true)"
 
   # Auth secrets are runtime-only and must not depend on config/<environment>.env.
   auth_saml_x509_certificate=""
   ldap_bind_password=""
   oidc_client_secret=""
+  grafana_admin_password=""
+  glpi_metrics_db_password=""
   if [[ -f "$secret_path" ]]; then
     auth_saml_x509_certificate="$(read_yaml_top_level_value "$secret_path" "auth_saml_x509_certificate" || true)"
     ldap_bind_password="$(read_yaml_top_level_value "$secret_path" "ldap_bind_password" || true)"
     oidc_client_secret="$(read_yaml_top_level_value "$secret_path" "oidc_client_secret" || true)"
+    if [[ -z "${mysqld_exporter_password// }" ]]; then
+      mysqld_exporter_password="$(read_yaml_top_level_value "$secret_path" "mysqld_exporter_password" || true)"
+    fi
+    grafana_admin_password="$(read_yaml_top_level_value "$secret_path" "grafana_admin_password" || true)"
+    glpi_metrics_db_password="$(read_yaml_top_level_value "$secret_path" "glpi_metrics_db_password" || true)"
   fi
 
   if [[ -z "${glpi_db_password// }" ]]; then
@@ -818,11 +830,26 @@ ensure_secret_keys() {
     echo "Used by: schema creation, grants, and hardening" >&2
     exit 1
   fi
-  if [[ "$db_deployment_mode" == "self_hosted" && -z "${mysqld_exporter_password// }" ]]; then
-    echo "Missing required config key: MONITORING_MYSQLD_EXPORTER_PASSWORD" >&2
-    echo "Purpose: secret password for mysqld exporter account" >&2
-    echo "Used by: monitoring role deployment" >&2
-    exit 1
+  if [[ "$db_deployment_mode" == "self_hosted" && "$monitoring_mysqld_exporter_enabled" == "true" && -z "${mysqld_exporter_password// }" ]]; then
+    mysqld_exporter_password="$(read_required_value \
+      "Enter mysqld exporter database password for environment '$environment':" \
+      "least-privilege SQL account used by mysqld_exporter; it must stay outside config/<environment>.env" \
+      "$secret_path" \
+      "true")"
+  fi
+  if [[ "$monitoring_grafana_enabled" == "true" && -z "${grafana_admin_password// }" ]]; then
+    grafana_admin_password="$(read_required_value \
+      "Enter Grafana admin password for environment '$environment':" \
+      "Grafana local administrator bootstrap password; it must stay outside config/<environment>.env" \
+      "$secret_path" \
+      "true")"
+  fi
+  if [[ "$monitoring_glpi_custom_metrics_enabled" == "true" && -z "${glpi_metrics_db_password// }" ]]; then
+    glpi_metrics_db_password="$(read_required_value \
+      "Enter GLPI metrics database password for environment '$environment':" \
+      "least-privilege SQL account used by the local node_exporter textfile metrics script" \
+      "$secret_path" \
+      "true")"
   fi
 
   save_yaml_map "$secret_path" \
@@ -830,6 +857,8 @@ ensure_secret_keys() {
     glpi_db_root_password "$glpi_db_root_password" \
     glpi_db_managed_admin_password "$glpi_db_managed_admin_password" \
     mysqld_exporter_password "$mysqld_exporter_password" \
+    grafana_admin_password "$grafana_admin_password" \
+    glpi_metrics_db_password "$glpi_metrics_db_password" \
     auth_saml_x509_certificate "$auth_saml_x509_certificate" \
     ldap_bind_password "$ldap_bind_password" \
     oidc_client_secret "$oidc_client_secret"

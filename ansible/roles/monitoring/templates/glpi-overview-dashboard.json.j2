@@ -1,0 +1,35 @@
+{
+  "uid": "glpi-operations-overview",
+  "title": "GLPI Operations Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["glpi", "operations-kit"],
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Targets Up",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "sum(up)", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Late GLPI Crontasks",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "glpi_crontask_late_total", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Pending Notifications",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "glpi_queuednotifications_pending_total", "refId": "A"}]
+    },
+    {
+      "type": "stat",
+      "title": "Backup Age",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "glpi_backup_age_seconds", "refId": "A"}]
+    }
+  ]
+}

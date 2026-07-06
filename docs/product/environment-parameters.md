@@ -51,6 +51,7 @@ Mailpit UI/SMTP credentials are collected by `./scripts/glpictl.sh <env> email p
 | `EXECUTION_*`, `TOPOLOGY_*` | Local/SSH execution and single/dual-server topology. | Manual field guide. |
 | `NETWORK_*` | SSH identity and DB source allowlist. | Manual field guide. |
 | `GLPI_*`, `PHP_FPM_*`, `WEB_*` | GLPI version, web engine, PHP runtime, ports, app packages. | Manual field guide. |
+| `GLPI_REDIS_*` | Local Redis cache/session integration for GLPI app hosts. | Manual field guide. |
 | `DATABASE_*` | MariaDB/MySQL schema, users, bind, port, packages. | Manual field guide. |
 | `TLS_*` | TLS mode, certificate target paths, provided source files. | Manual field guide and TLS appendix. |
 | `BACKUP_*` | Backup base directory and retention. | Manual field guide. |
@@ -76,6 +77,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |
 | `OPERATIONS_SECURITY_MODE_DEFAULT` | `secure`. | Prevents silent risk acceptance. |
 | `EMAIL_MAILPIT_UI_BIND_HOST` / `EMAIL_MAILPIT_SMTP_BIND_HOST` | `127.0.0.1`. | Keeps Mailpit behind the GLPI proxy and prevents open SMTP/UI exposure. |
+| `GLPI_REDIS_SESSION_LOCKING` | `0`. | Keeps phpredis session locking disabled to avoid blocking concurrent GLPI AJAX requests. |
+| `GLPI_REDIS_MAXMEMORY` | commented/empty. | Avoids applying Redis memory sizing before host capacity is known. |
 | `RESOURCE_PROFILE_ACTIVE` | `small` until sized by real workload. | Avoids overcommitting small hosts. |
 
 ## DB access mode examples

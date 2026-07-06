@@ -1,5 +1,40 @@
 ---
+- name: Restart node exporter
+  ansible.builtin.service:
+    name: prometheus-node-exporter
+    state: restarted
+
 - name: Restart mysqld exporter
   ansible.builtin.service:
     name: prometheus-mysqld-exporter
     state: restarted
+
+- name: Restart prometheus
+  ansible.builtin.service:
+    name: prometheus
+    state: restarted
+
+- name: Restart grafana
+  ansible.builtin.service:
+    name: grafana-server
+    state: restarted
+
+- name: Restart nginx exporter
+  ansible.builtin.service:
+    name: prometheus-nginx-exporter
+    state: restarted
+
+- name: Restart php-fpm exporter
+  ansible.builtin.service:
+    name: prometheus-php-fpm-exporter
+    state: restarted
+
+- name: Restart blackbox exporter
+  ansible.builtin.service:
+    name: prometheus-blackbox-exporter
+    state: restarted
+
+- name: Reload nginx
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded

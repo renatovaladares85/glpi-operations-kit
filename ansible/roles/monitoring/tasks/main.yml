@@ -1,9 +1,36 @@
 ---
+- name: Assert monitoring profile is supported
+  ansible.builtin.assert:
+    that:
+      - monitoring_profile in ['minimal', 'standard', 'full', 'external_prometheus', 'external_grafana']
+    fail_msg: "Invalid monitoring_profile. Render config/<environment>.env again and rerun deploy check."
+
 - name: Install node exporter
   ansible.builtin.apt:
     name: prometheus-node-exporter
     state: present
   when: node_exporter_enabled
+
+- name: Create node exporter textfile collector directory
+  ansible.builtin.file:
+    path: /var/lib/prometheus/node-exporter
+    state: directory
+    owner: prometheus
+    group: prometheus
+    mode: "0755"
+  when:
+    - node_exporter_enabled
+    - monitoring_glpi_custom_metrics_enabled or monitoring_glpi_backup_freshness_enabled
+
+- name: Configure node exporter defaults
+  ansible.builtin.template:
+    src: node-exporter.default.j2
+    dest: /etc/default/prometheus-node-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  when: node_exporter_enabled
+  notify: Restart node exporter
 
 - name: Ensure node exporter is enabled
   ansible.builtin.service:
@@ -20,23 +47,26 @@
     - mysqld_exporter_enabled
     - "'glpi_db' in group_names"
 
-- name: Create mysqld exporter config directory
+- name: Create Prometheus configuration directory
   ansible.builtin.file:
-    path: /etc/prometheus
+    path: "{{ item }}"
     state: directory
     owner: root
     group: root
     mode: "0750"
+  loop:
+    - /etc/prometheus
+    - /etc/prometheus/rules
   when:
-    - mysqld_exporter_enabled
-    - "'glpi_db' in group_names"
+    - monitoring_prometheus_enabled or mysqld_exporter_enabled or blackbox_exporter_enabled
 
 - name: Assert monitoring database secrets are provided for DB hosts
   ansible.builtin.assert:
     that:
       - mysqld_exporter_user is defined
       - mysqld_exporter_password is defined
-    fail_msg: "Missing mysqld_exporter runtime secrets. Provide mysqld_exporter_user and mysqld_exporter_password."
+      - glpi_db_root_password is defined
+    fail_msg: "Missing mysqld_exporter runtime secrets. Provide mysqld_exporter_user, mysqld_exporter_password, and glpi_db_root_password."
   when:
     - mysqld_exporter_enabled
     - "'glpi_db' in group_names"
@@ -73,7 +103,7 @@
     group: root
     mode: "0644"
     content: |
-      ARGS="--config.my-cnf=/etc/prometheus/mysqld-exporter.cnf"
+      ARGS="--config.my-cnf=/etc/prometheus/mysqld-exporter.cnf --web.listen-address={{ monitoring_exporter_bind_host | default('127.0.0.1') }}:9104"
   when:
     - mysqld_exporter_enabled
     - "'glpi_db' in group_names"
@@ -87,3 +117,350 @@
   when:
     - mysqld_exporter_enabled
     - "'glpi_db' in group_names"
+
+- name: Install Prometheus on monitoring hosts
+  ansible.builtin.apt:
+    name: prometheus
+    state: present
+  when:
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart prometheus
+
+- name: Deploy Prometheus alert rules
+  ansible.builtin.template:
+    src: prometheus-alerts.yml.j2
+    dest: /etc/prometheus/rules/glpi-alerts.yml
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart prometheus
+
+- name: Configure Prometheus defaults
+  ansible.builtin.template:
+    src: prometheus.default.j2
+    dest: /etc/default/prometheus
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart prometheus
+
+- name: Ensure Prometheus is enabled
+  ansible.builtin.service:
+    name: prometheus
+    state: started
+    enabled: true
+  when:
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+
+- name: Assert Grafana secret is available
+  ansible.builtin.assert:
+    that:
+      - grafana_admin_password is defined
+      - grafana_admin_password | length > 0
+    fail_msg: "Missing runtime secret grafana_admin_password in .runtime/<env>/secrets.yml."
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+
+- name: Install Grafana on monitoring hosts
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+
+- name: Create Grafana provisioning directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0750"
+  loop:
+    - /etc/grafana/provisioning/datasources
+    - /etc/grafana/provisioning/dashboards
+    - /var/lib/grafana/dashboards/glpi
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy Grafana configuration
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: /etc/grafana/grafana.ini
+    owner: root
+    group: grafana
+    mode: "0640"
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart grafana
+
+- name: Provision Grafana Prometheus datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/prometheus.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  when:
+    - monitoring_grafana_enabled
+    - monitoring_prometheus_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart grafana
+
+- name: Provision Grafana dashboard provider
+  ansible.builtin.template:
+    src: grafana-dashboard-provider.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/glpi.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart grafana
+
+- name: Provision GLPI overview dashboard
+  ansible.builtin.template:
+    src: glpi-overview-dashboard.json.j2
+    dest: /var/lib/grafana/dashboards/glpi/glpi-overview.json
+    owner: root
+    group: grafana
+    mode: "0640"
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart grafana
+
+- name: Ensure Grafana is enabled
+  ansible.builtin.service:
+    name: grafana-server
+    state: started
+    enabled: true
+  when:
+    - monitoring_grafana_enabled
+    - "'glpi_app' in group_names"
+
+- name: Install Nginx exporter on app hosts
+  ansible.builtin.apt:
+    name: prometheus-nginx-exporter
+    state: present
+  when:
+    - nginx_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Configure Nginx exporter defaults
+  ansible.builtin.template:
+    src: nginx-exporter.default.j2
+    dest: /etc/default/prometheus-nginx-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - nginx_exporter_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart nginx exporter
+
+- name: Ensure Nginx exporter is enabled
+  ansible.builtin.service:
+    name: prometheus-nginx-exporter
+    state: started
+    enabled: true
+  when:
+    - nginx_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Install PHP-FPM exporter on app hosts
+  ansible.builtin.apt:
+    name: prometheus-php-fpm-exporter
+    state: present
+  when:
+    - php_fpm_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Configure PHP-FPM exporter defaults
+  ansible.builtin.template:
+    src: php-fpm-exporter.default.j2
+    dest: /etc/default/prometheus-php-fpm-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - php_fpm_exporter_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart php-fpm exporter
+
+- name: Ensure PHP-FPM exporter is enabled
+  ansible.builtin.service:
+    name: prometheus-php-fpm-exporter
+    state: started
+    enabled: true
+  when:
+    - php_fpm_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Install Blackbox exporter on app hosts
+  ansible.builtin.apt:
+    name: prometheus-blackbox-exporter
+    state: present
+  when:
+    - blackbox_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy Blackbox exporter configuration
+  ansible.builtin.template:
+    src: blackbox.yml.j2
+    dest: /etc/prometheus/blackbox.yml
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - blackbox_exporter_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart blackbox exporter
+
+- name: Configure Blackbox exporter defaults
+  ansible.builtin.template:
+    src: blackbox-exporter.default.j2
+    dest: /etc/default/prometheus-blackbox-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - blackbox_exporter_enabled
+    - "'glpi_app' in group_names"
+  notify: Restart blackbox exporter
+
+- name: Ensure Blackbox exporter is enabled
+  ansible.builtin.service:
+    name: prometheus-blackbox-exporter
+    state: started
+    enabled: true
+  when:
+    - blackbox_exporter_enabled
+    - "'glpi_app' in group_names"
+
+- name: Assert GLPI custom metrics secret is available
+  ansible.builtin.assert:
+    that:
+      - glpi_metrics_db_password is defined
+      - glpi_metrics_db_password | length > 0
+    fail_msg: "Missing runtime secret glpi_metrics_db_password in .runtime/<env>/secrets.yml."
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+
+- name: Assert GLPI custom metrics database admin secret is available
+  ansible.builtin.assert:
+    that:
+      - glpi_db_root_password is defined
+      - glpi_db_root_password | length > 0
+      - monitoring_glpi_metrics_db_user is defined
+      - monitoring_glpi_metrics_db_user | length > 0
+    fail_msg: "Missing runtime/public values for GLPI metrics database user creation."
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_db' in group_names"
+
+- name: Create GLPI metrics database user
+  community.mysql.mysql_user:
+    name: "{{ monitoring_glpi_metrics_db_user }}"
+    password: "{{ glpi_metrics_db_password }}"
+    host: "{{ db_grant_host | default(glpi_db_app_access_host | default('%')) }}"
+    priv: "{{ glpi_db_name }}.*:SELECT"
+    state: present
+    login_user: root
+    login_password: "{{ glpi_db_root_password }}"
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_db' in group_names"
+
+- name: Create GLPI monitoring config directory
+  ansible.builtin.file:
+    path: /etc/glpi-monitoring
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy GLPI metrics database config
+  ansible.builtin.template:
+    src: glpi-textfile-metrics.cnf.j2
+    dest: /etc/glpi-monitoring/glpi-textfile-metrics.cnf
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy GLPI textfile metrics script
+  ansible.builtin.template:
+    src: glpi-textfile-metrics.sh.j2
+    dest: /usr/local/bin/glpi-textfile-metrics.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_app' in group_names"
+
+- name: Schedule GLPI textfile metrics collection
+  ansible.builtin.cron:
+    name: GLPI textfile metrics
+    user: root
+    minute: "{{ '0' if ((monitoring_glpi_custom_metrics_interval_seconds | int) // 60) == 60 else '*/' ~ (((monitoring_glpi_custom_metrics_interval_seconds | int) // 60) | int) }}"
+    job: "/usr/local/bin/glpi-textfile-metrics.sh"
+  when:
+    - monitoring_glpi_custom_metrics_enabled
+    - "'glpi_app' in group_names"
+
+- name: Deploy Grafana subdomain Nginx site
+  ansible.builtin.template:
+    src: nginx-grafana-subdomain.conf.j2
+    dest: /etc/nginx/sites-available/glpi-monitoring.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - monitoring_grafana_enabled
+    - monitoring_grafana_public_mode == 'subdomain'
+    - glpi_web_server_type == 'nginx'
+    - "'glpi_app' in group_names"
+  notify: Reload nginx
+
+- name: Enable Grafana subdomain Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/glpi-monitoring.conf
+    dest: /etc/nginx/sites-enabled/glpi-monitoring.conf
+    state: link
+    force: true
+  when:
+    - monitoring_grafana_enabled
+    - monitoring_grafana_public_mode == 'subdomain'
+    - glpi_web_server_type == 'nginx'
+    - "'glpi_app' in group_names"
+  notify: Reload nginx

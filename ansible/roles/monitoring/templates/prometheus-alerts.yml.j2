@@ -1,0 +1,38 @@
+groups:
+  - name: glpi-operations-kit
+    rules:
+      - alert: GLPIExporterDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target is down"
+          description: "{% raw %}Target {{ $labels.job }} / {{ $labels.instance }} is not being scraped.{% endraw %}"
+
+      - alert: GLPIDiskUsageHigh
+        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > {{ (monitoring_thresholds.disk_warning_percent | default(80)) if monitoring_thresholds is mapping else 80 }}
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage is high"
+          description: "{% raw %}Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is above warning threshold.{% endraw %}"
+
+      - alert: GLPISwapInUse
+        expr: node_memory_SwapTotal_bytes > 0 and (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Swap is in use"
+          description: "{% raw %}Host {{ $labels.instance }} is using swap.{% endraw %}"
+
+      - alert: GLPIBackupTooOld
+        expr: glpi_backup_age_seconds > {{ (monitoring_glpi_backup_max_age_hours | default(24) | int) * 3600 }}
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GLPI backup is stale"
+          description: "Last successful GLPI backup is older than the configured threshold."

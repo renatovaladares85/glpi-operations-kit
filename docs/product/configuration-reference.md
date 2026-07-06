@@ -43,6 +43,7 @@ Runtime values are merged in this order:
 - `EXECUTION_*`, `TOPOLOGY_*`: orchestration model and host scope
 - `NETWORK_*`: SSH and DB access policy/source restrictions
 - `GLPI_*`, `PHP_FPM_*`, `WEB_*`: application stack settings
+- `GLPI_REDIS_*`: Redis cache/session integration options
 - `DATABASE_*`: database baseline and packages
 - `TLS_*`: TLS mode and certificate paths
 - `BACKUP_*`: backup base directory and retention
@@ -74,6 +75,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `GLPI_TIMEZONE_SUPPORT_ENABLED` | Enables timezone readiness workflow. | `true`, `false` |
 | `GLPI_TIMEZONE_DB_MODE` | Defines DB timezone behavior. | `disabled`, `validate`, `apply` |
 | `GLPI_TIMEZONE_DB_LEGACY_GRANT` | Enables optional legacy grant on `mysql.time_zone_name`. | `true`, `false` |
+| `GLPI_REDIS_SESSION_LOCKING` | Controls phpredis session locking. Default keeps locking disabled for concurrent GLPI AJAX requests. | `0`, `1` |
+| `GLPI_REDIS_CACHE_PREFIX` | Optional GLPI Redis cache namespace prefix. Empty uses `glpi_cache_<hostname>:`. | string |
 | `EMAIL_MAILPIT_ENABLED` | Enables the post-deploy Mailpit install workflow. | `true`, `false` |
 | `EMAIL_MAILPIT_UI_PATH` | Publishes Mailpit UI through the GLPI web protocol/port. | `/mailpit` |
 
@@ -82,6 +85,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
+- Redis is installed and configured on GLPI app hosts by default for GLPI cache (DB 0) and PHP-FPM sessions (DB 1).
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
 - `EMAIL_MAILPIT_ENABLED=true`: enables `glpictl email prepare/install mailpit`; Docker/Compose must already exist on the app host.
 
@@ -114,4 +118,6 @@ Mailpit UI/SMTP auth is prompted by `glpictl email prepare mailpit` and stored a
 Automatic source of truth is `scripts/lib/render_product_config.py`, which maps:
 
 - `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE]`
-- plus `DEFAULT_GLPI_APP_PACKAGES` including PHP extensions and `mariadb-client` for APP -> DB checks.
+- plus `DEFAULT_GLPI_APP_PACKAGES` including PHP extensions, `php-redis`, `redis-server`, and `mariadb-client` for APP -> DB checks.
+
+Redis memory sizing is not forced by default. `GLPI_REDIS_MAXMEMORY` and `GLPI_REDIS_MAXMEMORY_POLICY` are optional overrides and should be set only after host capacity is known.

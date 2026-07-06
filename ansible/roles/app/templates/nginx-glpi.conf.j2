@@ -1,3 +1,4 @@
+{% set monitoring_public_path = monitoring_grafana_public_path | default('/monitoring') %}
 {% if glpi_tls_mode == 'none' %}
 server {
     listen {{ web_http_port }} default_server;
@@ -12,11 +13,46 @@ server {
         try_files $uri /index.php$is_args$args;
     }
 
+{% if nginx_exporter_enabled | default(false) %}
+    location = /nginx_status {
+        stub_status;
+        allow 127.0.0.1;
+        deny all;
+        access_log off;
+    }
+{% endif %}
+
+{% if monitoring_grafana_enabled | default(false) and monitoring_grafana_public_mode | default('disabled') == 'path' %}
+    location = {{ monitoring_public_path }} {
+        return 301 {{ monitoring_public_path }}/;
+    }
+
+    location ^~ {{ monitoring_public_path }}/ {
+        proxy_pass http://{{ monitoring_grafana_bind_host | default('127.0.0.1') }}:{{ monitoring_grafana_port | default(3000) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix {{ monitoring_public_path }};
+    }
+{% endif %}
+
     location ~ ^/index\.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:{{ glpi_php_fpm_socket }};
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+    }
+
+    location ~ ^/_session_probe_[A-Za-z0-9_.-]+\.php$ {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{{ glpi_php_fpm_socket }};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+        access_log off;
     }
 
     location ~* ^/(config|files|marketplace|src|tests|vendor)/ {
@@ -31,6 +67,15 @@ server {
     listen {{ web_http_port }} default_server;
     listen [::]:{{ web_http_port }} default_server;
     server_name {{ glpi_domain }} {{ glpi_app_host }};
+
+{% if nginx_exporter_enabled | default(false) %}
+    location = /nginx_status {
+        stub_status;
+        allow 127.0.0.1;
+        deny all;
+        access_log off;
+    }
+{% endif %}
 
     location / {
         return 301 https://$host$request_uri;
@@ -53,11 +98,46 @@ server {
         try_files $uri /index.php$is_args$args;
     }
 
+{% if nginx_exporter_enabled | default(false) %}
+    location = /nginx_status {
+        stub_status;
+        allow 127.0.0.1;
+        deny all;
+        access_log off;
+    }
+{% endif %}
+
+{% if monitoring_grafana_enabled | default(false) and monitoring_grafana_public_mode | default('disabled') == 'path' %}
+    location = {{ monitoring_public_path }} {
+        return 301 {{ monitoring_public_path }}/;
+    }
+
+    location ^~ {{ monitoring_public_path }}/ {
+        proxy_pass http://{{ monitoring_grafana_bind_host | default('127.0.0.1') }}:{{ monitoring_grafana_port | default(3000) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Prefix {{ monitoring_public_path }};
+    }
+{% endif %}
+
     location ~ ^/index\.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:{{ glpi_php_fpm_socket }};
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+    }
+
+    location ~ ^/_session_probe_[A-Za-z0-9_.-]+\.php$ {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{{ glpi_php_fpm_socket }};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+        access_log off;
     }
 
     location ~* ^/(config|files|marketplace|src|tests|vendor)/ {

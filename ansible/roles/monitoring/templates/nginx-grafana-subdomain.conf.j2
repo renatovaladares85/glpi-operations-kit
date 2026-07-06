@@ -1,0 +1,26 @@
+server {
+    listen {{ web_http_port }};
+    listen [::]:{{ web_http_port }};
+    server_name {{ monitoring_grafana_public_fqdn }};
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen {{ web_https_port }} ssl http2;
+    listen [::]:{{ web_https_port }} ssl http2;
+    server_name {{ monitoring_grafana_public_fqdn }};
+
+    ssl_certificate {{ glpi_tls_certificate_path }};
+    ssl_certificate_key {{ glpi_tls_certificate_key_path }};
+
+    location / {
+        proxy_pass http://{{ monitoring_grafana_bind_host | default('127.0.0.1') }}:{{ monitoring_grafana_port | default(3000) }}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

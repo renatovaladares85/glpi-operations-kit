@@ -1,0 +1,9 @@
+DB_HOST={{ glpi_db_host | quote }}
+DB_PORT={{ mariadb_port | default(3306) | quote }}
+DB_NAME={{ glpi_db_name | quote }}
+DB_USER={{ monitoring_glpi_metrics_db_user | quote }}
+DB_PASSWORD={{ glpi_metrics_db_password | quote }}
+BACKUP_BASE_DIR={{ glpi_backup_base_dir | quote }}
+BACKUP_FRESHNESS_ENABLED={{ monitoring_glpi_backup_freshness_enabled | default(false) | string | lower | quote }}
+BACKUP_MAX_AGE_HOURS={{ monitoring_glpi_backup_max_age_hours | default(24) | quote }}
+TEXTFILE_OUTPUT='/var/lib/prometheus/node-exporter/glpi.prom'

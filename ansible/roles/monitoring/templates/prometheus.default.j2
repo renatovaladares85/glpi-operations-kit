@@ -1,0 +1,1 @@
+ARGS="--web.listen-address={{ monitoring_prometheus_bind_host | default('127.0.0.1') }}:{{ monitoring_prometheus_port | default(9090) }} --storage.tsdb.retention.time={{ monitoring_prometheus_retention_time | default('15d') }} --storage.tsdb.retention.size={{ monitoring_prometheus_retention_size | default('4GB') }}"

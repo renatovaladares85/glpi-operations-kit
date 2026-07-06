@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
@@ -13,6 +14,8 @@ TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
 GLPI_TIMEZONE_DB_MODES = {"disabled", "validate", "apply"}
+MONITORING_PROFILES = {"minimal", "standard", "full", "external_prometheus", "external_grafana"}
+MONITORING_GRAFANA_PUBLIC_MODES = {"disabled", "path", "subdomain"}
 DEFAULT_MAILPIT_IMAGE = "axllent/mailpit:v1.30.1"
 
 DEFAULT_GLPI_APP_PACKAGES = [
@@ -32,6 +35,7 @@ DEFAULT_GLPI_APP_PACKAGES = [
     "php-imap",
     "php-opcache",
     "php-redis",
+    "redis-server",
     "tar",
     "xz-utils",
     "curl",
@@ -116,10 +120,6 @@ REQUIRED_PUBLIC_KEYS = {
         "purpose": "Defines the mysqld_exporter username.",
         "consumer": "monitoring role",
     },
-    "MONITORING_MYSQLD_EXPORTER_PASSWORD": {
-        "purpose": "Defines the mysqld_exporter password.",
-        "consumer": "runtime secrets materialization and monitoring role",
-    },
     "TLS_MODE": {
         "purpose": "Defines whether the deployment uses none, self_signed, or provided TLS.",
         "consumer": "application role and TLS workflow",
@@ -177,6 +177,10 @@ DOTTED_KEY_MAP = {
     "glpi.filesystem.owner": "GLPI_FILESYSTEM_OWNER",
     "glpi.filesystem.group": "GLPI_FILESYSTEM_GROUP",
     "glpi.app_packages": "GLPI_APP_PACKAGES",
+    "glpi.redis.cache_prefix": "GLPI_REDIS_CACHE_PREFIX",
+    "glpi.redis.session_locking": "GLPI_REDIS_SESSION_LOCKING",
+    "glpi.redis.maxmemory": "GLPI_REDIS_MAXMEMORY",
+    "glpi.redis.maxmemory_policy": "GLPI_REDIS_MAXMEMORY_POLICY",
     "database.name": "DATABASE_NAME",
     "database.user": "DATABASE_USER",
     "database.port": "DATABASE_PORT",
@@ -196,14 +200,44 @@ DOTTED_KEY_MAP = {
     "tls.provided_local_key_path": "TLS_PROVIDED_LOCAL_KEY_PATH",
     "backup.base_dir": "BACKUP_BASE_DIR",
     "backup.retention_days": "BACKUP_RETENTION_DAYS",
+    "monitoring.profile": "MONITORING_PROFILE",
+    "monitoring.prometheus.enabled": "MONITORING_PROMETHEUS_ENABLED",
+    "monitoring.prometheus.bind_host": "MONITORING_PROMETHEUS_BIND_HOST",
+    "monitoring.prometheus.port": "MONITORING_PROMETHEUS_PORT",
+    "monitoring.prometheus.retention_time": "MONITORING_PROMETHEUS_RETENTION_TIME",
+    "monitoring.prometheus.retention_size": "MONITORING_PROMETHEUS_RETENTION_SIZE",
+    "monitoring.grafana.enabled": "MONITORING_GRAFANA_ENABLED",
+    "monitoring.grafana.admin_user": "MONITORING_GRAFANA_ADMIN_USER",
+    "monitoring.grafana.bind_host": "MONITORING_GRAFANA_BIND_HOST",
+    "monitoring.grafana.port": "MONITORING_GRAFANA_PORT",
+    "monitoring.grafana.public_mode": "MONITORING_GRAFANA_PUBLIC_MODE",
+    "monitoring.grafana.public_path": "MONITORING_GRAFANA_PUBLIC_PATH",
+    "monitoring.grafana.public_fqdn": "MONITORING_GRAFANA_PUBLIC_FQDN",
+    "monitoring.grafana.domain": "MONITORING_GRAFANA_DOMAIN",
+    "monitoring.grafana.require_auth": "MONITORING_GRAFANA_REQUIRE_AUTH",
+    "monitoring.grafana.require_https": "MONITORING_GRAFANA_REQUIRE_HTTPS",
+    "monitoring.exporters.bind_host": "MONITORING_EXPORTER_BIND_HOST",
+    "monitoring.exporters.allowed_source_hosts": "MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS",
     "monitoring.exporters.node.enabled": "MONITORING_NODE_EXPORTER_ENABLED",
     "monitoring.exporters.mysqld.enabled": "MONITORING_MYSQLD_EXPORTER_ENABLED",
     "monitoring.exporters.mysqld.user": "MONITORING_MYSQLD_EXPORTER_USER",
+    "monitoring.exporters.nginx.enabled": "MONITORING_NGINX_EXPORTER_ENABLED",
+    "monitoring.exporters.php_fpm.enabled": "MONITORING_PHP_FPM_EXPORTER_ENABLED",
+    "monitoring.exporters.blackbox.enabled": "MONITORING_BLACKBOX_EXPORTER_ENABLED",
+    "monitoring.blackbox.targets": "MONITORING_BLACKBOX_TARGETS_JSON",
+    "monitoring.glpi_custom_metrics.enabled": "MONITORING_GLPI_CUSTOM_METRICS_ENABLED",
+    "monitoring.glpi_custom_metrics.interval_seconds": "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS",
+    "monitoring.glpi_custom_metrics.db_user": "MONITORING_GLPI_METRICS_DB_USER",
+    "monitoring.glpi_backup_freshness.enabled": "MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED",
+    "monitoring.glpi_backup_freshness.max_age_hours": "MONITORING_GLPI_BACKUP_MAX_AGE_HOURS",
     "monitoring.labels": "MONITORING_LABELS_JSON",
     "monitoring.thresholds": "MONITORING_THRESHOLDS_JSON",
     "monitoring.scrape_profiles": "MONITORING_SCRAPE_PROFILES_JSON",
     "monitoring.dashboard_profile": "MONITORING_DASHBOARD_PROFILE",
     "monitoring.alert_routes": "MONITORING_ALERT_ROUTES_JSON",
+    "alerting.alertmanager.enabled": "ALERTMANAGER_ENABLED",
+    "alerting.alertmanager.bind_host": "MONITORING_ALERTMANAGER_BIND_HOST",
+    "alerting.alertmanager.port": "MONITORING_ALERTMANAGER_PORT",
     "alerting.tls_expiry_warning_days": "ALERTING_TLS_EXPIRY_WARNING_DAYS",
     "alerting.backup_failure_enabled": "ALERTING_BACKUP_FAILURE_ENABLED",
     "alerting.service_down_enabled": "ALERTING_SERVICE_DOWN_ENABLED",
@@ -239,8 +273,18 @@ DOTTED_KEY_MAP = {
 }
 
 BOOL_KEYS = {
+    "MONITORING_PROMETHEUS_ENABLED",
+    "MONITORING_GRAFANA_ENABLED",
+    "MONITORING_GRAFANA_REQUIRE_AUTH",
+    "MONITORING_GRAFANA_REQUIRE_HTTPS",
     "MONITORING_NODE_EXPORTER_ENABLED",
     "MONITORING_MYSQLD_EXPORTER_ENABLED",
+    "MONITORING_NGINX_EXPORTER_ENABLED",
+    "MONITORING_PHP_FPM_EXPORTER_ENABLED",
+    "MONITORING_BLACKBOX_EXPORTER_ENABLED",
+    "MONITORING_GLPI_CUSTOM_METRICS_ENABLED",
+    "MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED",
+    "ALERTMANAGER_ENABLED",
     "ALERTING_BACKUP_FAILURE_ENABLED",
     "ALERTING_SERVICE_DOWN_ENABLED",
     "SECURITY_ALLOW_INSECURE_NON_PRODUCTION",
@@ -260,6 +304,14 @@ FALSE_VALUES = {"0", "false", "no", "off"}
 def fail(message: str) -> None:
     print(message, file=sys.stderr)
     sys.exit(1)
+
+
+def fail_config_check(message: str, correction: str) -> None:
+    fail(
+        f"Configuration check failed: {message}\n"
+        f"Correction required: {correction}\n"
+        "Update config/<environment>.env and rerun the check before continuing."
+    )
 
 
 def parse_env_file(config_path: Path) -> dict:
@@ -324,12 +376,12 @@ def as_list(value: str, default: list) -> list:
     return [entry.strip() for entry in raw.split(",") if entry.strip()]
 
 
-def normalize_http_path(value: str, default: str) -> str:
+def normalize_http_path(value: str, default: str, key_name: str = "EMAIL_MAILPIT_UI_PATH") -> str:
     path = (value or "").strip() or default
     if not path.startswith("/"):
-        fail("EMAIL_MAILPIT_UI_PATH must start with '/'.")
+        fail(f"{key_name} must start with '/'.")
     if path == "/":
-        fail("EMAIL_MAILPIT_UI_PATH cannot be '/'.")
+        fail(f"{key_name} cannot be '/'.")
     if path != "/" and path.endswith("/"):
         path = path.rstrip("/")
     return path
@@ -346,6 +398,63 @@ def as_json_object(value: str, default: dict) -> dict:
     if not isinstance(loaded, dict):
         fail("Expected JSON object for map-based configuration field.")
     return loaded
+
+
+def as_json_array(value: str, default: list) -> list:
+    raw = (value or "").strip()
+    if not raw:
+        return list(default)
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail(f"Invalid JSON array value: {exc}")
+    if not isinstance(loaded, list):
+        fail("Expected JSON array for list-based configuration field.")
+    return loaded
+
+
+def validate_integer_port(values: dict, key: str, default: str) -> int:
+    raw_value = read_value(values, key, default).strip()
+    if raw_value and not raw_value.isdigit():
+        fail_config_check(f"{key} must be an integer.", f"Set {key} to a valid TCP port number between 1 and 65535.")
+    port = as_int(raw_value or default, as_int(default, 0))
+    if not (1 <= port <= 65535):
+        fail_config_check(f"{key} must be between 1 and 65535.", f"Adjust {key} to a free TCP port in the valid range.")
+    return port
+
+
+def is_loopback_bind(bind_host: str) -> bool:
+    normalized = (bind_host or "").strip().lower()
+    return normalized in {"127.0.0.1", "localhost", "::1"}
+
+
+def is_blocked_public_bind(bind_host: str) -> bool:
+    normalized = (bind_host or "").strip().lower()
+    return normalized in {"", "0.0.0.0", "::", "*", "any", "all"}
+
+
+def validate_restricted_source_list(sources: list[str], key_name: str) -> None:
+    blocked = {"0.0.0.0/0", "::/0", "any", "all", "*", "0.0.0.0", "::"}
+    for source in sources:
+        if str(source).strip().lower() in blocked:
+            fail_config_check(
+                f"{key_name} contains a broad source entry: {source}",
+                f"Replace {key_name} with explicit Prometheus source IPs or hostnames.",
+            )
+
+
+def validate_http_url_list(urls: list, key_name: str) -> list[str]:
+    normalized_urls = []
+    for raw_url in urls:
+        url = str(raw_url).strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            fail_config_check(
+                f"{key_name} contains an invalid target: {url}",
+                f"Use only explicit http:// or https:// URLs in {key_name}.",
+            )
+        normalized_urls.append(url)
+    return normalized_urls
 
 
 def read_value(values: dict, key: str, default: str = "") -> str:
@@ -389,7 +498,7 @@ def profile_value(values: dict, profile_name: str, suffix: str, default: str) ->
 
 def ensure_required_keys(values: dict, execution_mode: str, db_deployment_mode: str) -> None:
     for key in REQUIRED_PUBLIC_KEYS:
-        if db_deployment_mode == "managed" and key in {"DATABASE_ROOT_PASSWORD", "MONITORING_MYSQLD_EXPORTER_PASSWORD"}:
+        if db_deployment_mode == "managed" and key == "DATABASE_ROOT_PASSWORD":
             continue
         require_value(values, key)
     if execution_mode == "ssh":
@@ -399,9 +508,10 @@ def ensure_required_keys(values: dict, execution_mode: str, db_deployment_mode: 
 
 def validate_no_legacy_web_port_keys(values: dict) -> None:
     if "NGINX_HTTP_PORT" in values or "NGINX_HTTPS_PORT" in values:
-        fail(
+        fail_config_check(
             "Legacy keys detected: NGINX_HTTP_PORT/NGINX_HTTPS_PORT. "
-            "Migrate to WEB_HTTP_PORT/WEB_HTTPS_PORT."
+            "Migrate to WEB_HTTP_PORT/WEB_HTTPS_PORT.",
+            "Remove NGINX_HTTP_PORT/NGINX_HTTPS_PORT and set WEB_HTTP_PORT/WEB_HTTPS_PORT instead.",
         )
 
 
@@ -423,6 +533,258 @@ def validate_feature_contract(values: dict, execution_mode: str, db_deployment_m
     tls_mode = require_value(values, "TLS_MODE").strip().lower()
     if tls_mode not in TLS_MODES:
         fail("TLS_MODE must be one of: none, self_signed, provided.")
+
+    web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
+    if web_server_type not in WEB_SERVER_TYPES:
+        fail_config_check("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.", "Set WEB_SERVER_TYPE to nginx, apache, or lighttpd.")
+
+    redis_session_locking = read_value(values, "GLPI_REDIS_SESSION_LOCKING", "0").strip() or "0"
+    if redis_session_locking not in {"0", "1"}:
+        fail_config_check(
+            "GLPI_REDIS_SESSION_LOCKING must be 0 or 1.",
+            "Use GLPI_REDIS_SESSION_LOCKING=0 for the default non-locking session mode, or 1 to enable phpredis session locking.",
+        )
+
+    monitoring_profile = read_value(values, "MONITORING_PROFILE", "minimal").strip().lower() or "minimal"
+    if monitoring_profile not in MONITORING_PROFILES:
+        fail_config_check(
+            "MONITORING_PROFILE must be one of: minimal, standard, full, external_prometheus, external_grafana.",
+            "Set MONITORING_PROFILE to the deployment profile that matches the enabled monitoring components.",
+        )
+
+    prometheus_enabled = as_bool(read_value(values, "MONITORING_PROMETHEUS_ENABLED", "false"), False)
+    grafana_enabled = as_bool(read_value(values, "MONITORING_GRAFANA_ENABLED", "false"), False)
+    node_exporter_enabled = as_bool(read_value(values, "MONITORING_NODE_EXPORTER_ENABLED", "true"), True)
+    nginx_exporter_enabled = as_bool(read_value(values, "MONITORING_NGINX_EXPORTER_ENABLED", "false"), False)
+    php_fpm_exporter_enabled = as_bool(read_value(values, "MONITORING_PHP_FPM_EXPORTER_ENABLED", "false"), False)
+    blackbox_exporter_enabled = as_bool(read_value(values, "MONITORING_BLACKBOX_EXPORTER_ENABLED", "true"), True)
+    mysqld_exporter_enabled = as_bool(read_value(values, "MONITORING_MYSQLD_EXPORTER_ENABLED", "false"), False)
+    alertmanager_enabled = as_bool(read_value(values, "ALERTMANAGER_ENABLED", "false"), False)
+    glpi_custom_metrics_enabled = as_bool(read_value(values, "MONITORING_GLPI_CUSTOM_METRICS_ENABLED", "false"), False)
+    backup_freshness_enabled = as_bool(read_value(values, "MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED", "false"), False)
+    grafana_require_auth = as_bool(read_value(values, "MONITORING_GRAFANA_REQUIRE_AUTH", "true"), True)
+    grafana_require_https = as_bool(read_value(values, "MONITORING_GRAFANA_REQUIRE_HTTPS", "true"), True)
+    grafana_public_mode = read_value(values, "MONITORING_GRAFANA_PUBLIC_MODE", "disabled").strip().lower() or "disabled"
+    if grafana_public_mode not in MONITORING_GRAFANA_PUBLIC_MODES:
+        fail_config_check(
+            "MONITORING_GRAFANA_PUBLIC_MODE must be one of: disabled, path, subdomain.",
+            "Set MONITORING_GRAFANA_PUBLIC_MODE to disabled, path, or subdomain.",
+        )
+
+    if "MONITORING_EXPORTER_BIND_HOST" in values and not read_value(values, "MONITORING_EXPORTER_BIND_HOST", "").strip():
+        fail_config_check(
+            "MONITORING_EXPORTER_BIND_HOST cannot be empty when configured.",
+            "Set MONITORING_EXPORTER_BIND_HOST=127.0.0.1 or another explicit private bind address.",
+        )
+    exporter_bind_host = read_value(values, "MONITORING_EXPORTER_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    exporter_allowed_sources = as_list(read_value(values, "MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS", ""), [])
+    validate_restricted_source_list(exporter_allowed_sources, "MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS")
+    exporter_enabled = (
+        node_exporter_enabled
+        or mysqld_exporter_enabled
+        or nginx_exporter_enabled
+        or php_fpm_exporter_enabled
+        or blackbox_exporter_enabled
+    )
+
+    if exporter_enabled and is_blocked_public_bind(exporter_bind_host):
+        fail_config_check(
+            f"MONITORING_EXPORTER_BIND_HOST cannot be public or wildcard: {exporter_bind_host}",
+            "Set MONITORING_EXPORTER_BIND_HOST=127.0.0.1 or a specific private interface address.",
+        )
+
+    if db_deployment_mode == "managed" and mysqld_exporter_enabled:
+        fail_config_check(
+            "MONITORING_MYSQLD_EXPORTER_ENABLED=true is not supported with DATABASE_DEPLOYMENT_MODE=managed "
+            "in this project phase.",
+            "Use DATABASE_DEPLOYMENT_MODE=self_hosted for this project, or disable MONITORING_MYSQLD_EXPORTER_ENABLED.",
+        )
+
+    if nginx_exporter_enabled and web_server_type != "nginx":
+        fail_config_check(
+            "MONITORING_NGINX_EXPORTER_ENABLED=true requires WEB_SERVER_TYPE=nginx.",
+            "Set WEB_SERVER_TYPE=nginx or disable MONITORING_NGINX_EXPORTER_ENABLED.",
+        )
+
+    if exporter_enabled and not is_loopback_bind(exporter_bind_host) and not exporter_allowed_sources:
+        fail_config_check(
+            "MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS is required when exporters bind outside loopback.",
+            "Prefer MONITORING_EXPORTER_BIND_HOST=127.0.0.1. If private-network scraping is required, set MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS to the Prometheus source hosts.",
+        )
+
+    if alertmanager_enabled:
+        fail_config_check(
+            "ALERTMANAGER_ENABLED=true is reserved for a later phase.",
+            "Set ALERTMANAGER_ENABLED=false until the Alertmanager Ansible tasks/templates are implemented.",
+        )
+
+    if monitoring_profile == "minimal" and (
+        mysqld_exporter_enabled
+        or nginx_exporter_enabled
+        or php_fpm_exporter_enabled
+        or glpi_custom_metrics_enabled
+        or backup_freshness_enabled
+    ):
+        fail_config_check(
+            "MONITORING_PROFILE=minimal allows node_exporter, blackbox_exporter, and optional Grafana only.",
+            "Use MONITORING_PROFILE=standard or full for app/db exporters and GLPI functional metrics.",
+        )
+    if monitoring_profile == "minimal" and not node_exporter_enabled:
+        fail_config_check(
+            "MONITORING_PROFILE=minimal requires MONITORING_NODE_EXPORTER_ENABLED=true.",
+            "Enable MONITORING_NODE_EXPORTER_ENABLED or choose a profile that does not require node exporter.",
+        )
+    if monitoring_profile == "minimal" and not blackbox_exporter_enabled:
+        fail_config_check(
+            "MONITORING_PROFILE=minimal requires MONITORING_BLACKBOX_EXPORTER_ENABLED=true.",
+            "Enable MONITORING_BLACKBOX_EXPORTER_ENABLED or choose a profile that does not require blackbox.",
+        )
+    if backup_freshness_enabled and not glpi_custom_metrics_enabled:
+        fail_config_check(
+            "MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED=true requires MONITORING_GLPI_CUSTOM_METRICS_ENABLED=true.",
+            "Enable MONITORING_GLPI_CUSTOM_METRICS_ENABLED or disable backup freshness monitoring.",
+        )
+    if glpi_custom_metrics_enabled and db_deployment_mode != "self_hosted":
+        fail_config_check(
+            "MONITORING_GLPI_CUSTOM_METRICS_ENABLED=true requires DATABASE_DEPLOYMENT_MODE=self_hosted in this phase.",
+            "Use DATABASE_DEPLOYMENT_MODE=self_hosted or disable GLPI custom metrics.",
+        )
+    if monitoring_profile == "standard" and (
+        not prometheus_enabled
+        or not grafana_enabled
+        or not node_exporter_enabled
+        or not mysqld_exporter_enabled
+        or not nginx_exporter_enabled
+        or not php_fpm_exporter_enabled
+        or not blackbox_exporter_enabled
+    ):
+        fail_config_check(
+            "MONITORING_PROFILE=standard requires Prometheus, Grafana, node, mysqld, nginx, php-fpm, and blackbox exporters enabled.",
+            "Enable the standard monitoring component toggles, or choose MONITORING_PROFILE=minimal.",
+        )
+    if monitoring_profile == "full" and (
+        not prometheus_enabled
+        or not grafana_enabled
+        or not node_exporter_enabled
+        or not mysqld_exporter_enabled
+        or not nginx_exporter_enabled
+        or not php_fpm_exporter_enabled
+        or not blackbox_exporter_enabled
+        or not glpi_custom_metrics_enabled
+        or not backup_freshness_enabled
+    ):
+        fail_config_check(
+            "MONITORING_PROFILE=full requires standard monitoring plus GLPI functional metrics and backup freshness.",
+            "Enable all standard component toggles plus MONITORING_GLPI_CUSTOM_METRICS_ENABLED and MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED.",
+        )
+    if monitoring_profile == "external_prometheus" and (prometheus_enabled or grafana_enabled):
+        fail_config_check(
+            "MONITORING_PROFILE=external_prometheus requires local Prometheus/Grafana disabled.",
+            "Set MONITORING_PROMETHEUS_ENABLED=false and MONITORING_GRAFANA_ENABLED=false for external Prometheus mode.",
+        )
+    if monitoring_profile == "external_grafana" and (not prometheus_enabled or grafana_enabled):
+        fail_config_check(
+            "MONITORING_PROFILE=external_grafana requires local Prometheus enabled and local Grafana disabled.",
+            "Set MONITORING_PROMETHEUS_ENABLED=true and MONITORING_GRAFANA_ENABLED=false.",
+        )
+
+    prometheus_port = validate_integer_port(values, "MONITORING_PROMETHEUS_PORT", "9090")
+    grafana_port = validate_integer_port(values, "MONITORING_GRAFANA_PORT", "3000")
+    alertmanager_port = validate_integer_port(values, "MONITORING_ALERTMANAGER_PORT", "9093")
+    web_http_port = validate_integer_port(values, "WEB_HTTP_PORT", "80")
+    web_https_port = validate_integer_port(values, "WEB_HTTPS_PORT", "443")
+    declared_ports = {
+        "WEB_HTTP_PORT": web_http_port,
+        "WEB_HTTPS_PORT": web_https_port,
+    }
+    if prometheus_enabled:
+        declared_ports["MONITORING_PROMETHEUS_PORT"] = prometheus_port
+    if grafana_enabled:
+        declared_ports["MONITORING_GRAFANA_PORT"] = grafana_port
+    if alertmanager_enabled:
+        declared_ports["MONITORING_ALERTMANAGER_PORT"] = alertmanager_port
+    seen_ports = {}
+    for key, port in declared_ports.items():
+        if port in seen_ports:
+            fail_config_check(
+                f"{key} conflicts with {seen_ports[port]} on port {port}.",
+                f"Change {key} or {seen_ports[port]} to a different free port.",
+            )
+        seen_ports[port] = key
+
+    grafana_public_path = normalize_http_path(
+        read_value(values, "MONITORING_GRAFANA_PUBLIC_PATH", "/monitoring"),
+        "/monitoring",
+        "MONITORING_GRAFANA_PUBLIC_PATH",
+    )
+    email_mailpit_path = normalize_http_path(read_value(values, "EMAIL_MAILPIT_UI_PATH", "/mailpit"), "/mailpit")
+    if grafana_public_path == email_mailpit_path:
+        fail_config_check(
+            "MONITORING_GRAFANA_PUBLIC_PATH conflicts with EMAIL_MAILPIT_UI_PATH.",
+            "Set MONITORING_GRAFANA_PUBLIC_PATH and EMAIL_MAILPIT_UI_PATH to different URL paths.",
+        )
+
+    grafana_public_fqdn = read_value(
+        values,
+        "MONITORING_GRAFANA_PUBLIC_FQDN",
+        read_value(values, "MONITORING_GRAFANA_DOMAIN", ""),
+    ).strip()
+    if grafana_public_mode == "path" and grafana_public_fqdn:
+        fail_config_check(
+            "MONITORING_GRAFANA_PUBLIC_MODE=path cannot also set a Grafana public FQDN.",
+            "Clear MONITORING_GRAFANA_PUBLIC_FQDN/MONITORING_GRAFANA_DOMAIN or use MONITORING_GRAFANA_PUBLIC_MODE=subdomain.",
+        )
+    if grafana_public_mode != "disabled" and not grafana_enabled:
+        fail_config_check(
+            "MONITORING_GRAFANA_PUBLIC_MODE requires MONITORING_GRAFANA_ENABLED=true.",
+            "Enable MONITORING_GRAFANA_ENABLED or set MONITORING_GRAFANA_PUBLIC_MODE=disabled.",
+        )
+    if grafana_public_mode != "disabled" and not grafana_require_auth:
+        fail_config_check(
+            "External Grafana publication requires MONITORING_GRAFANA_REQUIRE_AUTH=true.",
+            "Set MONITORING_GRAFANA_REQUIRE_AUTH=true before publishing Grafana.",
+        )
+    if grafana_public_mode != "disabled" and grafana_require_https and tls_mode == "none":
+        fail_config_check(
+            "External Grafana publication requires HTTPS.",
+            "Set TLS_MODE=self_signed or TLS_MODE=provided, or disable MONITORING_GRAFANA_REQUIRE_HTTPS only for an accepted non-production risk.",
+        )
+    if grafana_public_mode == "subdomain" and not grafana_public_fqdn:
+        fail_config_check(
+            "MONITORING_GRAFANA_PUBLIC_FQDN is required when MONITORING_GRAFANA_PUBLIC_MODE=subdomain.",
+            "Set MONITORING_GRAFANA_PUBLIC_FQDN to the monitoring FQDN or use MONITORING_GRAFANA_PUBLIC_MODE=path.",
+        )
+
+    blackbox_targets = validate_http_url_list(
+        as_json_array(read_value(values, "MONITORING_BLACKBOX_TARGETS_JSON", "[]"), []),
+        "MONITORING_BLACKBOX_TARGETS_JSON",
+    )
+    if blackbox_exporter_enabled and not blackbox_targets:
+        default_scheme = "https" if tls_mode != "none" else "http"
+        blackbox_targets = [f"{default_scheme}://{require_value(values, 'GLPI_DOMAIN').strip()}/"]
+
+    custom_interval = as_int(read_value(values, "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS", "300"), 300)
+    if custom_interval < 60:
+        fail_config_check(
+            "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS must be at least 60.",
+            "Use a collection interval of 60 seconds or higher; 300 is the recommended default.",
+        )
+    if custom_interval > 3600:
+        fail_config_check(
+            "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS cannot be greater than 3600 in this phase.",
+            "Use an interval between 60 and 3600 seconds; 300 is the recommended default.",
+        )
+    if custom_interval % 60 != 0:
+        fail_config_check(
+            "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS must be a multiple of 60.",
+            "Use a cron-compatible interval such as 60, 300, 600, or 900 seconds.",
+        )
+    backup_max_age = as_int(read_value(values, "MONITORING_GLPI_BACKUP_MAX_AGE_HOURS", "24"), 24)
+    if backup_max_age < 1:
+        fail_config_check(
+            "MONITORING_GLPI_BACKUP_MAX_AGE_HOURS must be at least 1.",
+            "Set MONITORING_GLPI_BACKUP_MAX_AGE_HOURS to a positive number of hours.",
+        )
 
     if execution_mode == "ssh":
         ssh_key_path = os.path.expanduser(require_value(values, "NETWORK_SSH_PRIVATE_KEY_PATH").strip())
@@ -495,6 +857,18 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     if web_server_type == "apache":
         app_packages.append("libapache2-mod-php8.3")
 
+    default_blackbox_target = f"{'https' if tls_mode != 'none' else 'http'}://{glpi_domain}/"
+    blackbox_exporter_enabled = as_bool(read_value(values, "MONITORING_BLACKBOX_EXPORTER_ENABLED", "true"), True)
+    monitoring_blackbox_targets = validate_http_url_list(
+        as_json_array(
+            read_value(values, "MONITORING_BLACKBOX_TARGETS_JSON", json.dumps([default_blackbox_target])),
+            [default_blackbox_target],
+        ),
+        "MONITORING_BLACKBOX_TARGETS_JSON",
+    )
+    if blackbox_exporter_enabled and not monitoring_blackbox_targets:
+        monitoring_blackbox_targets = [default_blackbox_target]
+
     public_runtime = {
         "product_name": require_value(values, "PRODUCT_NAME"),
         "product_slug": read_value(values, "PRODUCT_SLUG", "glpi-operations-kit"),
@@ -550,10 +924,50 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_pm_max_spare_servers": as_int(profile_value(values, active_profile_name, "PHP_MAX_SPARE_SERVERS", "6"), 6),
         "glpi_pm_max_requests": as_int(profile_value(values, active_profile_name, "PHP_MAX_REQUESTS", "500"), 500),
         "glpi_cron_schedule": read_value(values, "OPERATIONS_GLPI_CRON_SCHEDULE", read_value(values, "GLPI_CRON_SCHEDULE", "*/5 * * * *")),
+        "glpi_redis_cache_prefix": read_value(values, "GLPI_REDIS_CACHE_PREFIX", "").strip(),
+        "glpi_redis_session_locking": read_value(values, "GLPI_REDIS_SESSION_LOCKING", "0").strip() or "0",
+        "glpi_redis_maxmemory": read_value(values, "GLPI_REDIS_MAXMEMORY", "").strip(),
+        "glpi_redis_maxmemory_policy": read_value(values, "GLPI_REDIS_MAXMEMORY_POLICY", "").strip(),
         "glpi_backup_retention_days": as_int(read_value(values, "BACKUP_RETENTION_DAYS", "14"), 14),
+        "monitoring_profile": read_value(values, "MONITORING_PROFILE", "minimal").strip().lower() or "minimal",
+        "monitoring_prometheus_enabled": as_bool(read_value(values, "MONITORING_PROMETHEUS_ENABLED", "false"), False),
+        "monitoring_prometheus_bind_host": read_value(values, "MONITORING_PROMETHEUS_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "monitoring_prometheus_port": as_int(read_value(values, "MONITORING_PROMETHEUS_PORT", "9090"), 9090),
+        "monitoring_prometheus_retention_time": read_value(values, "MONITORING_PROMETHEUS_RETENTION_TIME", "15d").strip() or "15d",
+        "monitoring_prometheus_retention_size": read_value(values, "MONITORING_PROMETHEUS_RETENTION_SIZE", "4GB").strip() or "4GB",
+        "monitoring_grafana_enabled": as_bool(read_value(values, "MONITORING_GRAFANA_ENABLED", "false"), False),
+        "monitoring_grafana_admin_user": read_value(values, "MONITORING_GRAFANA_ADMIN_USER", "daniel_monitor").strip() or "daniel_monitor",
+        "monitoring_grafana_bind_host": read_value(values, "MONITORING_GRAFANA_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "monitoring_grafana_port": as_int(read_value(values, "MONITORING_GRAFANA_PORT", "3000"), 3000),
+        "monitoring_grafana_public_mode": read_value(values, "MONITORING_GRAFANA_PUBLIC_MODE", "disabled").strip().lower() or "disabled",
+        "monitoring_grafana_public_path": normalize_http_path(
+            read_value(values, "MONITORING_GRAFANA_PUBLIC_PATH", "/monitoring"),
+            "/monitoring",
+            "MONITORING_GRAFANA_PUBLIC_PATH",
+        ),
+        "monitoring_grafana_public_fqdn": read_value(
+            values,
+            "MONITORING_GRAFANA_PUBLIC_FQDN",
+            read_value(values, "MONITORING_GRAFANA_DOMAIN", ""),
+        ).strip(),
+        "monitoring_grafana_domain": read_value(values, "MONITORING_GRAFANA_DOMAIN", "").strip(),
+        "monitoring_grafana_require_auth": as_bool(read_value(values, "MONITORING_GRAFANA_REQUIRE_AUTH", "true"), True),
+        "monitoring_grafana_require_https": as_bool(read_value(values, "MONITORING_GRAFANA_REQUIRE_HTTPS", "true"), True),
+        "monitoring_grafana_anonymous_enabled": False,
+        "monitoring_exporter_bind_host": read_value(values, "MONITORING_EXPORTER_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "monitoring_exporter_allowed_source_hosts": as_list(read_value(values, "MONITORING_EXPORTER_ALLOWED_SOURCE_HOSTS", ""), []),
         "node_exporter_enabled": as_bool(read_value(values, "MONITORING_NODE_EXPORTER_ENABLED", "true"), True),
-        "mysqld_exporter_enabled": as_bool(read_value(values, "MONITORING_MYSQLD_EXPORTER_ENABLED", "true"), True),
+        "mysqld_exporter_enabled": as_bool(read_value(values, "MONITORING_MYSQLD_EXPORTER_ENABLED", "false"), False),
         "mysqld_exporter_user": require_value(values, "MONITORING_MYSQLD_EXPORTER_USER"),
+        "nginx_exporter_enabled": as_bool(read_value(values, "MONITORING_NGINX_EXPORTER_ENABLED", "false"), False),
+        "php_fpm_exporter_enabled": as_bool(read_value(values, "MONITORING_PHP_FPM_EXPORTER_ENABLED", "false"), False),
+        "blackbox_exporter_enabled": blackbox_exporter_enabled,
+        "monitoring_blackbox_targets": monitoring_blackbox_targets,
+        "monitoring_glpi_custom_metrics_enabled": as_bool(read_value(values, "MONITORING_GLPI_CUSTOM_METRICS_ENABLED", "false"), False),
+        "monitoring_glpi_custom_metrics_interval_seconds": as_int(read_value(values, "MONITORING_GLPI_CUSTOM_METRICS_INTERVAL_SECONDS", "300"), 300),
+        "monitoring_glpi_metrics_db_user": read_value(values, "MONITORING_GLPI_METRICS_DB_USER", "amos_metrics").strip() or "amos_metrics",
+        "monitoring_glpi_backup_freshness_enabled": as_bool(read_value(values, "MONITORING_GLPI_BACKUP_FRESHNESS_ENABLED", "false"), False),
+        "monitoring_glpi_backup_max_age_hours": as_int(read_value(values, "MONITORING_GLPI_BACKUP_MAX_AGE_HOURS", "24"), 24),
         "monitoring_labels": as_json_object(read_value(values, "MONITORING_LABELS_JSON", "{}"), {}),
         "monitoring_thresholds": as_json_object(read_value(values, "MONITORING_THRESHOLDS_JSON", "{}"), {}),
         "monitoring_scrape_profiles": as_json_object(
@@ -562,6 +976,9 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         ),
         "monitoring_dashboard_profile": read_value(values, "MONITORING_DASHBOARD_PROFILE", "glpi-standard"),
         "monitoring_alert_routes": as_json_object(read_value(values, "MONITORING_ALERT_ROUTES_JSON", "{}"), {}),
+        "alertmanager_enabled": as_bool(read_value(values, "ALERTMANAGER_ENABLED", "false"), False),
+        "alertmanager_bind_host": read_value(values, "MONITORING_ALERTMANAGER_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        "alertmanager_port": as_int(read_value(values, "MONITORING_ALERTMANAGER_PORT", "9093"), 9093),
         "alert_tls_expiry_warning_days": as_int(read_value(values, "ALERTING_TLS_EXPIRY_WARNING_DAYS", "30"), 30),
         "security_allow_insecure_non_production": as_bool(read_value(values, "SECURITY_ALLOW_INSECURE_NON_PRODUCTION", "true"), True),
         "security_require_tls": as_bool(read_value(values, "SECURITY_REQUIRE_TLS", "false"), False),

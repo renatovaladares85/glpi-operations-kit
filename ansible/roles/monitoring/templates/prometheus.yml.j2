@@ -1,0 +1,69 @@
+global:
+  scrape_interval: "{{ (monitoring_scrape_profiles.default.interval | default('30s')) if monitoring_scrape_profiles is mapping else '30s' }}"
+  scrape_timeout: "{{ (monitoring_scrape_profiles.default.timeout | default('10s')) if monitoring_scrape_profiles is mapping else '10s' }}"
+  external_labels:
+{% for key, value in (monitoring_labels | default({})).items() %}
+    {{ key }}: "{{ value }}"
+{% endfor %}
+    environment: "{{ environment_name | default('unknown') }}"
+
+rule_files:
+  - /etc/prometheus/rules/glpi-alerts.yml
+
+scrape_configs:
+  - job_name: node
+    static_configs:
+{% for host in (groups.get('glpi_app', []) + groups.get('glpi_db', [])) | unique %}
+      - targets: ["{{ hostvars[host].ansible_host | default(host) }}:9100"]
+        labels:
+          role: "{{ 'app' if host in groups.get('glpi_app', []) else 'db' }}"
+{% endfor %}
+
+{% if mysqld_exporter_enabled | default(false) %}
+  - job_name: mysqld
+    static_configs:
+{% for host in groups.get('glpi_db', []) %}
+      - targets: ["{{ hostvars[host].ansible_host | default(host) }}:9104"]
+        labels:
+          role: db
+{% endfor %}
+{% endif %}
+
+{% if nginx_exporter_enabled | default(false) %}
+  - job_name: nginx
+    static_configs:
+{% for host in groups.get('glpi_app', []) %}
+      - targets: ["{{ hostvars[host].ansible_host | default(host) }}:9113"]
+        labels:
+          role: app
+{% endfor %}
+{% endif %}
+
+{% if php_fpm_exporter_enabled | default(false) %}
+  - job_name: php_fpm
+    static_configs:
+{% for host in groups.get('glpi_app', []) %}
+      - targets: ["{{ hostvars[host].ansible_host | default(host) }}:9253"]
+        labels:
+          role: app
+{% endfor %}
+{% endif %}
+
+{% if blackbox_exporter_enabled | default(false) %}
+  - job_name: blackbox_http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+{% for target in monitoring_blackbox_targets | default([]) %}
+          - "{{ target }}"
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: "{{ monitoring_exporter_bind_host | default('127.0.0.1') }}:9115"
+{% endif %}

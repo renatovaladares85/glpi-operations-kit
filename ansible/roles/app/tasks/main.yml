@@ -181,6 +181,7 @@
     owner: root
     group: root
     mode: "0644"
+    backup: true
   when: glpi_web_server_type == 'nginx'
   notify: Reload nginx
 
@@ -269,6 +270,24 @@
   when: glpi_web_server_type == 'lighttpd'
   notify: Reload lighttpd
 
+- name: Deploy GLPI Redis integration script
+  ansible.builtin.copy:
+    src: glpi-redis-integration.sh
+    dest: /usr/local/sbin/glpi-redis-integration.sh
+    owner: root
+    group: root
+    mode: "0750"
+    backup: true
+
+- name: Deploy GLPI Redis session rollback script
+  ansible.builtin.copy:
+    src: glpi-redis-session-rollback.sh
+    dest: /usr/local/sbin/glpi-redis-session-rollback.sh
+    owner: root
+    group: root
+    mode: "0750"
+    backup: true
+
 - name: Deploy GLPI cron wrapper
   ansible.builtin.template:
     src: glpi-cron.sh.j2
@@ -277,16 +296,28 @@
     group: root
     mode: "0750"
 
-- name: Configure GLPI cron job
+- name: Read existing GLPI user crontab before cron migration
+  ansible.builtin.command: "crontab -u {{ glpi_data_owner }} -l"
+  register: glpi_legacy_user_crontab
+  failed_when: false
+  changed_when: false
+
+- name: Backup legacy GLPI user crontab before removal
+  ansible.builtin.copy:
+    content: "{{ glpi_legacy_user_crontab.stdout }}\n"
+    dest: "/tmp/glpi_user_crontab_{{ glpi_data_owner }}_{{ ansible_date_time.iso8601_basic_short }}.bak"
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - glpi_legacy_user_crontab.rc == 0
+    - "'/usr/local/bin/glpi-cron.sh' in (glpi_legacy_user_crontab.stdout | default(''))"
+
+- name: Remove legacy GLPI user crontab entry
   ansible.builtin.cron:
     name: GLPI background tasks
     user: "{{ glpi_data_owner }}"
-    job: "/usr/local/bin/glpi-cron.sh >> {{ glpi_log_dir }}/cron.log 2>&1"
-    minute: "{{ glpi_cron_schedule.split(' ')[0] }}"
-    hour: "{{ glpi_cron_schedule.split(' ')[1] }}"
-    day: "{{ glpi_cron_schedule.split(' ')[2] }}"
-    month: "{{ glpi_cron_schedule.split(' ')[3] }}"
-    weekday: "{{ glpi_cron_schedule.split(' ')[4] }}"
+    state: absent
 
 - name: Validate nginx configuration
   ansible.builtin.command: nginx -t
@@ -352,6 +383,8 @@
     - { path: "{{ glpi_log_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
     - { path: "{{ glpi_config_dir }}/local_define.php", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0640" }
     - { path: "/usr/local/bin/glpi-cron.sh", owner: "root", group: "root", mode: "0750" }
+    - { path: "/usr/local/sbin/glpi-redis-integration.sh", owner: "root", group: "root", mode: "0750" }
+    - { path: "/usr/local/sbin/glpi-redis-session-rollback.sh", owner: "root", group: "root", mode: "0750" }
   register: glpi_permission_stats
   changed_when: false
 
@@ -413,6 +446,23 @@
 
 - name: Flush handlers before web routing checks
   ansible.builtin.meta: flush_handlers
+
+- name: Configure GLPI Redis cache and PHP-FPM sessions
+  ansible.builtin.command: /usr/local/sbin/glpi-redis-integration.sh
+  environment:
+    GLPI_PATH: "{{ glpi_install_dir }}"
+    GLPI_WEB_USER: "{{ glpi_data_owner }}"
+    GLPI_PHP_FPM_SERVICE: "{{ glpi_php_fpm_service }}"
+    GLPI_WEB_HTTP_PORT: "{{ web_http_port | string }}"
+    GLPI_WEB_HTTPS_PORT: "{{ web_https_port | string }}"
+    GLPI_WEB_HOST_HEADER: "{{ glpi_domain }}"
+    GLPI_TLS_MODE: "{{ glpi_tls_mode }}"
+    GLPI_REDIS_CACHE_PREFIX: "{{ glpi_redis_cache_prefix | default('') }}"
+    GLPI_REDIS_SESSION_LOCKING: "{{ glpi_redis_session_locking | default('0') }}"
+    GLPI_REDIS_MAXMEMORY: "{{ glpi_redis_maxmemory | default('') }}"
+    GLPI_REDIS_MAXMEMORY_POLICY: "{{ glpi_redis_maxmemory_policy | default('') }}"
+  register: glpi_redis_integration
+  changed_when: "'GLPI_REDIS_INTEGRATION_CHANGED=yes' in (glpi_redis_integration.stdout | default(''))"
 
 - name: Check GLPI HTTP response by hostname header
   ansible.builtin.uri:

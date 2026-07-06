@@ -1,0 +1,1 @@
+ARGS="--web.listen-address={{ monitoring_exporter_bind_host | default('127.0.0.1') }}:9100{% if monitoring_glpi_custom_metrics_enabled | default(false) or monitoring_glpi_backup_freshness_enabled | default(false) %} --collector.textfile.directory=/var/lib/prometheus/node-exporter{% endif %}"

@@ -1,0 +1,1 @@
+ARGS="-nginx.scrape-uri=http://127.0.0.1/nginx_status -web.listen-address={{ monitoring_exporter_bind_host | default('127.0.0.1') }}:9113"

@@ -1,0 +1,1 @@
+ARGS="--web.listen-address={{ monitoring_exporter_bind_host | default('127.0.0.1') }}:9253 --phpfpm.scrape-uri=unix://{{ glpi_php_fpm_socket }};/status"
