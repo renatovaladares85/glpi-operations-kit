@@ -1,6 +1,6 @@
 ---
 - name: Install GLPI application packages
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ glpi_app_packages }}"
     state: present
 
@@ -138,7 +138,7 @@
 - name: Deploy php.ini overrides for GLPI
   ansible.builtin.template:
     src: glpi-php.ini.j2
-    dest: /etc/php/8.3/fpm/conf.d/99-glpi.ini
+    dest: "{{ glpi_php_ini_fpm_path }}"
     owner: root
     group: root
     mode: "0644"
@@ -147,7 +147,7 @@
 - name: Deploy php.ini overrides for GLPI CLI
   ansible.builtin.template:
     src: glpi-php.ini.j2
-    dest: /etc/php/8.3/cli/conf.d/99-glpi.ini
+    dest: "{{ glpi_php_ini_cli_path }}"
     owner: root
     group: root
     mode: "0644"
@@ -155,7 +155,7 @@
 - name: Deploy PHP-FPM pool configuration
   ansible.builtin.template:
     src: glpi-pool.conf.j2
-    dest: /etc/php/8.3/fpm/pool.d/glpi.conf
+    dest: "{{ glpi_php_fpm_pool_path }}"
     owner: root
     group: root
     mode: "0644"
@@ -163,7 +163,7 @@
 
 - name: Disable default PHP-FPM pool to avoid socket conflicts
   ansible.builtin.file:
-    path: /etc/php/8.3/fpm/pool.d/www.conf
+    path: "{{ glpi_php_fpm_default_pool_path }}"
     state: absent
   notify: Restart php-fpm
 
@@ -177,7 +177,7 @@
 - name: Deploy Nginx virtual host
   ansible.builtin.template:
     src: nginx-glpi.conf.j2
-    dest: /etc/nginx/sites-available/glpi.conf
+    dest: "{{ glpi_nginx_conf_available_path }}"
     owner: root
     group: root
     mode: "0644"
@@ -187,25 +187,31 @@
 
 - name: Enable GLPI virtual host
   ansible.builtin.file:
-    src: /etc/nginx/sites-available/glpi.conf
-    dest: /etc/nginx/sites-enabled/glpi.conf
+    src: "{{ glpi_nginx_conf_available_path }}"
+    dest: "{{ glpi_nginx_conf_enabled_path }}"
     state: link
     force: true
-  when: glpi_web_server_type == 'nginx'
+  when:
+    - glpi_web_server_type == 'nginx'
+    - glpi_nginx_conf_enabled_path != glpi_nginx_conf_available_path
   notify: Reload nginx
 
 - name: Disable default nginx site
   ansible.builtin.file:
-    path: /etc/nginx/sites-enabled/default
+    path: "{{ glpi_nginx_default_enabled_path }}"
     state: absent
-  when: glpi_web_server_type == 'nginx'
+  when:
+    - glpi_web_server_type == 'nginx'
+    - glpi_nginx_default_enabled_path | length > 0
   notify: Reload nginx
 
 - name: Remove default nginx site definition file when present
   ansible.builtin.file:
-    path: /etc/nginx/sites-available/default
+    path: "{{ glpi_nginx_default_available_path }}"
     state: absent
-  when: glpi_web_server_type == 'nginx'
+  when:
+    - glpi_web_server_type == 'nginx'
+    - glpi_nginx_default_available_path | length > 0
   notify: Reload nginx
 
 - name: Deploy Apache virtual host
@@ -335,7 +341,7 @@
   when: glpi_web_server_type == 'lighttpd'
 
 - name: Validate php-fpm configuration
-  ansible.builtin.command: php-fpm8.3 -t
+  ansible.builtin.command: "{{ glpi_php_fpm_test_command }}"
   changed_when: false
 
 - name: Validate PHP bcmath extension for GLPI 11 baseline
@@ -426,7 +432,7 @@
 
 - name: Ensure apache2 is enabled
   ansible.builtin.service:
-    name: apache2
+    name: "{{ glpi_apache_service }}"
     state: started
     enabled: true
   when: glpi_web_server_type == 'apache'

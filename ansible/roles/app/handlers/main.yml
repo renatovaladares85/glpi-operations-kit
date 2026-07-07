@@ -11,7 +11,7 @@
 
 - name: Reload apache2
   ansible.builtin.service:
-    name: apache2
+    name: "{{ glpi_apache_service | default('apache2') }}"
     state: reloaded
 
 - name: Reload lighttpd

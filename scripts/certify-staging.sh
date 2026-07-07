@@ -65,7 +65,12 @@ shell_escape_single_quotes() {
 }
 
 nginx_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "nginx -t" -o; }
-php_fpm_check() { ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "php-fpm8.3 -t" -o; }
+php_fpm_check() {
+  local php_fpm_test_command
+  php_fpm_test_command="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_php_fpm_test_command" || true)"
+  [[ -z "${php_fpm_test_command// }" ]] && php_fpm_test_command="php-fpm8.3 -t"
+  ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$php_fpm_test_command" -o
+}
 db_connectivity_check() {
   if [[ "$DB_DEPLOYMENT_MODE" == "managed" ]]; then
     local db_host db_port db_user db_password db_admin_password

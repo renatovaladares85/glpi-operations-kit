@@ -2,8 +2,8 @@
 user = {{ glpi_data_owner }}
 group = {{ glpi_data_group }}
 listen = {{ glpi_php_fpm_socket }}
-listen.owner = www-data
-listen.group = www-data
+listen.owner = {{ glpi_data_owner }}
+listen.group = {{ glpi_data_group }}
 pm = {{ glpi_pm }}
 pm.max_children = {{ glpi_pm_max_children }}
 pm.start_servers = {{ glpi_pm_start_servers }}

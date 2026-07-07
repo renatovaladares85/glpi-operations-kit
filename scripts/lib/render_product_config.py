@@ -18,7 +18,7 @@ MONITORING_PROFILES = {"minimal", "standard", "full", "external_prometheus", "ex
 MONITORING_GRAFANA_PUBLIC_MODES = {"disabled", "path", "subdomain"}
 DEFAULT_MAILPIT_IMAGE = "axllent/mailpit:v1.30.1"
 
-DEFAULT_GLPI_APP_PACKAGES = [
+DEFAULT_GLPI_APP_PACKAGES_DEBIAN = [
     "php-fpm",
     "php-cli",
     "php-curl",
@@ -43,13 +43,109 @@ DEFAULT_GLPI_APP_PACKAGES = [
     "mariadb-client",
 ]
 
-WEB_SERVER_PACKAGES = {
-    "nginx": ["nginx"],
-    "apache": ["apache2", "libapache2-mod-fcgid"],
-    "lighttpd": ["lighttpd"],
+DEFAULT_GLPI_APP_PACKAGES_RHEL = [
+    "php-fpm",
+    "php-cli",
+    "php-curl",
+    "php-gd",
+    "php-intl",
+    "php-mbstring",
+    "php-bcmath",
+    "php-mysqlnd",
+    "php-xml",
+    "php-zip",
+    "php-bz2",
+    "php-pecl-apcu",
+    "php-ldap",
+    "php-imap",
+    "php-opcache",
+    "php-pecl-redis",
+    "redis",
+    "tar",
+    "xz",
+    "curl",
+    "openssl",
+    "mariadb",
+]
+
+DEFAULT_GLPI_APP_PACKAGES_BY_FAMILY = {
+    "debian": DEFAULT_GLPI_APP_PACKAGES_DEBIAN,
+    "rhel": DEFAULT_GLPI_APP_PACKAGES_RHEL,
 }
 
-DEFAULT_DATABASE_PACKAGES = ["mariadb-server", "mariadb-client", "python3-pymysql"]
+WEB_SERVER_PACKAGES_BY_FAMILY = {
+    "debian": {
+        "nginx": ["nginx"],
+        "apache": ["apache2", "libapache2-mod-fcgid"],
+        "lighttpd": ["lighttpd"],
+    },
+    "rhel": {
+        "nginx": ["nginx"],
+        "apache": ["httpd"],
+        "lighttpd": ["lighttpd"],
+    },
+}
+
+WEB_SERVER_PACKAGES = WEB_SERVER_PACKAGES_BY_FAMILY["debian"]
+
+PLATFORM_DEFAULTS = {
+    "debian": {
+        "glpi_data_owner": "www-data",
+        "glpi_data_group": "www-data",
+        "php_fpm_service": "php8.3-fpm",
+        "php_fpm_socket": "/run/php/php8.3-fpm.sock",
+        "php_fpm_test_command": "php-fpm8.3 -t",
+        "php_ini_fpm_path": "/etc/php/8.3/fpm/conf.d/99-glpi.ini",
+        "php_ini_cli_path": "/etc/php/8.3/cli/conf.d/99-glpi.ini",
+        "php_fpm_pool_path": "/etc/php/8.3/fpm/pool.d/glpi.conf",
+        "php_fpm_default_pool_path": "/etc/php/8.3/fpm/pool.d/www.conf",
+        "nginx_conf_available_path": "/etc/nginx/sites-available/glpi.conf",
+        "nginx_conf_enabled_path": "/etc/nginx/sites-enabled/glpi.conf",
+        "nginx_default_available_path": "/etc/nginx/sites-available/default",
+        "nginx_default_enabled_path": "/etc/nginx/sites-enabled/default",
+        "nginx_fastcgi_params": "snippets/fastcgi-php.conf",
+        "apache_service": "apache2",
+    },
+    "rhel": {
+        "glpi_data_owner": "apache",
+        "glpi_data_group": "apache",
+        "php_fpm_service": "php-fpm",
+        "php_fpm_socket": "/run/php-fpm/glpi.sock",
+        "php_fpm_test_command": "php-fpm -t",
+        "php_ini_fpm_path": "/etc/php.d/99-glpi.ini",
+        "php_ini_cli_path": "/etc/php.d/99-glpi.ini",
+        "php_fpm_pool_path": "/etc/php-fpm.d/glpi.conf",
+        "php_fpm_default_pool_path": "/etc/php-fpm.d/www.conf",
+        "nginx_conf_available_path": "/etc/nginx/conf.d/glpi.conf",
+        "nginx_conf_enabled_path": "/etc/nginx/conf.d/glpi.conf",
+        "nginx_default_available_path": "",
+        "nginx_default_enabled_path": "",
+        "nginx_fastcgi_params": "fastcgi_params",
+        "apache_service": "httpd",
+    },
+}
+
+WEB_SERVER_SERVICES = {
+    "debian": {
+        "nginx": "nginx",
+        "apache": "apache2",
+        "lighttpd": "lighttpd",
+    },
+    "rhel": {
+        "nginx": "nginx",
+        "apache": "httpd",
+        "lighttpd": "lighttpd",
+    },
+}
+
+DEFAULT_GLPI_APP_PACKAGES = DEFAULT_GLPI_APP_PACKAGES_DEBIAN
+
+DEFAULT_DATABASE_PACKAGES_BY_FAMILY = {
+    "debian": ["mariadb-server", "mariadb-client", "python3-pymysql"],
+    "rhel": ["mariadb-server", "mariadb", "python3-PyMySQL"],
+}
+
+DEFAULT_DATABASE_PACKAGES = DEFAULT_DATABASE_PACKAGES_BY_FAMILY["debian"]
 
 REQUIRED_PUBLIC_KEYS = {
     "PRODUCT_NAME": {
@@ -299,6 +395,31 @@ BOOL_KEYS = {
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def read_os_release(os_release_path=None) -> dict:
+    path = os_release_path or Path(os.environ.get("GLPI_OS_RELEASE_FILE", "/etc/os-release"))
+    if not path.is_file():
+        return {}
+    values = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value.strip().strip('"')
+    return values
+
+
+def detect_platform_family(os_release=None) -> str:
+    release = os_release if os_release is not None else read_os_release()
+    distro_id = release.get("ID", "").lower()
+    id_like = set(release.get("ID_LIKE", "").lower().split())
+    if distro_id in {"ubuntu", "debian"} or {"ubuntu", "debian"} & id_like:
+        return "debian"
+    if distro_id in {"rocky", "rhel", "almalinux", "centos"} or {"rhel", "centos"} & id_like:
+        return "rhel"
+    return "debian"
 
 
 def fail(message: str) -> None:
@@ -827,6 +948,11 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
     if web_server_type not in WEB_SERVER_TYPES:
         fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.")
+    platform_family = detect_platform_family()
+    platform_defaults = PLATFORM_DEFAULTS[platform_family]
+    web_server_packages = WEB_SERVER_PACKAGES_BY_FAMILY[platform_family]
+    default_app_packages = DEFAULT_GLPI_APP_PACKAGES_BY_FAMILY[platform_family]
+    default_database_packages = DEFAULT_DATABASE_PACKAGES_BY_FAMILY[platform_family]
 
     environment_name = require_value(values, "ENVIRONMENT_NAME").strip()
     release_root = read_value(values, "PATH_GLPI_RELEASE_ROOT", "/usr/share").strip() or "/usr/share"
@@ -850,12 +976,9 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
 
     app_packages_value = read_value(values, "GLPI_APP_PACKAGES", "").strip()
     if app_packages_value:
-        app_packages = as_list(app_packages_value, DEFAULT_GLPI_APP_PACKAGES)
+        app_packages = as_list(app_packages_value, default_app_packages)
     else:
-        app_packages = WEB_SERVER_PACKAGES[web_server_type] + DEFAULT_GLPI_APP_PACKAGES
-
-    if web_server_type == "apache":
-        app_packages.append("libapache2-mod-php8.3")
+        app_packages = web_server_packages[web_server_type] + default_app_packages
 
     default_blackbox_target = f"{'https' if tls_mode != 'none' else 'http'}://{glpi_domain}/"
     blackbox_exporter_enabled = as_bool(read_value(values, "MONITORING_BLACKBOX_EXPORTER_ENABLED", "true"), True)
@@ -878,6 +1001,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "environment_stage": read_value(values, "ENVIRONMENT_STAGE", environment_name),
         "execution_mode": execution_mode,
         "execution_host_role": host_role,
+        "platform_family": platform_family,
         "topology_mode": read_value(values, "TOPOLOGY_MODE", "dual-server"),
         "database_deployment_mode": db_deployment_mode,
         "glpi_version": glpi_version,
@@ -905,10 +1029,22 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_tls_provided_local_key_path": os.path.expanduser(read_value(values, "TLS_PROVIDED_LOCAL_KEY_PATH", "").strip())
         if read_value(values, "TLS_PROVIDED_LOCAL_KEY_PATH", "").strip()
         else "",
-        "glpi_data_owner": read_value(values, "GLPI_FILESYSTEM_OWNER", "www-data"),
-        "glpi_data_group": read_value(values, "GLPI_FILESYSTEM_GROUP", "www-data"),
-        "glpi_php_fpm_service": read_value(values, "PHP_FPM_SERVICE_NAME", "php8.3-fpm"),
-        "glpi_php_fpm_socket": read_value(values, "PHP_FPM_SOCKET", "/run/php/php8.3-fpm.sock"),
+        "glpi_data_owner": read_value(values, "GLPI_FILESYSTEM_OWNER", platform_defaults["glpi_data_owner"]),
+        "glpi_data_group": read_value(values, "GLPI_FILESYSTEM_GROUP", platform_defaults["glpi_data_group"]),
+        "glpi_php_fpm_service": read_value(values, "PHP_FPM_SERVICE_NAME", platform_defaults["php_fpm_service"]),
+        "glpi_php_fpm_socket": read_value(values, "PHP_FPM_SOCKET", platform_defaults["php_fpm_socket"]),
+        "glpi_php_fpm_test_command": platform_defaults["php_fpm_test_command"],
+        "glpi_php_ini_fpm_path": platform_defaults["php_ini_fpm_path"],
+        "glpi_php_ini_cli_path": platform_defaults["php_ini_cli_path"],
+        "glpi_php_fpm_pool_path": platform_defaults["php_fpm_pool_path"],
+        "glpi_php_fpm_default_pool_path": platform_defaults["php_fpm_default_pool_path"],
+        "glpi_nginx_conf_available_path": platform_defaults["nginx_conf_available_path"],
+        "glpi_nginx_conf_enabled_path": platform_defaults["nginx_conf_enabled_path"],
+        "glpi_nginx_default_available_path": platform_defaults["nginx_default_available_path"],
+        "glpi_nginx_default_enabled_path": platform_defaults["nginx_default_enabled_path"],
+        "glpi_nginx_fastcgi_params": platform_defaults["nginx_fastcgi_params"],
+        "glpi_web_service": WEB_SERVER_SERVICES[platform_family][web_server_type],
+        "glpi_apache_service": platform_defaults["apache_service"],
         "web_http_port": as_int(require_value(values, "WEB_HTTP_PORT"), 80),
         "web_https_port": as_int(require_value(values, "WEB_HTTPS_PORT"), 443),
         "glpi_app_packages": app_packages,
@@ -999,7 +1135,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "email_mailpit_container_name": "mailpit",
         "mariadb_bind_address": read_value(values, "DATABASE_BIND_ADDRESS", "0.0.0.0"),
         "mariadb_port": as_int(read_value(values, "DATABASE_PORT", "3306"), 3306),
-        "mariadb_version_packages": as_list(read_value(values, "DATABASE_PACKAGES", ""), DEFAULT_DATABASE_PACKAGES),
+        "mariadb_version_packages": as_list(read_value(values, "DATABASE_PACKAGES", ""), default_database_packages),
         "mariadb_innodb_buffer_pool_size": profile_value(values, active_profile_name, "MARIADB_INNODB_BUFFER_POOL_SIZE", "2G"),
         "mariadb_max_connections": as_int(profile_value(values, active_profile_name, "MARIADB_MAX_CONNECTIONS", "80"), 80),
         "mariadb_tmp_table_size": profile_value(values, active_profile_name, "MARIADB_TMP_TABLE_SIZE", "128M"),
@@ -1128,7 +1264,7 @@ def main() -> None:
     try:
         import yaml
     except ModuleNotFoundError:
-        fail("python3-yaml support is required. Install the Ubuntu package python3-yaml.")
+        fail("python3-yaml support is required. Install the OS Python YAML package.")
 
     execution_mode, host_role = resolve_execution_contract(values)
     db_deployment_mode = resolve_database_deployment_mode(values)

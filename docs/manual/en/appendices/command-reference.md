@@ -6,9 +6,17 @@ If your current task is `.env` synchronization, go directly to the sections `Gen
 
 ## Prepare host tooling
 
+Ubuntu 24.04:
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y bash git python3 python3-yaml ansible openssh-client
+```
+
+Rocky/RHEL-like 9.x:
+
+```bash
+sudo dnf install -y bash git python3 python3-PyYAML ansible-core openssh-clients
 ```
 
 Use this when the execution host is new or missing dependencies.

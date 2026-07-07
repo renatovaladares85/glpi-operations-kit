@@ -6,9 +6,17 @@ Se sua tarefa agora é sincronizar `.env`, vá direto para as seções `Gerar ou
 
 ## Preparar ferramentas do host
 
+Ubuntu 24.04:
+
 ```bash
 sudo apt-get update
 sudo apt-get install -y bash git python3 python3-yaml ansible openssh-client
+```
+
+Rocky/RHEL-like 9.x:
+
+```bash
+sudo dnf install -y bash git python3 python3-PyYAML ansible-core openssh-clients
 ```
 
 Use quando o host executor for novo ou estiver sem dependências.

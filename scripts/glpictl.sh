@@ -74,10 +74,13 @@ MANAGED_DB_TIMEZONE_MODE="disabled"
 MANAGED_DB_TIMEZONE_LEGACY_GRANT="false"
 
 build_execution_test_commands() {
+  local web_service php_service
+  web_service="$(read_effective_runtime_value "glpi_web_service" "nginx")"
+  php_service="$(read_effective_runtime_value "glpi_php_fpm_service" "php8.3-fpm")"
   EXECUTION_TEST_COMMANDS=()
   EXECUTION_TEST_COMMANDS+=("curl -k -I ${EXECUTION_ACCESS_URL}")
   EXECUTION_TEST_COMMANDS+=("sudo nginx -t")
-  EXECUTION_TEST_COMMANDS+=("sudo systemctl is-active nginx php8.3-fpm")
+  EXECUTION_TEST_COMMANDS+=("sudo systemctl is-active ${web_service} ${php_service}")
   EXECUTION_TEST_COMMANDS+=("tail -n 50 .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log")
   if [[ "$EXECUTION_ACCESS_SCHEME" == "https" ]]; then
     EXECUTION_TEST_COMMANDS+=("openssl s_client -connect ${EXECUTION_ACCESS_HOST}:${EXECUTION_ACCESS_PORT} -servername ${EXECUTION_ACCESS_HOST} </dev/null 2>/dev/null | openssl x509 -noout -dates")
@@ -1904,13 +1907,13 @@ apply_managed_db_mysql_client_workaround() {
     return 1
   fi
 
-  if ! prompt_yes_no "Managed DB check detected missing MySQL client on APP host. Apply workaround now (install default-mysql-client)?"; then
+  if ! prompt_yes_no "Managed DB check detected missing MySQL client on APP host. Apply workaround now (install OS MariaDB/MySQL client package)?"; then
     echo "    workaround: operator skipped automatic MySQL client installation."
     return 1
   fi
 
   write_step "Applying workaround: installing MySQL client on APP host"
-  if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y default-mysql-client" -o; then
+  if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "set -euo pipefail; if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y default-mysql-client; elif command -v dnf >/dev/null 2>&1; then dnf install -y mariadb; elif command -v yum >/dev/null 2>&1; then yum install -y mariadb; else echo 'No supported package manager found (apt, dnf, yum).' >&2; exit 1; fi" -o; then
     echo "Automatic workaround failed: unable to install MySQL client on APP host." >&2
     return 1
   fi

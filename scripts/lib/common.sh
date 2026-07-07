@@ -645,7 +645,7 @@ require_python_yaml_support() {
     return 1
   fi
   if ! python3 -c "import yaml" >/dev/null 2>&1; then
-    echo "python3-yaml support is required. Install PyYAML or the Ubuntu python3-yaml package." >&2
+    echo "python3-yaml support is required. Install PyYAML or the OS Python YAML package." >&2
     return 1
   fi
 }
@@ -1039,20 +1039,147 @@ finalize_precheck_reports() {
   chmod 600 "$report_md_path"
 }
 
-ubuntu_supported() {
-  if [[ ! -f /etc/os-release ]]; then
+os_release_file_path() {
+  printf '%s\n' "${GLPI_OS_RELEASE_FILE:-/etc/os-release}"
+}
+
+os_release_value() {
+  local key="$1"
+  local os_release_file
+  os_release_file="$(os_release_file_path)"
+  if [[ ! -f "$os_release_file" ]]; then
     return 1
   fi
-  local distro_id distro_version
-  distro_id="$(awk -F= '/^ID=/ {gsub(/"/,"",$2); print $2}' /etc/os-release | head -n1)"
-  distro_version="$(awk -F= '/^VERSION_ID=/ {gsub(/"/,"",$2); print $2}' /etc/os-release | head -n1)"
-  if [[ "$distro_id" != "ubuntu" ]]; then
+  awk -F= -v key="$key" '
+    $1 == key {
+      value = $0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^"/, "", value)
+      gsub(/"$/, "", value)
+      print value
+      exit
+    }
+  ' "$os_release_file"
+}
+
+os_release_token_matches() {
+  local value="$1"
+  local expected="$2"
+  local token
+  for token in $value; do
+    if [[ "$token" == "$expected" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+platform_family() {
+  local distro_id distro_like
+  distro_id="$(os_release_value "ID" | tr '[:upper:]' '[:lower:]' || true)"
+  distro_like="$(os_release_value "ID_LIKE" | tr '[:upper:]' '[:lower:]' || true)"
+
+  case "$distro_id" in
+    ubuntu|debian)
+      echo "debian"
+      return 0
+      ;;
+    rocky|rhel|almalinux|centos)
+      echo "rhel"
+      return 0
+      ;;
+  esac
+
+  if os_release_token_matches "$distro_like" "debian" || os_release_token_matches "$distro_like" "ubuntu"; then
+    echo "debian"
+    return 0
+  fi
+  if os_release_token_matches "$distro_like" "rhel" || os_release_token_matches "$distro_like" "centos"; then
+    echo "rhel"
+    return 0
+  fi
+
+  echo "unknown"
+}
+
+platform_human_name() {
+  local distro_id distro_version distro_name
+  distro_id="$(os_release_value "ID" || true)"
+  distro_version="$(os_release_value "VERSION_ID" || true)"
+  distro_name="$(os_release_value "PRETTY_NAME" || true)"
+  if [[ -n "${distro_name// }" ]]; then
+    echo "$distro_name"
+    return 0
+  fi
+  echo "${distro_id:-unknown} ${distro_version:-unknown}"
+}
+
+platform_supported() {
+  if [[ ! -f "$(os_release_file_path)" ]]; then
     return 1
   fi
-  if [[ "$distro_version" != "24.04" && "$distro_version" != "24.04.1" && "$distro_version" != "24.04.2" && "$distro_version" != "24.04.3" ]]; then
-    return 1
+  local distro_id distro_version distro_major family
+  distro_id="$(os_release_value "ID" | tr '[:upper:]' '[:lower:]' || true)"
+  distro_version="$(os_release_value "VERSION_ID" || true)"
+  distro_major="${distro_version%%.*}"
+  family="$(platform_family)"
+
+  if [[ "$distro_id" == "ubuntu" && "$distro_version" == 24.04* ]]; then
+    return 0
   fi
-  return 0
+  if [[ "$family" == "rhel" && "$distro_major" == "9" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+platform_package_manager() {
+  case "$(platform_family)" in
+    debian) echo "apt" ;;
+    rhel) echo "dnf" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+package_install_action() {
+  local package_name="$1"
+  case "$(platform_package_manager)" in
+    apt) echo "apt install ${package_name}" ;;
+    dnf) echo "dnf install ${package_name}" ;;
+    yum) echo "yum install ${package_name}" ;;
+    *) echo "manual install ${package_name}" ;;
+  esac
+}
+
+package_install_command() {
+  local package_name="$1"
+  case "$(platform_package_manager)" in
+    apt)
+      if command -v sudo >/dev/null 2>&1; then
+        echo "sudo apt-get update && sudo apt-get install -y ${package_name}"
+      else
+        echo "apt-get update && apt-get install -y ${package_name}"
+      fi
+      ;;
+    dnf)
+      if command -v sudo >/dev/null 2>&1; then
+        echo "sudo dnf install -y ${package_name}"
+      else
+        echo "dnf install -y ${package_name}"
+      fi
+      ;;
+    yum)
+      if command -v sudo >/dev/null 2>&1; then
+        echo "sudo yum install -y ${package_name}"
+      else
+        echo "yum install -y ${package_name}"
+      fi
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
 }
 
 ssh_public_key_path_for_private_key() {
@@ -1111,25 +1238,81 @@ ensure_ssh_key_material_for_environment() {
 
 package_for_command() {
   local command_name="$1"
-  case "$command_name" in
-    ansible-playbook|ansible-inventory) echo "ansible" ;;
-    git) echo "git" ;;
-    python3) echo "python3" ;;
-    ssh) echo "openssh-client" ;;
-    bash) echo "bash" ;;
-    *) echo "" ;;
+  case "$(platform_family)" in
+    rhel)
+      case "$command_name" in
+        ansible|ansible-playbook|ansible-inventory) echo "ansible-core" ;;
+        git) echo "git" ;;
+        python3) echo "python3" ;;
+        ssh) echo "openssh-clients" ;;
+        bash) echo "bash" ;;
+        mysql) echo "mariadb" ;;
+        *) echo "" ;;
+      esac
+      ;;
+    *)
+      case "$command_name" in
+        ansible|ansible-playbook|ansible-inventory) echo "ansible" ;;
+        git) echo "git" ;;
+        python3) echo "python3" ;;
+        ssh) echo "openssh-client" ;;
+        bash) echo "bash" ;;
+        mysql) echo "mariadb-client" ;;
+        *) echo "" ;;
+      esac
+      ;;
   esac
 }
 
-install_command_ubuntu() {
+package_for_python_yaml() {
+  case "$(platform_family)" in
+    rhel) echo "python3-PyYAML" ;;
+    *) echo "python3-yaml" ;;
+  esac
+}
+
+php_cli_package_for_platform() {
+  local php_version="$1"
+  case "$(platform_family)" in
+    rhel) echo "php-cli" ;;
+    *) echo "php${php_version}-cli" ;;
+  esac
+}
+
+php_fpm_package_for_platform() {
+  local php_version="$1"
+  case "$(platform_family)" in
+    rhel) echo "php-fpm" ;;
+    *) echo "php${php_version}-fpm" ;;
+  esac
+}
+
+php_extension_package_for_platform() {
+  local extension_name="$1"
+  local php_version="$2"
+  case "$(platform_family)" in
+    rhel)
+      case "$extension_name" in
+        mysqli|mysqlnd) echo "php-mysqlnd" ;;
+        redis) echo "php-pecl-redis" ;;
+        apcu) echo "php-pecl-apcu" ;;
+        *) echo "php-${extension_name}" ;;
+      esac
+      ;;
+    *)
+      echo "php${php_version}-${extension_name}"
+      ;;
+  esac
+}
+
+install_command_platform() {
   local command_name="$1"
   local package_name="$2"
-  local install_cmd=""
+  local install_cmd
 
-  if command -v sudo >/dev/null 2>&1; then
-    install_cmd="sudo apt-get update && sudo apt-get install -y ${package_name}"
-  else
-    install_cmd="apt-get update && apt-get install -y ${package_name}"
+  install_cmd="$(package_install_command "$package_name")"
+  if [[ -z "${install_cmd// }" ]]; then
+    return 1
   fi
 
   echo "Trying to install '${command_name}' from package '${package_name}'..."
@@ -1149,7 +1332,7 @@ prompt_install_missing_command() {
     answer="y"
   else
     echo "Command '${command_name}' is missing (${level})."
-    if prompt_yes_no "Install now on this Ubuntu host using package '${package_name}'?"; then
+    if prompt_yes_no "Install now on this $(platform_family) host using package '${package_name}'?"; then
       answer="y"
     else
       answer="n"
@@ -1160,7 +1343,7 @@ prompt_install_missing_command() {
     return 1
   fi
 
-  if install_command_ubuntu "$command_name" "$package_name"; then
+  if install_command_platform "$command_name" "$package_name"; then
     if command -v "$command_name" >/dev/null 2>&1; then
       preflight_print_result "$level" "ok" "command '$command_name' installed successfully"
       return 0
@@ -1168,12 +1351,8 @@ prompt_install_missing_command() {
   fi
 
   echo "Automatic installation failed for '${command_name}'." >&2
-  echo "Manual remediation (Ubuntu):" >&2
-  if command -v sudo >/dev/null 2>&1; then
-    echo "  sudo apt-get update && sudo apt-get install -y ${package_name}" >&2
-  else
-    echo "  apt-get update && apt-get install -y ${package_name}" >&2
-  fi
+  echo "Manual remediation ($(platform_family)):" >&2
+  echo "  $(package_install_command "$package_name")" >&2
   return 1
 }
 
@@ -1197,6 +1376,8 @@ check_or_install_command() {
 check_or_install_python_yaml_support() {
   local level="$1"
   local answer=""
+  local package_name
+  package_name="$(package_for_python_yaml)"
   if ! command -v python3 >/dev/null 2>&1; then
     preflight_print_result "$level" "fail" "python3 command not found for python3-yaml validation"
     return 1
@@ -1211,7 +1392,7 @@ check_or_install_python_yaml_support() {
     answer="y"
   else
     echo "python3-yaml module is missing (${level})."
-    if prompt_yes_no "Install now on this Ubuntu host using package 'python3-yaml'?"; then
+    if prompt_yes_no "Install now on this $(platform_family) host using package '${package_name}'?"; then
       answer="y"
     else
       answer="n"
@@ -1222,7 +1403,7 @@ check_or_install_python_yaml_support() {
     return 1
   fi
 
-  if install_command_ubuntu "python3-yaml" "python3-yaml"; then
+  if install_command_platform "python3-yaml" "$package_name"; then
     if python3 -c "import yaml" >/dev/null 2>&1; then
       preflight_print_result "$level" "ok" "python3-yaml module installed successfully"
       return 0
@@ -1230,12 +1411,8 @@ check_or_install_python_yaml_support() {
   fi
 
   echo "Automatic installation failed for 'python3-yaml'." >&2
-  echo "Manual remediation (Ubuntu):" >&2
-  if command -v sudo >/dev/null 2>&1; then
-    echo "  sudo apt-get update && sudo apt-get install -y python3-yaml" >&2
-  else
-    echo "  apt-get update && apt-get install -y python3-yaml" >&2
-  fi
+  echo "Manual remediation ($(platform_family)):" >&2
+  echo "  $(package_install_command "$package_name")" >&2
   return 1
 }
 
@@ -1263,7 +1440,10 @@ php_extension_enabled() {
 
 package_installed() {
   local package_name="$1"
-  dpkg-query -W -f='${Status}' "$package_name" 2>/dev/null | grep -q "install ok installed"
+  case "$(platform_family)" in
+    rhel) rpm -q "$package_name" >/dev/null 2>&1 ;;
+    *) dpkg-query -W -f='${Status}' "$package_name" 2>/dev/null | grep -q "install ok installed" ;;
+  esac
 }
 
 service_exists() {
@@ -1273,12 +1453,13 @@ service_exists() {
 
 ensure_php_cli_available() {
   local php_version="$1"
-  local cli_package="php${php_version}-cli"
+  local cli_package
+  cli_package="$(php_cli_package_for_platform "$php_version")"
   if command -v php >/dev/null 2>&1; then
     return 0
   fi
   echo "PHP CLI binary not found. Installing ${cli_package} before extension validation." >&2
-  if ! install_command_ubuntu "$cli_package" "$cli_package"; then
+  if ! install_command_platform "$cli_package" "$cli_package"; then
     return 1
   fi
   command -v php >/dev/null 2>&1
@@ -1288,10 +1469,11 @@ auto_remediate_php_extension() {
   local extension_name="$1"
   local php_version="$2"
   local fpm_service="$3"
-  local extension_package="php${php_version}-${extension_name}"
-  local cli_package="php${php_version}-cli"
-  local fpm_package="php${php_version}-fpm"
+  local extension_package cli_package fpm_package
   local enable_cli_cmd enable_fpm_cmd restart_fpm_cmd
+  extension_package="$(php_extension_package_for_platform "$extension_name" "$php_version")"
+  cli_package="$(php_cli_package_for_platform "$php_version")"
+  fpm_package="$(php_fpm_package_for_platform "$php_version")"
 
   if ! ensure_php_cli_available "$php_version"; then
     echo "PHP CLI binary not found and automatic installation failed." >&2
@@ -1300,12 +1482,25 @@ auto_remediate_php_extension() {
 
   if ! package_installed "$cli_package"; then
     echo "PHP CLI package ${cli_package} not installed. Installing package." >&2
-    install_command_ubuntu "$cli_package" "$cli_package" || return 1
+    install_command_platform "$cli_package" "$cli_package" || return 1
   fi
 
   if ! package_installed "$extension_package"; then
     echo "PHP extension package ${extension_package} not installed. Installing package." >&2
-    install_command_ubuntu "$extension_package" "$extension_package" || return 1
+    install_command_platform "$extension_package" "$extension_package" || return 1
+  fi
+
+  if [[ "$(platform_family)" == "rhel" ]]; then
+    if service_exists "$fpm_service"; then
+      if command -v sudo >/dev/null 2>&1; then
+        restart_fpm_cmd="sudo systemctl restart '${fpm_service}'"
+      else
+        restart_fpm_cmd="systemctl restart '${fpm_service}'"
+      fi
+      bash -lc "$restart_fpm_cmd" || return 1
+    fi
+    php_extension_enabled "$extension_name" "php"
+    return $?
   fi
 
   if ! command -v phpenmod >/dev/null 2>&1; then
@@ -1331,7 +1526,7 @@ auto_remediate_php_extension() {
   if service_exists "$fpm_service"; then
     if ! package_installed "$fpm_package"; then
       echo "PHP-FPM package ${fpm_package} not installed. Installing package." >&2
-      install_command_ubuntu "$fpm_package" "$fpm_package" || return 1
+      install_command_platform "$fpm_package" "$fpm_package" || return 1
     fi
     if ! bash -lc "$enable_fpm_cmd"; then
       return 1
@@ -1356,9 +1551,10 @@ check_or_install_php_extension() {
   local extension_name="$2"
   local php_version="$3"
   local fpm_service="$4"
-  local package_name="php${php_version}-${extension_name}"
+  local package_name
   local answer=""
   local remediation_answer=""
+  package_name="$(php_extension_package_for_platform "$extension_name" "$php_version")"
 
   if ! ensure_php_cli_available "$php_version"; then
     preflight_print_result "$level" "fail" "php cli not found"
@@ -1375,7 +1571,7 @@ check_or_install_php_extension() {
     answer="y"
   else
     echo "PHP extension '$extension_name' is missing (${level})."
-    if prompt_yes_no "Install now on this Ubuntu host using package '${package_name}'?"; then
+    if prompt_yes_no "Install now on this $(platform_family) host using package '${package_name}'?"; then
       answer="y"
     else
       answer="n"
@@ -1386,7 +1582,7 @@ check_or_install_php_extension() {
     return 1
   fi
 
-  if install_command_ubuntu "$package_name" "$package_name"; then
+  if install_command_platform "$package_name" "$package_name"; then
     if php_extension_enabled "$extension_name" "php"; then
       preflight_print_result "$level" "ok" "php extension '$extension_name' installed successfully"
       return 0
@@ -1394,12 +1590,8 @@ check_or_install_php_extension() {
   fi
 
   echo "Automatic installation failed for PHP extension '${extension_name}'." >&2
-  echo "Manual remediation (Ubuntu):" >&2
-  if command -v sudo >/dev/null 2>&1; then
-    echo "  sudo apt-get update && sudo apt-get install -y ${package_name}" >&2
-  else
-    echo "  apt-get update && apt-get install -y ${package_name}" >&2
-  fi
+  echo "Manual remediation ($(platform_family)):" >&2
+  echo "  $(package_install_command "$package_name")" >&2
 
   if [[ -t 0 || -r /dev/tty ]]; then
     if prompt_yes_no "Try automatic remediation now (phpenmod + php-fpm restart) for '${extension_name}'?"; then
@@ -1545,20 +1737,20 @@ run_preflight_checks() {
   if command -v bash >/dev/null 2>&1; then
     preflight_print_result "mandatory" "ok" "bash found"
     append_precheck_item "$environment" "bash" "local-tooling" "all" "mandatory" \
-      "Script runtime requires bash." "command -v bash" "apt install bash" "true" "pass" "none"
+      "Script runtime requires bash." "command -v bash" "$(package_install_action "$(package_for_command bash)")" "true" "pass" "none"
   else
     preflight_print_result "mandatory" "fail" "bash not found"
     append_precheck_item "$environment" "bash" "local-tooling" "all" "mandatory" \
-      "Script runtime requires bash." "command -v bash" "apt install bash" "true" "fail" "Install bash package."
+      "Script runtime requires bash." "command -v bash" "$(package_install_action "$(package_for_command bash)")" "true" "fail" "Install bash package."
     register_mandatory_failure
   fi
 
-  if ubuntu_supported; then
-    append_precheck_item "$environment" "ubuntu-supported" "platform" "all" "mandatory" \
-      "Official baseline is Ubuntu 24.04." "cat /etc/os-release" "manual host update" "true" "pass" "none"
+  if platform_supported; then
+    append_precheck_item "$environment" "linux-platform-supported" "platform" "all" "mandatory" \
+      "Supported platforms are Ubuntu 24.04 and Rocky/RHEL-like 9.x." "cat /etc/os-release" "manual host update" "true" "pass" "$(platform_human_name)"
   else
-    append_precheck_item "$environment" "ubuntu-supported" "platform" "all" "mandatory" \
-      "Official baseline is Ubuntu 24.04." "cat /etc/os-release" "manual host update" "true" "fail" "Use Ubuntu 24.04 before deployment."
+    append_precheck_item "$environment" "linux-platform-supported" "platform" "all" "mandatory" \
+      "Supported platforms are Ubuntu 24.04 and Rocky/RHEL-like 9.x." "cat /etc/os-release" "manual host update" "true" "fail" "Use Ubuntu 24.04 or Rocky/RHEL-like 9.x before deployment."
     register_mandatory_failure
   fi
 
@@ -1577,39 +1769,43 @@ run_preflight_checks() {
   else
     preflight_print_result "optional" "warn" "df not found; free disk space was not validated"
     append_precheck_item "$environment" "local-free-disk" "local-host" "all" "optional" \
-      "Disk validation is recommended for stability." "df -Pk ." "apt install coreutils" "false" "warn" "Install coreutils for disk checks."
+      "Disk validation is recommended for stability." "df -Pk ." "$(package_install_action coreutils)" "false" "warn" "Install coreutils for disk checks."
     optional_failures=$((optional_failures + 1))
   fi
 
   for cmd in "${mandatory_commands[@]}"; do
-    if ! check_or_install_command "mandatory" "$cmd" "$(package_for_command "$cmd")"; then
+    local required_package
+    required_package="$(package_for_command "$cmd")"
+    if ! check_or_install_command "mandatory" "$cmd" "$required_package"; then
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
-        "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "fail" "Install package and rerun precheck."
+        "Command is required by deployment workflow." "command -v $cmd" "$(package_install_action "$required_package")" "true" "fail" "Install package and rerun precheck."
       register_mandatory_failure
     else
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "mandatory" \
-        "Command is required by deployment workflow." "command -v $cmd" "apt install $(package_for_command "$cmd")" "true" "pass" "none"
+        "Command is required by deployment workflow." "command -v $cmd" "$(package_install_action "$required_package")" "true" "pass" "none"
     fi
   done
 
   if ! check_or_install_python_yaml_support "mandatory"; then
     append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
-      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "fail" "Install python3-yaml and rerun precheck."
+      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "$(package_install_action "$(package_for_python_yaml)")" "true" "fail" "Install Python YAML package and rerun precheck."
     register_mandatory_failure
   else
     append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
-      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "apt install python3-yaml" "true" "pass" "none"
+      "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "$(package_install_action "$(package_for_python_yaml)")" "true" "pass" "none"
   fi
 
   for cmd in "${optional_commands[@]}"; do
-    if ! check_or_install_command "optional" "$cmd" "$(package_for_command "$cmd")"; then
+    local optional_package
+    optional_package="$(package_for_command "$cmd")"
+    if ! check_or_install_command "optional" "$cmd" "$optional_package"; then
       preflight_print_result "optional" "warn" "command '$cmd' remains unavailable"
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "optional" \
-        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "apt install $(package_for_command "$cmd")" "false" "warn" "Install optional package for diagnostics."
+        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "$(package_install_action "$optional_package")" "false" "warn" "Install optional package for diagnostics."
       optional_failures=$((optional_failures + 1))
     else
       append_precheck_item "$environment" "$cmd" "local-tooling" "all" "optional" \
-        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "apt install $(package_for_command "$cmd")" "false" "pass" "none"
+        "Useful for connectivity diagnostics and remote checks." "command -v $cmd" "$(package_install_action "$optional_package")" "false" "pass" "none"
     fi
   done
 
@@ -1742,12 +1938,14 @@ run_preflight_checks() {
     fi
 
     if [[ "$app_stack_expected" == "true" ]]; then
-      if check_or_install_command "mandatory" "mysql" "mariadb-client"; then
+      local mariadb_client_package
+      mariadb_client_package="$(package_for_command mysql)"
+      if check_or_install_command "mandatory" "mysql" "$mariadb_client_package"; then
         append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
-          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "apt install mariadb-client" "true" "pass" "none"
+          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mariadb_client_package")" "true" "pass" "none"
       else
         append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
-          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "apt install mariadb-client" "true" "fail" "Install mariadb-client and rerun precheck."
+          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mariadb_client_package")" "true" "fail" "Install MariaDB client package and rerun precheck."
         register_mandatory_failure
       fi
     else
@@ -1757,12 +1955,14 @@ run_preflight_checks() {
 
     if [[ "$glpi_requires_bcmath" == "true" ]]; then
       if [[ "$app_stack_expected" == "true" ]]; then
+        local bcmath_package
+        bcmath_package="$(php_extension_package_for_platform "bcmath" "$php_version")"
         if check_or_install_php_extension "mandatory" "bcmath" "$php_version" "$php_fpm_service"; then
           append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
-            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "pass" "none"
+            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "$(package_install_action "$bcmath_package")" "true" "pass" "none"
         else
           append_precheck_item "$environment" "php-extension-bcmath" "php-runtime" "GLPI >= 11 on app-host local flow" "mandatory" \
-            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "apt install php-bcmath" "true" "fail" "Install php-bcmath and rerun precheck."
+            "GLPI 11 requires bcmath extension for QR code support." "php -m | grep -i '^bcmath$'" "$(package_install_action "$bcmath_package")" "true" "fail" "Install PHP bcmath package and rerun precheck."
           register_mandatory_failure
         fi
       else

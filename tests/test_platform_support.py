@@ -1,0 +1,91 @@
+import shlex
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+COMMON_SH = REPO_ROOT / "scripts" / "lib" / "common.sh"
+
+
+class PlatformSupportTest(unittest.TestCase):
+    def run_common(self, os_release: str, body: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            os_release_path = Path(tmp) / "os-release"
+            os_release_path.write_text(os_release, encoding="utf-8")
+            script = f"""
+set -euo pipefail
+export GLPI_OS_RELEASE_FILE={shlex.quote(str(os_release_path))}
+source {shlex.quote(str(COMMON_SH))}
+{body}
+"""
+            return subprocess.run(
+                ["bash", "-lc", script],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+    def test_ubuntu_2404_is_supported_with_apt_packages(self):
+        result = self.run_common(
+            'ID=ubuntu\nVERSION_ID="24.04"\nID_LIKE=debian\n',
+            """
+platform_supported
+printf 'family=%s\\n' "$(platform_family)"
+printf 'ssh=%s\\n' "$(package_for_command ssh)"
+printf 'yaml=%s\\n' "$(package_for_python_yaml)"
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("family=debian", result.stdout)
+        self.assertIn("ssh=openssh-client", result.stdout)
+        self.assertIn("yaml=python3-yaml", result.stdout)
+
+    def test_rocky_9_is_supported_with_dnf_packages(self):
+        result = self.run_common(
+            'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
+            """
+platform_supported
+printf 'family=%s\\n' "$(platform_family)"
+printf 'manager=%s\\n' "$(platform_package_manager)"
+printf 'ansible=%s\\n' "$(package_for_command ansible-playbook)"
+printf 'ssh=%s\\n' "$(package_for_command ssh)"
+printf 'yaml=%s\\n' "$(package_for_python_yaml)"
+printf 'mysql=%s\\n' "$(package_for_command mysql)"
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("family=rhel", result.stdout)
+        self.assertIn("manager=dnf", result.stdout)
+        self.assertIn("ansible=ansible-core", result.stdout)
+        self.assertIn("ssh=openssh-clients", result.stdout)
+        self.assertIn("yaml=python3-PyYAML", result.stdout)
+        self.assertIn("mysql=mariadb", result.stdout)
+
+    def test_unsupported_platform_fails(self):
+        for os_release in (
+            'ID=ubuntu\nVERSION_ID="22.04"\nID_LIKE=debian\n',
+            'ID=fedora\nVERSION_ID="39"\nID_LIKE=fedora\n',
+        ):
+            with self.subTest(os_release=os_release):
+                result = self.run_common(
+                    os_release,
+                    """
+if platform_supported; then
+  echo supported
+  exit 1
+fi
+echo unsupported
+""",
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("unsupported", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
