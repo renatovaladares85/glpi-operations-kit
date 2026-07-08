@@ -101,6 +101,26 @@ rm -rf "$tmp_dir"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("mode=700", result.stdout)
 
+    def test_required_ansible_modules_reports_missing_collection_module(self):
+        result = self.run_common(
+            'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
+            """
+ansible-doc() {
+  case "$*" in
+    *community.general.timezone*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+if required_ansible_modules_available; then
+  echo unexpected-pass
+  exit 1
+fi
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("missing modules: community.general.timezone", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

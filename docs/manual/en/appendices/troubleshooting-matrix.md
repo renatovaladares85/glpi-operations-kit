@@ -8,6 +8,13 @@
 - Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all`
   - Example: `./scripts/glpictl.sh staging deploy check all`
 
+## Missing required Ansible collection
+
+- Symptom: `ansible-playbook` fails with `couldn't resolve module/action`, for example `community.general.timezone`.
+- Validate: `ansible-doc -t module community.general.timezone`
+- Fix: `ansible-galaxy collection install -r ansible/requirements.yml`
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all` before trying `deploy apply`.
+
 ## `permission denied` on script execution
 
 - Symptom: `./scripts/*.sh` fails with permission errors.

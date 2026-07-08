@@ -1280,6 +1280,36 @@ package_for_python_yaml() {
   esac
 }
 
+required_ansible_modules_available() {
+  local -a required_modules=(
+    "community.general.timezone"
+    "community.general.ufw"
+    "community.mysql.mysql_db"
+    "community.mysql.mysql_query"
+    "community.mysql.mysql_user"
+  )
+  local -a missing_modules=()
+  local module
+
+  if ! command -v ansible-doc >/dev/null 2>&1; then
+    echo "ansible-doc command not found"
+    return 1
+  fi
+
+  for module in "${required_modules[@]}"; do
+    if ! ansible-doc -t module "$module" >/dev/null 2>&1; then
+      missing_modules+=("$module")
+    fi
+  done
+
+  if ((${#missing_modules[@]} > 0)); then
+    printf 'missing modules: %s\n' "${missing_modules[*]}"
+    return 1
+  fi
+
+  return 0
+}
+
 php_cli_package_for_platform() {
   local php_version="$1"
   case "$(platform_family)" in
@@ -1802,6 +1832,18 @@ run_preflight_checks() {
   else
     append_precheck_item "$environment" "python3-yaml" "local-tooling" "all" "mandatory" \
       "Runtime rendering requires python3-yaml support." "python3 -c \"import yaml\"" "$(package_install_action "$(package_for_python_yaml)")" "true" "pass" "none"
+  fi
+
+  local ansible_modules_status
+  if ansible_modules_status="$(required_ansible_modules_available 2>&1)"; then
+    preflight_print_result "mandatory" "ok" "required Ansible collections are available"
+    append_precheck_item "$environment" "ansible-collections" "local-tooling" "all" "mandatory" \
+      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.general.timezone" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "pass" "none"
+  else
+    preflight_print_result "mandatory" "fail" "required Ansible collections are missing: ${ansible_modules_status}"
+    append_precheck_item "$environment" "ansible-collections" "local-tooling" "all" "mandatory" \
+      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.general.timezone" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "fail" "Run ansible-galaxy collection install -r ansible/requirements.yml and rerun precheck."
+    register_mandatory_failure
   fi
 
   for cmd in "${optional_commands[@]}"; do

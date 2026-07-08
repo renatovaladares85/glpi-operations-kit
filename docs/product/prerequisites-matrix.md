@@ -22,6 +22,7 @@ Each item defines:
 | `python3` + yaml module | Local tooling | all | always | mandatory | Required to render runtime config and inventory from `config/<env>.env` | `python3 -c "import yaml"` | Yes (`apt`/`dnf`) | Yes |
 | `ansible-playbook` | Local tooling | all | always | mandatory | Required to apply Ansible roles | `command -v ansible-playbook` | Yes (`apt`/`dnf`) | Yes |
 | `ansible-inventory` | Local tooling | all | always | mandatory | Required to validate generated inventory | `command -v ansible-inventory` | Yes (`apt`/`dnf`) | Yes |
+| Ansible collections | Local tooling | all | always | mandatory | Required because playbooks reference modules from `community.general` and `community.mysql` | `ansible-doc -t module community.general.timezone` | Yes (`ansible-galaxy`) | Yes |
 | `sudo` (or root) | Privilege | all | always | mandatory | Required for package, permissions, and service operations | `sudo -v` | Partial | Yes |
 | Operator in `glpiops` | Privilege | all | always | mandatory | Enforces least-privilege operational model | `id -nG` | Yes (`groupadd/usermod`) | Yes |
 | Script execute permission | Permissions | all | always | mandatory | Prevents first-run execution failures | `ls -l scripts/*.sh` | Yes (`chmod +x`) | Yes |

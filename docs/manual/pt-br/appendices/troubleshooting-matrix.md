@@ -8,6 +8,13 @@
 - Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all`
   - Exemplo: `./scripts/glpictl.sh staging deploy check all`
 
+## Falta collection Ansible obrigatória
+
+- Sintoma: `ansible-playbook` falha com `couldn't resolve module/action`, por exemplo `community.general.timezone`.
+- Validação: `ansible-doc -t module community.general.timezone`
+- Correção: `ansible-galaxy collection install -r ansible/requirements.yml`
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all` antes de tentar `deploy apply`.
+
 ## `permission denied` ao executar script
 
 - Sintoma: `./scripts/*.sh` falha por permissão.
