@@ -105,6 +105,8 @@ PLATFORM_DEFAULTS = {
         "nginx_default_enabled_path": "/etc/nginx/sites-enabled/default",
         "nginx_fastcgi_params": "snippets/fastcgi-php.conf",
         "apache_service": "apache2",
+        "apache_conf_path": "/etc/apache2/sites-available/glpi.conf",
+        "apache_default_conf_path": "/etc/apache2/sites-enabled/000-default.conf",
     },
     "rhel": {
         "glpi_data_owner": "apache",
@@ -122,6 +124,8 @@ PLATFORM_DEFAULTS = {
         "nginx_default_enabled_path": "",
         "nginx_fastcgi_params": "fastcgi_params",
         "apache_service": "httpd",
+        "apache_conf_path": "/etc/httpd/conf.d/glpi.conf",
+        "apache_default_conf_path": "/etc/httpd/conf.d/welcome.conf",
     },
 }
 
@@ -1045,6 +1049,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_nginx_fastcgi_params": platform_defaults["nginx_fastcgi_params"],
         "glpi_web_service": WEB_SERVER_SERVICES[platform_family][web_server_type],
         "glpi_apache_service": platform_defaults["apache_service"],
+        "glpi_apache_conf_path": platform_defaults["apache_conf_path"],
+        "glpi_apache_default_conf_path": platform_defaults["apache_default_conf_path"],
         "web_http_port": as_int(require_value(values, "WEB_HTTP_PORT"), 80),
         "web_https_port": as_int(require_value(values, "WEB_HTTPS_PORT"), 443),
         "glpi_app_packages": app_packages,

@@ -1319,8 +1319,6 @@ package_for_python_yaml() {
 
 required_ansible_modules_available() {
   local -a required_modules=(
-    "community.general.timezone"
-    "community.general.ufw"
     "community.mysql.mysql_db"
     "community.mysql.mysql_query"
     "community.mysql.mysql_user"
@@ -1875,11 +1873,11 @@ run_preflight_checks() {
   if ansible_modules_status="$(required_ansible_modules_available 2>&1)"; then
     preflight_print_result "mandatory" "ok" "required Ansible collections are available"
     append_precheck_item "$environment" "ansible-collections" "local-tooling" "all" "mandatory" \
-      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.general.timezone" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "pass" "none"
+      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.mysql.mysql_db" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "pass" "none"
   else
     preflight_print_result "mandatory" "fail" "required Ansible collections are missing: ${ansible_modules_status}"
     append_precheck_item "$environment" "ansible-collections" "local-tooling" "all" "mandatory" \
-      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.general.timezone" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "fail" "Run ansible-galaxy collection install -r ansible/requirements.yml and rerun precheck."
+      "Playbooks require Ansible collections declared in ansible/requirements.yml." "ansible-doc -t module community.mysql.mysql_db" "ansible-galaxy collection install -r ansible/requirements.yml" "true" "fail" "Run ansible-galaxy collection install -r ansible/requirements.yml and rerun precheck."
     register_mandatory_failure
   fi
 

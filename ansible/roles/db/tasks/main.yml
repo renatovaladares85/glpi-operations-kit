@@ -1,6 +1,6 @@
 ---
 - name: Install MariaDB packages
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ mariadb_version_packages }}"
     state: present
 
@@ -19,21 +19,55 @@
     state: started
     enabled: true
 
-- name: Configure firewall for restricted MariaDB access
-  community.general.ufw:
-    rule: allow
-    src: "{{ item }}"
-    port: "{{ mariadb_port }}"
-    proto: tcp
+- name: Configure ufw for restricted MariaDB access
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - from
+      - "{{ item }}"
+      - to
+      - any
+      - port
+      - "{{ mariadb_port | string }}"
+      - proto
+      - tcp
+  changed_when: false
   loop: "{{ db_firewall_sources | default(([glpi_db_app_access_host] if glpi_db_app_access_host is defined else db_allowed_source_hosts)) }}"
-  when: not (db_firewall_open | default(false) | bool)
+  when:
+    - platform_family | default('debian') == 'debian'
+    - not (db_firewall_open | default(false) | bool)
 
-- name: Configure firewall for open MariaDB access
-  community.general.ufw:
-    rule: allow
-    port: "{{ mariadb_port }}"
-    proto: tcp
-  when: db_firewall_open | default(false) | bool
+- name: Configure ufw for open MariaDB access
+  ansible.builtin.command: "ufw allow {{ mariadb_port }}/tcp"
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'debian'
+    - db_firewall_open | default(false) | bool
+
+- name: Configure firewalld for restricted MariaDB access
+  ansible.builtin.command:
+    argv:
+      - firewall-cmd
+      - --permanent
+      - "--add-rich-rule=rule family=ipv4 source address={{ item }} port port={{ mariadb_port }} protocol=tcp accept"
+  changed_when: false
+  loop: "{{ db_firewall_sources | default(([glpi_db_app_access_host] if glpi_db_app_access_host is defined else db_allowed_source_hosts)) }}"
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - not (db_firewall_open | default(false) | bool)
+
+- name: Configure firewalld for open MariaDB access
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ mariadb_port }}/tcp"
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - db_firewall_open | default(false) | bool
+
+- name: Reload firewalld after MariaDB firewall changes
+  ansible.builtin.command: firewall-cmd --reload
+  changed_when: false
+  when: platform_family | default('debian') == 'rhel'
 
 - name: Check if runtime database secrets file is provided
   ansible.builtin.assert:

@@ -1,30 +1,49 @@
 ---
-- name: Update apt cache
+- name: Update apt cache on Debian-like hosts
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  when: platform_family | default('debian') == 'debian'
 
 - name: Install base operating system packages
-  ansible.builtin.apt:
-    name:
-      - apt-transport-https
-      - ca-certificates
-      - curl
-      - gnupg
-      - software-properties-common
-      - unzip
-      - ufw
-      - chrony
-      - rsync
-      - jq
-      - htop
-      - unattended-upgrades
-      - apt-listchanges
+  ansible.builtin.package:
+    name: "{{ base_os_packages_by_family[platform_family | default('debian')] }}"
     state: present
+  vars:
+    base_os_packages_by_family:
+      debian:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - gnupg
+        - software-properties-common
+        - unzip
+        - ufw
+        - chrony
+        - rsync
+        - jq
+        - htop
+        - unattended-upgrades
+        - apt-listchanges
+      rhel:
+        - ca-certificates
+        - curl
+        - gnupg2
+        - unzip
+        - firewalld
+        - chrony
+        - rsync
+        - jq
+        - htop
+
+- name: Read current timezone
+  ansible.builtin.command: timedatectl show -p Timezone --value
+  register: current_timezone
+  changed_when: false
 
 - name: Configure timezone
-  community.general.timezone:
-    name: "{{ timezone_name }}"
+  ansible.builtin.command: "timedatectl set-timezone {{ timezone_name }}"
+  when: current_timezone.stdout != timezone_name
 
 - name: Ensure chrony is enabled
   ansible.builtin.service:
@@ -41,31 +60,62 @@
     mode: "0644"
   notify: Restart ssh
 
-- name: Set default deny incoming firewall policy
-  community.general.ufw:
-    direction: incoming
-    policy: deny
+- name: Set default deny incoming firewall policy on Debian-like hosts
+  ansible.builtin.command: ufw default deny incoming
+  changed_when: false
+  when: platform_family | default('debian') == 'debian'
 
-- name: Allow SSH access
-  community.general.ufw:
-    rule: allow
-    port: "22"
-    proto: tcp
+- name: Allow SSH access on Debian-like hosts
+  ansible.builtin.command: ufw allow 22/tcp
+  changed_when: false
+  when: platform_family | default('debian') == 'debian'
 
-- name: Allow HTTP access on app hosts
-  community.general.ufw:
-    rule: allow
-    port: "80"
-    proto: tcp
-  when: "'glpi_app' in group_names"
+- name: Allow HTTP access on Debian-like app hosts
+  ansible.builtin.command: ufw allow 80/tcp
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'debian'
+    - "'glpi_app' in group_names"
 
-- name: Allow HTTPS access on app hosts
-  community.general.ufw:
-    rule: allow
-    port: "443"
-    proto: tcp
-  when: "'glpi_app' in group_names"
+- name: Allow HTTPS access on Debian-like app hosts
+  ansible.builtin.command: ufw allow 443/tcp
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'debian'
+    - "'glpi_app' in group_names"
 
-- name: Ensure firewall is enabled
-  community.general.ufw:
-    state: enabled
+- name: Ensure ufw is enabled on Debian-like hosts
+  ansible.builtin.command: ufw --force enable
+  changed_when: false
+  when: platform_family | default('debian') == 'debian'
+
+- name: Ensure firewalld is enabled on RHEL-like hosts
+  ansible.builtin.service:
+    name: firewalld
+    state: started
+    enabled: true
+  when: platform_family | default('debian') == 'rhel'
+
+- name: Allow SSH access on RHEL-like hosts
+  ansible.builtin.command: firewall-cmd --permanent --add-service=ssh
+  changed_when: false
+  when: platform_family | default('debian') == 'rhel'
+
+- name: Allow HTTP access on RHEL-like app hosts
+  ansible.builtin.command: firewall-cmd --permanent --add-service=http
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - "'glpi_app' in group_names"
+
+- name: Allow HTTPS access on RHEL-like app hosts
+  ansible.builtin.command: firewall-cmd --permanent --add-service=https
+  changed_when: false
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - "'glpi_app' in group_names"
+
+- name: Reload firewalld on RHEL-like hosts
+  ansible.builtin.command: firewall-cmd --reload
+  changed_when: false
+  when: platform_family | default('debian') == 'rhel'

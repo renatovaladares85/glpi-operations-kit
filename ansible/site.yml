@@ -2,41 +2,65 @@
 - name: Prepare base operating system
   hosts: all
   become: true
-  roles:
-    - role: base
-      tags: ["base"]
+  tasks:
+    - name: Include base role
+      ansible.builtin.include_role:
+        name: base
+        apply:
+          tags: base
+      tags: base
 
 - name: Configure GLPI application hosts
   hosts: glpi_app
   become: true
-  roles:
-    - role: app
-      tags: ["app"]
+  tasks:
+    - name: Include app role
+      ansible.builtin.include_role:
+        name: app
+        apply:
+          tags: app
+      tags: app
 
 - name: Configure MariaDB hosts
   hosts: glpi_db
   become: true
-  roles:
-    - role: db
-      tags: ["db"]
+  tasks:
+    - name: Include db role
+      ansible.builtin.include_role:
+        name: db
+        apply:
+          tags: db
+      tags: db
 
 - name: Configure monitoring exporters
   hosts: all
   become: true
-  roles:
-    - role: monitoring
-      tags: ["monitoring"]
+  tasks:
+    - name: Include monitoring role
+      ansible.builtin.include_role:
+        name: monitoring
+        apply:
+          tags: monitoring
+      tags: monitoring
 
 - name: Configure backup routines
   hosts: all
   become: true
-  roles:
-    - role: backup
-      tags: ["backup"]
+  tasks:
+    - name: Include backup role
+      ansible.builtin.include_role:
+        name: backup
+        apply:
+          tags: backup
+      tags: backup
 
 - name: Configure post-deploy email capture
   hosts: glpi_app
   become: true
-  roles:
-    - role: email
-      tags: ["email"]
+  tasks:
+    - name: Include email role
+      ansible.builtin.include_role:
+        name: email
+        apply:
+          tags: email
+      tags: email

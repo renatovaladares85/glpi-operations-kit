@@ -10,8 +10,8 @@
 
 ## Falta collection Ansible obrigatória
 
-- Sintoma: `ansible-playbook` falha com `couldn't resolve module/action`, por exemplo `community.general.timezone`.
-- Validação: `ansible-doc -t module community.general.timezone`
+- Sintoma: `ansible-playbook` falha com `couldn't resolve module/action`, por exemplo `community.mysql.mysql_db`.
+- Validação: `ansible-doc -t module community.mysql.mysql_db`
 - Correção: `ansible-galaxy collection install -r ansible/requirements.yml`
 - Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all` antes de tentar `deploy apply`.
 

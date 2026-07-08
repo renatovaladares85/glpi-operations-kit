@@ -13,6 +13,10 @@
         RewriteRule ^(.*)$ index.php [QSA,L]
     </Directory>
 
+    <FilesMatch \.php$>
+        SetHandler "proxy:unix:{{ glpi_php_fpm_socket }}|fcgi://localhost/"
+    </FilesMatch>
+
     ErrorLog {{ glpi_log_dir }}/apache-error.log
     CustomLog {{ glpi_log_dir }}/apache-access.log combined
 </VirtualHost>

@@ -107,7 +107,7 @@ rm -rf "$tmp_dir"
             """
 ansible-doc() {
   case "$*" in
-    *community.general.timezone*) return 1 ;;
+    *community.mysql.mysql_db*) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -119,7 +119,7 @@ fi
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("missing modules: community.general.timezone", result.stdout)
+        self.assertIn("missing modules: community.mysql.mysql_db", result.stdout)
 
 
 if __name__ == "__main__":

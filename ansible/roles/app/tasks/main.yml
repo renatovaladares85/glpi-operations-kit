@@ -167,11 +167,13 @@
     state: absent
   notify: Restart php-fpm
 
-- name: Enable Apache rewrite module
-  ansible.builtin.command: a2enmod rewrite
+- name: Enable Apache modules on Debian-like hosts
+  ansible.builtin.command: a2enmod rewrite proxy proxy_fcgi setenvif
   register: apache_rewrite_module
   changed_when: "'already enabled' not in (apache_rewrite_module.stdout | default(''))"
-  when: glpi_web_server_type == 'apache'
+  when:
+    - glpi_web_server_type == 'apache'
+    - platform_family | default('debian') == 'debian'
   notify: Reload apache2
 
 - name: Deploy Nginx virtual host
@@ -217,25 +219,38 @@
 - name: Deploy Apache virtual host
   ansible.builtin.template:
     src: apache-glpi.conf.j2
-    dest: /etc/apache2/sites-available/glpi.conf
+    dest: "{{ glpi_apache_conf_path }}"
     owner: root
     group: root
     mode: "0644"
   when: glpi_web_server_type == 'apache'
   notify: Reload apache2
 
-- name: Enable Apache GLPI virtual host
+- name: Enable Apache GLPI virtual host on Debian-like hosts
   ansible.builtin.command: a2ensite glpi.conf
   register: apache_glpi_site
   changed_when: "'already enabled' not in (apache_glpi_site.stdout | default(''))"
-  when: glpi_web_server_type == 'apache'
+  when:
+    - glpi_web_server_type == 'apache'
+    - platform_family | default('debian') == 'debian'
   notify: Reload apache2
 
-- name: Disable default Apache virtual host
+- name: Disable default Apache virtual host on Debian-like hosts
   ansible.builtin.command: a2dissite 000-default.conf
   register: apache_default_site
   changed_when: "'already disabled' not in (apache_default_site.stdout | default(''))"
-  when: glpi_web_server_type == 'apache'
+  when:
+    - glpi_web_server_type == 'apache'
+    - platform_family | default('debian') == 'debian'
+  notify: Reload apache2
+
+- name: Disable default Apache welcome page on RHEL-like hosts
+  ansible.builtin.file:
+    path: "{{ glpi_apache_default_conf_path }}"
+    state: absent
+  when:
+    - glpi_web_server_type == 'apache'
+    - platform_family | default('debian') == 'rhel'
   notify: Reload apache2
 
 - name: Deploy lighttpd GLPI virtual host
