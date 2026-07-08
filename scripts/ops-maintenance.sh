@@ -53,7 +53,7 @@ OPERATION_ID="$(new_operation_id "ops-${DOMAIN}")"
 if ! acquire_runtime_lock "$ENVIRONMENT"; then
   exit 1
 fi
-trap 'release_runtime_lock "$ENVIRONMENT"' EXIT
+trap 'release_runtime_lock "$ENVIRONMENT" || true; finish_operation_log_stream' EXIT
 
 begin_operation_log "$ENVIRONMENT" "$OPERATION_ID" "$*"
 write_operation_state "$ENVIRONMENT" "$OPERATION_ID" "start" "started" "operation started"

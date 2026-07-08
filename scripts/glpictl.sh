@@ -300,6 +300,7 @@ finalize_glpictl_operation() {
     print_failure_diagnostics
     echo "END OF EXECUTION (FAILED)" >&2
   fi
+  finish_operation_log_stream
 }
 
 handle_signal() {

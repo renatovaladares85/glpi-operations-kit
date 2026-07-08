@@ -9,6 +9,10 @@ GLPI_OPS_GROUP="${GLPI_OPS_GROUP:-glpiops}"
 CERT_RENEWAL_WARN_DAYS="${CERT_RENEWAL_WARN_DAYS:-30}"
 GLPI_EXECUTION_MODE="${GLPI_EXECUTION_MODE:-}"
 GLPI_HOST_ROLE="${GLPI_HOST_ROLE:-}"
+OPERATION_LOGGER_PID="${OPERATION_LOGGER_PID:-}"
+OPERATION_LOGGER_FIFO="${OPERATION_LOGGER_FIFO:-}"
+OPERATION_LOG_STDOUT_FD="${OPERATION_LOG_STDOUT_FD:-}"
+OPERATION_LOG_STDERR_FD="${OPERATION_LOG_STDERR_FD:-}"
 
 write_step() {
   printf '\n==> %s\n' "$1"
@@ -315,7 +319,7 @@ begin_operation_log() {
   local environment="$1"
   local operation_id="$2"
   local command_line="$3"
-  local log_path
+  local log_path fifo_root fifo_dir fifo_path
   log_path="$(operation_log_path "$environment" "$operation_id")"
   local summary_path
   summary_path="$(operation_summary_path "$environment" "$operation_id")"
@@ -332,12 +336,45 @@ begin_operation_log() {
   } >"$summary_path"
   chmod 600 "$summary_path"
 
-  exec > >(
+  fifo_root="${GLPI_OPERATION_FIFO_ROOT:-/tmp}"
+  fifo_dir="$(mktemp -d "${fifo_root%/}/glpi-operation-log.XXXXXX")"
+  chmod 700 "$fifo_dir"
+  fifo_path="$fifo_dir/stream"
+  mkfifo -m 600 "$fifo_path"
+
+  exec {OPERATION_LOG_STDOUT_FD}>&1
+  exec {OPERATION_LOG_STDERR_FD}>&2
+
+  (
     while IFS= read -r line; do
       printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$line"
-    done | tee -a "$log_path"
-  ) 2>&1
+    done <"$fifo_path" | tee -a "$log_path"
+  ) &
+  OPERATION_LOGGER_PID="$!"
+  OPERATION_LOGGER_FIFO="$fifo_path"
+
+  exec >"$fifo_path" 2>&1
+  rm -f "$fifo_path"
+  rmdir "$fifo_dir" 2>/dev/null || true
   echo "Operation log: $log_path"
+}
+
+finish_operation_log_stream() {
+  local logger_pid="${OPERATION_LOGGER_PID:-}"
+  if [[ -z "$logger_pid" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${OPERATION_LOG_STDOUT_FD:-}" && -n "${OPERATION_LOG_STDERR_FD:-}" ]]; then
+    exec 1>&${OPERATION_LOG_STDOUT_FD} 2>&${OPERATION_LOG_STDERR_FD}
+    exec {OPERATION_LOG_STDOUT_FD}>&-
+    exec {OPERATION_LOG_STDERR_FD}>&-
+  fi
+  wait "$logger_pid" || true
+  OPERATION_LOGGER_PID=""
+  OPERATION_LOGGER_FIFO=""
+  OPERATION_LOG_STDOUT_FD=""
+  OPERATION_LOG_STDERR_FD=""
 }
 
 complete_operation_log() {
