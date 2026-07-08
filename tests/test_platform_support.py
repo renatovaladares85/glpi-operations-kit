@@ -86,6 +86,21 @@ echo unsupported
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("unsupported", result.stdout)
 
+    def test_ensure_mode_clears_directory_special_bits(self):
+        result = self.run_common(
+            'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
+            """
+tmp_dir="$(mktemp -d)"
+chmod 2700 "$tmp_dir"
+printf 'y\\n' | ensure_mode "$tmp_dir" "700"
+printf 'mode=%s\\n' "$(stat -c '%a' "$tmp_dir")"
+rm -rf "$tmp_dir"
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mode=700", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

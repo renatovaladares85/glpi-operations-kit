@@ -44,6 +44,14 @@ is_root_user() {
   [[ "$(current_uid)" -eq 0 ]]
 }
 
+current_operator_user() {
+  if is_root_user && [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]]; then
+    echo "$SUDO_USER"
+    return
+  fi
+  id -un
+}
+
 file_mode_octal() {
   local path="$1"
   stat -c '%a' "$path" 2>/dev/null || true
@@ -121,12 +129,13 @@ ensure_script_directory_executable() {
 ensure_mode() {
   local path="$1"
   local expected="$2"
-  local mode
+  local mode fix_cmd
   mode="$(file_mode_octal "$path")"
   if [[ "$mode" == "$expected" ]]; then
     return 0
   fi
-  if offer_fix_then_execute "Path '$path' has mode '${mode:-unknown}', expected '$expected'." "chmod $expected '$path'"; then
+  printf -v fix_cmd "chmod u-s,g-s,o-t %q && chmod %s %q" "$path" "$expected" "$path"
+  if offer_fix_then_execute "Path '$path' has mode '${mode:-unknown}', expected '$expected'." "$fix_cmd"; then
     mode="$(file_mode_octal "$path")"
     [[ "$mode" == "$expected" ]]
     return
@@ -144,7 +153,7 @@ ensure_directory_mode() {
 ensure_group_exists_and_membership() {
   local group_name="$1"
   local current_user
-  current_user="$(id -un)"
+  current_user="$(current_operator_user)"
 
   if ! getent group "$group_name" >/dev/null 2>&1; then
     local create_cmd
@@ -200,7 +209,7 @@ write_bootstrap_marker() {
   local marker
   marker="$(bootstrap_marker_path)"
   ensure_directory "$SCRIPT_ROOT/../.runtime"
-  printf "bootstrap_completed_at=%s\nbootstrap_completed_by=%s\n" "$(date -u +%FT%TZ)" "$(id -un)" >"$marker"
+  printf "bootstrap_completed_at=%s\nbootstrap_completed_by=%s\n" "$(date -u +%FT%TZ)" "$(current_operator_user)" >"$marker"
   chmod 600 "$marker"
 }
 
