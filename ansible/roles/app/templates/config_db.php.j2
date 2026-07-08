@@ -1,0 +1,12 @@
+<?php
+
+class DB extends DBmysql {
+   public $dbhost = '{{ glpi_db_host }}{% if mariadb_port is defined and (mariadb_port | string | trim | length) > 0 %}:{{ mariadb_port }}{% endif %}';
+   public $dbuser = '{{ glpi_db_user }}';
+   public $dbpassword = '{{ glpi_db_password | urlencode }}';
+   public $dbdefault = '{{ glpi_db_name }}';
+   public $use_timezones = {{ 'true' if glpi_timezone_support_enabled | default(false) | bool else 'false' }};
+   public $use_utf8mb4 = true;
+   public $allow_datetime = false;
+   public $allow_signed_keys = false;
+}

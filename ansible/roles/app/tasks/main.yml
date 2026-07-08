@@ -135,6 +135,15 @@
     group: "{{ glpi_data_group }}"
     mode: "0640"
 
+- name: Deploy GLPI database configuration
+  ansible.builtin.template:
+    src: config_db.php.j2
+    dest: "{{ glpi_config_dir }}/config_db.php"
+    owner: "{{ glpi_data_owner }}"
+    group: "{{ glpi_data_group }}"
+    mode: "0640"
+  no_log: true
+
 - name: Deploy php.ini overrides for GLPI
   ansible.builtin.template:
     src: glpi-php.ini.j2
@@ -403,6 +412,7 @@
     - { path: "{{ glpi_plugin_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
     - { path: "{{ glpi_log_dir }}", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0750" }
     - { path: "{{ glpi_config_dir }}/local_define.php", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0640" }
+    - { path: "{{ glpi_config_dir }}/config_db.php", owner: "{{ glpi_data_owner }}", group: "{{ glpi_data_group }}", mode: "0640" }
     - { path: "/usr/local/bin/glpi-cron.sh", owner: "root", group: "root", mode: "0750" }
     - { path: "/usr/local/sbin/glpi-redis-integration.sh", owner: "root", group: "root", mode: "0750" }
     - { path: "/usr/local/sbin/glpi-redis-session-rollback.sh", owner: "root", group: "root", mode: "0750" }
@@ -484,6 +494,87 @@
     GLPI_REDIS_MAXMEMORY_POLICY: "{{ glpi_redis_maxmemory_policy | default('') }}"
   register: glpi_redis_integration
   changed_when: "'GLPI_REDIS_INTEGRATION_CHANGED=yes' in (glpi_redis_integration.stdout | default(''))"
+
+- name: Check GLPI database schema marker
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=TCP
+      - "--host={{ glpi_db_host }}"
+      - "--port={{ mariadb_port }}"
+      - "--user={{ glpi_db_user }}"
+      - "--database={{ glpi_db_name }}"
+      - --batch
+      - --skip-column-names
+      - --connect-timeout=10
+      - "--execute=SHOW TABLES LIKE 'glpi_configs';"
+  environment:
+    MYSQL_PWD: "{{ glpi_db_password }}"
+  register: glpi_db_schema_marker
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Assert GLPI database is reachable before schema bootstrap
+  ansible.builtin.assert:
+    that:
+      - glpi_db_schema_marker.rc == 0
+    fail_msg: "GLPI database is not reachable with configured application credentials. Validate managed DB host, port, database, user, password and grants."
+  changed_when: false
+
+- name: Install GLPI database schema when absent
+  ansible.builtin.command:
+    argv:
+      - php
+      - bin/console
+      - db:install
+      - --no-interaction
+      - --no-telemetry
+  args:
+    chdir: "{{ glpi_install_dir }}"
+  become: true
+  become_user: "{{ glpi_data_owner }}"
+  register: glpi_database_install
+  changed_when: glpi_database_install.rc == 0
+  failed_when: false
+  no_log: true
+  when: (glpi_db_schema_marker.stdout | default('') | trim) == ''
+
+- name: Assert GLPI database schema installation succeeded
+  ansible.builtin.assert:
+    that:
+      - glpi_database_install.rc == 0
+    fail_msg: "GLPI database schema installation failed. Validate managed DB privileges and confirm the target database is empty or already contains a valid GLPI schema."
+  changed_when: false
+  when: (glpi_db_schema_marker.stdout | default('') | trim) == ''
+
+- name: Recheck GLPI database schema marker
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=TCP
+      - "--host={{ glpi_db_host }}"
+      - "--port={{ mariadb_port }}"
+      - "--user={{ glpi_db_user }}"
+      - "--database={{ glpi_db_name }}"
+      - --batch
+      - --skip-column-names
+      - --connect-timeout=10
+      - "--execute=SHOW TABLES LIKE 'glpi_configs';"
+  environment:
+    MYSQL_PWD: "{{ glpi_db_password }}"
+  register: glpi_db_schema_marker_after
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Assert GLPI database schema is ready before web smoke checks
+  ansible.builtin.assert:
+    that:
+      - glpi_db_schema_marker_after.rc == 0
+      - (glpi_db_schema_marker_after.stdout | default('') | trim) == 'glpi_configs'
+    fail_msg: "GLPI database schema is not ready. Web smoke checks are blocked until the configured database contains a valid GLPI schema."
+  changed_when: false
 
 - name: Check GLPI HTTP response by hostname header
   ansible.builtin.uri:
