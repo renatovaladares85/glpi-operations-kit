@@ -64,7 +64,7 @@ printf 'mysql=%s\\n' "$(package_for_command mysql)"
         self.assertIn("ansible=ansible-core", result.stdout)
         self.assertIn("ssh=openssh-clients", result.stdout)
         self.assertIn("yaml=python3-PyYAML", result.stdout)
-        self.assertIn("mysql=mariadb", result.stdout)
+        self.assertIn("mysql=mysql", result.stdout)
 
     def test_unsupported_platform_fails(self):
         for os_release in (

@@ -1292,7 +1292,7 @@ package_for_command() {
         python3) echo "python3" ;;
         ssh) echo "openssh-clients" ;;
         bash) echo "bash" ;;
-        mysql) echo "mariadb" ;;
+        mysql) echo "mysql" ;;
         *) echo "" ;;
       esac
       ;;
@@ -2024,19 +2024,19 @@ run_preflight_checks() {
     fi
 
     if [[ "$app_stack_expected" == "true" ]]; then
-      local mariadb_client_package
-      mariadb_client_package="$(package_for_command mysql)"
-      if check_or_install_command "mandatory" "mysql" "$mariadb_client_package"; then
-        append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
-          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mariadb_client_package")" "true" "pass" "none"
+      local mysql_client_package
+      mysql_client_package="$(package_for_command mysql)"
+      if check_or_install_command "mandatory" "mysql" "$mysql_client_package"; then
+        append_precheck_item "$environment" "mysql-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
+          "App host needs a MySQL-compatible client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mysql_client_package")" "true" "pass" "none"
       else
-        append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
-          "App host needs MariaDB client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mariadb_client_package")" "true" "fail" "Install MariaDB client package and rerun precheck."
+        append_precheck_item "$environment" "mysql-client-on-app-host" "local-tooling" "deploy/apply app in local mode" "mandatory" \
+          "App host needs a MySQL-compatible client for DB connectivity validation and diagnostics." "command -v mysql" "$(package_install_action "$mysql_client_package")" "true" "fail" "Install a MySQL-compatible client package and rerun precheck."
         register_mandatory_failure
       fi
     else
-      append_precheck_item "$environment" "mariadb-client-on-app-host" "local-tooling" "non-app local target or ssh execution" "not-applicable" \
-        "MariaDB client on local host is required only for app-host local verification flow." "command -v mysql" "n/a" "false" "skip" "none"
+      append_precheck_item "$environment" "mysql-client-on-app-host" "local-tooling" "non-app local target or ssh execution" "not-applicable" \
+        "MySQL-compatible client on local host is required only for app-host local verification flow." "command -v mysql" "n/a" "false" "skip" "none"
     fi
 
     if [[ "$glpi_requires_bcmath" == "true" ]]; then

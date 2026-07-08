@@ -56,7 +56,7 @@ Each item defines:
 | Nginx | `nginx` | `nginx` |
 | PHP-FPM | `php-fpm` / service `php8.3-fpm` | `php-fpm` / service `php-fpm` |
 | GLPI PHP extensions | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysql`, `php-xml`, `php-zip`, `php-bz2`, `php-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-redis` | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysqlnd`, `php-xml`, `php-zip`, `php-bz2`, `php-pecl-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-pecl-redis` |
-| MariaDB client | `mariadb-client` | `mariadb` |
+| MySQL-compatible client | `mariadb-client` | `mysql` |
 | Redis | `redis-server` | `redis` |
 
 ## Notes

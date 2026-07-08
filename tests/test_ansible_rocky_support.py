@@ -1,4 +1,5 @@
 import unittest
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -48,6 +49,15 @@ class AnsibleRockySupportTest(unittest.TestCase):
         self.assertIn('dest: "{{ glpi_apache_conf_path }}"', app_tasks)
         self.assertIn("platform_family | default('debian') == 'rhel'", app_tasks)
         self.assertIn('SetHandler "proxy:unix:{{ glpi_php_fpm_socket }}|fcgi://localhost/"', apache_template)
+
+    def test_rhel_app_defaults_use_mysql_client_package(self):
+        renderer_path = REPO_ROOT / "scripts" / "lib" / "render_product_config.py"
+        spec = importlib.util.spec_from_file_location("render_product_config", renderer_path)
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+
+        self.assertIn("mysql", renderer.DEFAULT_GLPI_APP_PACKAGES_RHEL)
+        self.assertNotIn("mariadb", renderer.DEFAULT_GLPI_APP_PACKAGES_RHEL)
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ Mailpit UI/SMTP auth is prompted by `glpictl email prepare mailpit` and stored a
 Automatic source of truth is `scripts/lib/render_product_config.py`, which detects the local platform family from `/etc/os-release` and maps:
 
 - `WEB_SERVER_PACKAGES[WEB_SERVER_TYPE]` for Ubuntu/Debian or Rocky/RHEL-like
-- plus `DEFAULT_GLPI_APP_PACKAGES` including PHP extensions, Redis, and a MariaDB client for APP -> DB checks
+- plus `DEFAULT_GLPI_APP_PACKAGES` including PHP extensions, Redis, and a MySQL-compatible client for APP -> DB checks
 
 Platform-sensitive defaults:
 
@@ -127,7 +127,7 @@ Platform-sensitive defaults:
 | GLPI filesystem owner/group | `www-data:www-data` | `apache:apache` |
 | PHP-FPM service | `php8.3-fpm` | `php-fpm` |
 | PHP-FPM socket | `/run/php/php8.3-fpm.sock` | `/run/php-fpm/glpi.sock` |
-| MariaDB client package | `mariadb-client` | `mariadb` |
+| MySQL-compatible client package | `mariadb-client` | `mysql` |
 | Python YAML package | `python3-yaml` | `python3-PyYAML` |
 
 Redis memory sizing is not forced by default. `GLPI_REDIS_MAXMEMORY` and `GLPI_REDIS_MAXMEMORY_POLICY` are optional overrides and should be set only after host capacity is known.

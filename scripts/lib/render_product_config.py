@@ -65,7 +65,7 @@ DEFAULT_GLPI_APP_PACKAGES_RHEL = [
     "xz",
     "curl",
     "openssl",
-    "mariadb",
+    "mysql",
 ]
 
 DEFAULT_GLPI_APP_PACKAGES_BY_FAMILY = {
