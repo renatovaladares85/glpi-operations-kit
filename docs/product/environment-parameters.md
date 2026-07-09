@@ -52,7 +52,7 @@ Mailpit UI/SMTP credentials are collected by `./scripts/glpictl.sh <env> email p
 | `NETWORK_*` | SSH identity and DB source allowlist. | Manual field guide. |
 | `GLPI_*`, `PHP_FPM_*`, `WEB_*` | GLPI version, web engine, PHP runtime, ports, app packages. | Manual field guide. |
 | `GLPI_REDIS_*` | Local Redis cache/session integration for GLPI app hosts. | Manual field guide. |
-| `DATABASE_*` | MariaDB/MySQL schema, users, bind, port, packages. | Manual field guide. |
+| `DATABASE_*` | MariaDB/MySQL schema, users, bind, port, packages, managed DB compatibility policy. | Manual field guide. |
 | `TLS_*` | TLS mode, certificate target paths, provided source files. | Manual field guide and TLS appendix. |
 | `BACKUP_*` | Backup base directory and retention. | Manual field guide. |
 | `MONITORING_*`, `ALERTING_*` | Exporters, labels, thresholds, scrape profiles, alert routes. | Manual field guide. |
@@ -72,6 +72,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `EXECUTION_MODE` | `local` unless remote SSH orchestration is allowed by local policy. | Prevents implicit cross-host assumptions. |
 | `TOPOLOGY_MODE` | Match the real host layout. | Wrong topology can apply DB/app actions to the wrong host. |
 | `DATABASE_DEPLOYMENT_MODE` | `self_hosted` for VM-managed DB, `managed` for AWS RDS/external DB. | Controls whether scripts expect Linux DB host operations or direct DB TCP validation. |
+| `DATABASE_COMPATIBILITY_POLICY` | `block`. | Keeps official GLPI DB requirements blocking by default; `defer` is only a temporary non-production bridge with justification and confirmation. |
 | `WEB_SERVER_TYPE` | One of `nginx`, `apache`, `lighttpd`. | The Linux kit automates these engines only. |
 | `TLS_MODE` | `provided` for production. | Enforces secure public access defaults. |
 | `SECURITY_REQUIRE_ORDERED_EXECUTION` | `true`. | Protects deployment order and rollback reasoning. |

@@ -287,6 +287,11 @@ DOTTED_KEY_MAP = {
     "database.bind_address": "DATABASE_BIND_ADDRESS",
     "database.packages": "DATABASE_PACKAGES",
     "database.deployment_mode": "DATABASE_DEPLOYMENT_MODE",
+    "database.compatibility_policy": "DATABASE_COMPATIBILITY_POLICY",
+    "database.compatibility_justification": "DATABASE_COMPATIBILITY_JUSTIFICATION",
+    "database.compatibility_require_interactive_confirmation": "DATABASE_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION",
+    "database.compatibility_assume_yes": "DATABASE_COMPATIBILITY_ASSUME_YES",
+    "database.unsupported_prod_override": "DATABASE_UNSUPPORTED_PROD_OVERRIDE",
     "php_fpm.service_name": "PHP_FPM_SERVICE_NAME",
     "php_fpm.socket": "PHP_FPM_SOCKET",
     "php_fpm.pm": "PHP_FPM_PM",
@@ -977,6 +982,23 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     db_grant_host = db_app_access_host if db_access_mode == "restricted" else "%"
     db_firewall_open = db_access_mode == "open"
     db_firewall_sources = [] if db_firewall_open else restricted_db_sources
+    environment_stage = read_value(values, "ENVIRONMENT_STAGE", environment_name).strip() or environment_name
+    database_compatibility_policy = read_value(values, "DATABASE_COMPATIBILITY_POLICY", "block").strip().lower() or "block"
+    if database_compatibility_policy not in {"block", "warn", "defer"}:
+        fail("DATABASE_COMPATIBILITY_POLICY must be one of: block, warn, defer.")
+    database_compatibility_justification = read_value(values, "DATABASE_COMPATIBILITY_JUSTIFICATION", "").strip()
+    database_compatibility_require_interactive_confirmation = as_bool(
+        read_value(values, "DATABASE_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION", "true"),
+        True,
+    )
+    database_compatibility_assume_yes = as_bool(
+        read_value(values, "DATABASE_COMPATIBILITY_ASSUME_YES", "false"),
+        False,
+    )
+    database_unsupported_prod_override = as_bool(
+        read_value(values, "DATABASE_UNSUPPORTED_PROD_OVERRIDE", "false"),
+        False,
+    )
 
     app_packages_value = read_value(values, "GLPI_APP_PACKAGES", "").strip()
     if app_packages_value:
@@ -1002,12 +1024,17 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "customer_display_name": require_value(values, "CUSTOMER_DISPLAY_NAME"),
         "customer_short_name": read_value(values, "CUSTOMER_SHORT_NAME", "example-customer"),
         "environment_name": environment_name,
-        "environment_stage": read_value(values, "ENVIRONMENT_STAGE", environment_name),
+        "environment_stage": environment_stage,
         "execution_mode": execution_mode,
         "execution_host_role": host_role,
         "platform_family": platform_family,
         "topology_mode": read_value(values, "TOPOLOGY_MODE", "dual-server"),
         "database_deployment_mode": db_deployment_mode,
+        "database_compatibility_policy": database_compatibility_policy,
+        "database_compatibility_justification": database_compatibility_justification,
+        "database_compatibility_require_interactive_confirmation": database_compatibility_require_interactive_confirmation,
+        "database_compatibility_assume_yes": database_compatibility_assume_yes,
+        "database_unsupported_prod_override": database_unsupported_prod_override,
         "glpi_version": glpi_version,
         "glpi_download_url": f"https://github.com/glpi-project/glpi/releases/download/{glpi_version}/glpi-{glpi_version}.tgz",
         "glpi_release_root": release_root,

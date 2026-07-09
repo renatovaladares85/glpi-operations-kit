@@ -65,6 +65,7 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `EXECUTION_HOST_ROLE_DEFAULT` | Prevents wrong mutable actions on wrong hosts in local mode. | `app`, `db`, `all` |
 | `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
 | `DATABASE_DEPLOYMENT_MODE` | Defines self-hosted DB vs external managed DB flow. | `self_hosted`, `managed` |
+| `DATABASE_COMPATIBILITY_POLICY` | Controls managed DB incompatibility handling. Default is blocking. | `block`, `warn`, `defer` |
 | `WEB_SERVER_TYPE` | Selects the Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
 | `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
 | `SECURITY_REQUIRE_*` | Enables policy checks for TLS/HTTPS/promotion/ordered execution. | `true`, `false` |
@@ -84,6 +85,9 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
+- `DATABASE_COMPATIBILITY_POLICY=block`: default; incompatible managed DB blocks precheck/prepare/apply.
+- `DATABASE_COMPATIBILITY_POLICY=warn`: non-production only; requires justification and explicit confirmation, then continues with schema install/checks unsupported.
+- `DATABASE_COMPATIBILITY_POLICY=defer`: non-production only; requires justification and explicit confirmation, then skips GLPI schema bootstrap and web smoke checks until the DB is upgraded.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - Redis is installed and configured on GLPI app hosts by default for GLPI cache (DB 0) and PHP-FPM sessions (DB 1).
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
@@ -131,3 +135,23 @@ Platform-sensitive defaults:
 | Python YAML package | `python3-yaml` | `python3-PyYAML` |
 
 Redis memory sizing is not forced by default. `GLPI_REDIS_MAXMEMORY` and `GLPI_REDIS_MAXMEMORY_POLICY` are optional overrides and should be set only after host capacity is known.
+
+## Managed DB Compatibility Policy
+
+Official GLPI database requirements enforced by the kit:
+
+| GLPI version | Minimum MySQL | Minimum MariaDB |
+|---|---:|---:|
+| 10.0.x | 5.7 | 10.2 |
+| 11.0.x | 8.0 | 10.6 |
+
+`DATABASE_COMPATIBILITY_POLICY=block` is the safe default and must remain the normal production posture.
+
+Use `DATABASE_COMPATIBILITY_POLICY=defer` only as a temporary non-production bridge when the APP layer must be installed before a managed DB upgrade. In this mode, the kit still records the incompatible engine/version, requires `DATABASE_COMPATIBILITY_JUSTIFICATION`, requires operator confirmation unless `DATABASE_COMPATIBILITY_ASSUME_YES=true`, skips GLPI schema bootstrap, and skips web smoke checks that require a valid GLPI schema.
+
+After the managed DB is upgraded, rerun:
+
+```bash
+./scripts/glpictl.sh <env> deploy apply app
+./scripts/glpictl.sh <env> deploy post-check all
+```

@@ -70,8 +70,13 @@
 - Fix:
   - ask the DB team to upgrade the managed DB to MariaDB >= 10.6 or MySQL >= 8.0 when using GLPI 11;
   - or set `GLPI_VERSION` to a compatible GLPI 10.x version when the database must remain on MariaDB 10.5;
-  - do not bypass the block to install GLPI 11 on MariaDB 10.5.
+  - keep `DATABASE_COMPATIBILITY_POLICY=block` as the safe default.
+- Temporary non-production exception:
+  - use `DATABASE_COMPATIBILITY_POLICY=defer` only with a non-production `ENVIRONMENT_STAGE`, `SECURITY_MODE=permissive`, a filled `DATABASE_COMPATIBILITY_JUSTIFICATION`, and explicit confirmation;
+  - this installs the APP layer but skips GLPI schema/bootstrap and web smoke checks that require a valid schema;
+  - do not use `warn/defer` in production without explicit external approval and `DATABASE_UNSUPPORTED_PROD_OVERRIDE=true`.
 - Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all`, then `deploy apply app`.
+- After DB upgrade: rerun `./scripts/glpictl.sh <env> deploy apply app` and `./scripts/glpictl.sh <env> deploy post-check all`.
 
 ## MySQL connection drops at `reading initial communication packet`
 

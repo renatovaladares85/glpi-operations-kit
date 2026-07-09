@@ -477,6 +477,11 @@ configure_glpi_cache() {
   local console="${glpi_path}/bin/console"
   local commands=""
 
+  if [[ "${GLPI_DEFER_SCHEMA_BOOTSTRAP:-false}" == "true" ]]; then
+    log "GLPI cache console configuration deferred because DB schema bootstrap is deferred."
+    return 0
+  fi
+
   if [[ ! -f "$console" ]]; then
     log "GLPI cache configuration skipped safely: bin/console not found at $console."
     return 0

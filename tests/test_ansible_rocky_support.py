@@ -59,6 +59,25 @@ class AnsibleRockySupportTest(unittest.TestCase):
         self.assertIn("mysql", renderer.DEFAULT_GLPI_APP_PACKAGES_RHEL)
         self.assertNotIn("mariadb", renderer.DEFAULT_GLPI_APP_PACKAGES_RHEL)
 
+    def test_renderer_exposes_database_compatibility_contract(self):
+        renderer_path = REPO_ROOT / "scripts" / "lib" / "render_product_config.py"
+        spec = importlib.util.spec_from_file_location("render_product_config", renderer_path)
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+
+        self.assertEqual(
+            renderer.DOTTED_KEY_MAP["database.compatibility_policy"],
+            "DATABASE_COMPATIBILITY_POLICY",
+        )
+        self.assertEqual(
+            renderer.DOTTED_KEY_MAP["database.compatibility_justification"],
+            "DATABASE_COMPATIBILITY_JUSTIFICATION",
+        )
+        self.assertEqual(
+            renderer.DOTTED_KEY_MAP["database.compatibility_assume_yes"],
+            "DATABASE_COMPATIBILITY_ASSUME_YES",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -147,6 +147,28 @@ check_case "10.0.18" "10.5.27-MariaDB MariaDB Server" "pass"
         self.assertIn("11.0.8|8.0.36 MySQL Community Server|pass", result.stdout)
         self.assertIn("10.0.18|10.5.27-MariaDB MariaDB Server|pass", result.stdout)
 
+    def test_database_compatibility_policy_helpers_are_explicit(self):
+        result = self.run_common(
+            'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
+            """
+[[ "$(normalize_database_compatibility_policy "")" == "block" ]]
+[[ "$(normalize_database_compatibility_policy "warn")" == "warn" ]]
+[[ "$(normalize_database_compatibility_policy "defer")" == "defer" ]]
+[[ "$(normalize_database_compatibility_policy "allow")" == "invalid" ]]
+environment_stage_allows_unsupported_database "hml"
+environment_stage_allows_unsupported_database "example-hml"
+environment_stage_allows_unsupported_database "staging"
+! environment_stage_allows_unsupported_database "unknown"
+environment_stage_is_production "prod"
+environment_stage_is_production "production"
+! environment_stage_is_production "hml"
+echo policy-helpers-ok
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("policy-helpers-ok", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,8 +70,13 @@
 - Correção:
   - pedir upgrade do banco managed para MariaDB >= 10.6 ou MySQL >= 8.0 quando usar GLPI 11;
   - ou ajustar `GLPI_VERSION` para uma versão GLPI 10.x compatível quando o banco permanecer em MariaDB 10.5;
-  - não burlar o bloqueio para instalar GLPI 11 em MariaDB 10.5.
+  - manter `DATABASE_COMPATIBILITY_POLICY=block` como padrão seguro.
+- Exceção temporária em não produção:
+  - usar `DATABASE_COMPATIBILITY_POLICY=defer` somente com `ENVIRONMENT_STAGE` não produtivo, `SECURITY_MODE=permissive`, `DATABASE_COMPATIBILITY_JUSTIFICATION` preenchido e confirmação explícita;
+  - nesse modo o kit instala a camada APP, mas pula bootstrap/schema GLPI e smoke checks web que dependem de schema válido;
+  - não usar `warn/defer` em produção sem aprovação externa explícita e `DATABASE_UNSUPPORTED_PROD_OVERRIDE=true`.
 - Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all` e só depois `deploy apply app`.
+- Após upgrade do banco: repetir `./scripts/glpictl.sh <env> deploy apply app` e `./scripts/glpictl.sh <env> deploy post-check all`.
 
 ## Conexão MySQL cai em `reading initial communication packet`
 

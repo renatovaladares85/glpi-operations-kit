@@ -30,7 +30,7 @@ Each item defines:
 | Security mode default | Policy control | all | always | mandatory | Defines default policy behavior when `SECURITY_MODE` is not passed | `OPERATIONS_SECURITY_MODE_DEFAULT` in config | No | Yes |
 | Execution mode contract | Execution contract | all | always | mandatory | Prevents wrong orchestration model for local/ssh execution | `EXECUTION_MODE` or `GLPI_EXECUTION_MODE` | No | Yes |
 | Host role contract | Execution contract | all | always | mandatory | Ensures local host runs only allowed mutable actions | `EXECUTION_HOST_ROLE_DEFAULT` or `GLPI_HOST_ROLE` | No | Yes |
-| Managed DB version compatibility | Database | app | `DATABASE_DEPLOYMENT_MODE=managed` + credentials available | conditional-mandatory | GLPI must not be applied when the external DB version is incompatible with the configured GLPI version | `SELECT VERSION(), @@version_comment;` using the GLPI DB user | No | Yes |
+| Managed DB version compatibility | Database | app | `DATABASE_DEPLOYMENT_MODE=managed` + credentials available | conditional-mandatory | GLPI must not be applied when the external DB version is incompatible with the configured GLPI version unless an explicit non-production `warn`/`defer` policy is accepted | `SELECT VERSION(), @@version_comment;` using the GLPI DB user | No | Yes for `block`; No only for confirmed non-production `warn`/`defer` |
 | SSH key pair per environment | Security artifact | all | `EXECUTION_MODE=ssh` | conditional-mandatory | Supports safe environment isolation and host access | key existence + mode `0600` | Partial | Yes |
 | SSH connectivity to app/db | Network access | all | `EXECUTION_MODE=ssh` + `TOPOLOGY_MODE=dual-server` | conditional-mandatory | Confirms execution host can reach both targets | `ssh -i <key> <user>@<host> "echo ok"` | No | Yes |
 | TLS local files | Security artifact | all | `TLS_MODE=provided` | conditional-mandatory | Required to install valid cert/key in app host | local file existence check | No | Yes |
@@ -71,6 +71,13 @@ Each item defines:
 
 For `DATABASE_DEPLOYMENT_MODE=managed`, confirm the database engine/version before `deploy apply app`.
 MariaDB 10.5 is not compatible with GLPI 11; either upgrade the managed DB to MariaDB 10.6+ / MySQL 8.0+ or use a GLPI 10.x version compatible with MariaDB 10.5.
+
+`DATABASE_COMPATIBILITY_POLICY` controls temporary exception handling:
+
+- `block` is the default and fails when the managed DB is incompatible.
+- `warn` requires non-production stage, `SECURITY_MODE=permissive`, `DATABASE_COMPATIBILITY_JUSTIFICATION`, and explicit confirmation; it continues with schema install/checks unsupported.
+- `defer` has the same controls as `warn`, but skips GLPI schema bootstrap and web smoke checks until the managed DB is upgraded.
+- `prod`/`production` stages block `warn`/`defer` unless `DATABASE_UNSUPPORTED_PROD_OVERRIDE=true` is set with explicit external approval.
 
 ## Notes
 

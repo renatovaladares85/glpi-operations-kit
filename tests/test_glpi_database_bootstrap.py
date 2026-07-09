@@ -38,12 +38,28 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
         self.assertLess(schema_install_pos, redis_pos)
         self.assertLess(redis_pos, http_check_pos)
         self.assertIn("--execute=SELECT VERSION(), @@version_comment;", app_tasks)
-        self.assertIn("GLPI 11 requires MySQL >= 8.0 or MariaDB >= 10.6", app_tasks)
+        self.assertIn("MariaDB >= 10.6 or MySQL >= 8.0 for GLPI 11", app_tasks)
         self.assertIn("SHOW TABLES LIKE 'glpi_configs';", app_tasks)
         self.assertIn("db:install", app_tasks)
         self.assertIn("--no-interaction", app_tasks)
         self.assertIn("--no-telemetry", app_tasks)
         self.assertNotIn("--force", app_tasks)
+
+    def test_defer_policy_skips_schema_bootstrap_and_web_smoke_checks(self):
+        app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        redis_script = (
+            REPO_ROOT / "ansible" / "roles" / "app" / "files" / "glpi-redis-integration.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("database_compatibility_policy_effective", app_tasks)
+        self.assertIn("database_compatibility_operator_confirmed_effective", app_tasks)
+        self.assertIn("database_compatibility_schema_bootstrap_deferred_effective", app_tasks)
+        self.assertIn("Use DATABASE_COMPATIBILITY_POLICY=warn|defer only through glpictl confirmation", app_tasks)
+        self.assertIn("not (database_compatibility_schema_bootstrap_deferred_effective | bool)", app_tasks)
+        self.assertIn("GLPI_DEFER_SCHEMA_BOOTSTRAP", app_tasks)
+        self.assertIn("GLPI cache console configuration deferred because DB schema bootstrap is deferred.", redis_script)
 
 
 if __name__ == "__main__":

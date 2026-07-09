@@ -1766,6 +1766,35 @@ glpi_db_compatibility_value() {
   awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$report"
 }
 
+normalize_database_compatibility_policy() {
+  local policy="$1"
+  policy="${policy,,}"
+  [[ -z "${policy// }" ]] && policy="block"
+  case "$policy" in
+    block|warn|defer) echo "$policy" ;;
+    *) echo "invalid" ;;
+  esac
+}
+
+environment_stage_is_production() {
+  local stage="$1"
+  stage="${stage,,}"
+  case "$stage" in
+    prod|production|prd|*-prod|prod-*|*-prod-*|*-production|production-*|*-production-*|*-prd|prd-*|*-prd-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+environment_stage_allows_unsupported_database() {
+  local stage="$1"
+  stage="${stage,,}"
+  case "$stage" in
+    dev|development|test|testing|qa|uat|hml|homolog|homologacao|homologation|stage|staging|nonprod|non-production|sandbox) return 0 ;;
+    *-dev|dev-*|*-dev-*|*-test|test-*|*-test-*|*-qa|qa-*|*-qa-*|*-uat|uat-*|*-uat-*|*-hml|hml-*|*-hml-*|*-homolog|homolog-*|*-homolog-*|*-staging|staging-*|*-staging-*|*-stage|stage-*|*-stage-*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 probe_managed_db_version_local() {
   local db_host="$1"
   local db_port="$2"
@@ -2056,6 +2085,11 @@ run_preflight_checks() {
     db_password="$(read_product_config_value "$environment" "DATABASE_PASSWORD" || true)"
     glpi_version="$(read_product_config_value "$environment" "glpi.version" || true)"
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
+    environment_stage="$(read_product_config_value "$environment" "environment.stage" || true)"
+    database_compatibility_policy="$(normalize_database_compatibility_policy "$(read_product_config_value "$environment" "database.compatibility_policy" || true)")"
+    database_compatibility_justification="$(read_product_config_value "$environment" "database.compatibility_justification" || true)"
+    database_compatibility_assume_yes="$(normalize_bool_value "$(read_product_config_value "$environment" "database.compatibility_assume_yes" || true)" "false")"
+    database_unsupported_prod_override="$(normalize_bool_value "$(read_product_config_value "$environment" "database.unsupported_prod_override" || true)" "false")"
     security_mode="$(resolve_security_mode_for_environment "$environment")"
     execution_mode="$(resolve_execution_mode_for_environment "$environment")"
     host_role="$(resolve_host_role_for_environment "$environment")"
@@ -2065,6 +2099,7 @@ run_preflight_checks() {
     [[ -z "${php_fpm_service// }" ]] && php_fpm_service="php${php_version}-fpm"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
+    [[ -z "${environment_stage// }" ]] && environment_stage="$environment"
     [[ -z "${db_port// }" ]] && db_port="3306"
     if [[ -z "${db_password// }" && -f "$(runtime_secret_path "$environment")" ]]; then
       db_password="$(read_yaml_top_level_value "$(runtime_secret_path "$environment")" "glpi_db_password" || true)"
@@ -2144,6 +2179,10 @@ run_preflight_checks() {
       if [[ "$app_stack_expected" != "true" ]]; then
         append_precheck_item "$environment" "managed-db-version-compatible" "database" "non-app local target or ssh execution" "not-applicable" \
           "Managed DB version compatibility is enforced before app deployment." "SELECT VERSION(), @@version_comment" "n/a" "false" "skip" "none"
+      elif [[ "$database_compatibility_policy" == "invalid" ]]; then
+        append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+          "Managed DB compatibility policy must be block, warn, or defer." "DATABASE_COMPATIBILITY_POLICY" "set block, warn, or defer" "true" "fail" "Fix DATABASE_COMPATIBILITY_POLICY in config/<environment>.env."
+        register_mandatory_failure
       elif [[ -z "${db_password// }" ]]; then
         append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "conditional-mandatory" \
           "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "skip" "database password not available in check-only flow; deploy prepare/apply will block before app mutation."
@@ -2164,10 +2203,29 @@ run_preflight_checks() {
           if [[ "$managed_db_compat_status" == "pass" ]]; then
             append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
               "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "pass" "$managed_db_compat_message"
-          else
+          elif [[ "$database_compatibility_policy" == "block" ]]; then
             append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
               "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "fail" "$managed_db_compat_message"
             register_mandatory_failure
+          elif [[ -z "${database_compatibility_justification// }" ]]; then
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB is incompatible and policy ${database_compatibility_policy} requires an explicit justification." "DATABASE_COMPATIBILITY_JUSTIFICATION" "set a temporary operational justification" "true" "fail" "Set DATABASE_COMPATIBILITY_JUSTIFICATION before using DATABASE_COMPATIBILITY_POLICY=${database_compatibility_policy}."
+            register_mandatory_failure
+          elif [[ "$security_mode" != "permissive" ]]; then
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB is incompatible and warn/defer is allowed only in SECURITY_MODE=permissive." "SECURITY_MODE=permissive" "run with SECURITY_MODE=permissive after accepting the risk" "true" "fail" "Use SECURITY_MODE=permissive with explicit justification, or keep DATABASE_COMPATIBILITY_POLICY=block."
+            register_mandatory_failure
+          elif environment_stage_is_production "$environment_stage" && [[ "$database_unsupported_prod_override" != "true" ]]; then
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB is incompatible and policy ${database_compatibility_policy} is blocked in production by default." "ENVIRONMENT_STAGE + DATABASE_UNSUPPORTED_PROD_OVERRIDE" "do not use unsupported DB in production" "true" "fail" "Upgrade the DB before production deploy, or set DATABASE_UNSUPPORTED_PROD_OVERRIDE=true only with explicit exceptional approval."
+            register_mandatory_failure
+          elif ! environment_stage_is_production "$environment_stage" && ! environment_stage_allows_unsupported_database "$environment_stage"; then
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB is incompatible and policy ${database_compatibility_policy} is allowed only for known non-production stages." "ENVIRONMENT_STAGE" "set dev/hml/homolog/staging/test or keep block" "true" "fail" "Set ENVIRONMENT_STAGE to a non-production value or keep DATABASE_COMPATIBILITY_POLICY=block."
+            register_mandatory_failure
+          else
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "conditional-mandatory" \
+              "Managed DB is incompatible but DATABASE_COMPATIBILITY_POLICY=${database_compatibility_policy} is explicitly configured for non-production." "SELECT VERSION(), @@version_comment" "n/a" "false" "warn" "${managed_db_compat_message} Policy=${database_compatibility_policy}; justification recorded; deploy prepare/apply will require confirmation unless DATABASE_COMPATIBILITY_ASSUME_YES=true."
           fi
         else
           append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \

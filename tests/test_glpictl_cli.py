@@ -34,6 +34,39 @@ class GlpiCtlCliTest(unittest.TestCase):
             apply_section.index("invoke_ansible_or_fail"),
         )
 
+    def test_managed_db_compatibility_policy_requires_explicit_acceptance(self):
+        script = GLPICTL.read_text(encoding="utf-8")
+        gate = script[
+            script.index("enforce_managed_db_version_compatibility_gate()") : script.index(
+                "effective_managed_timezone_db_mode()"
+            )
+        ]
+
+        self.assertIn('MANAGED_DB_COMPATIBILITY_POLICY" != "warn"', gate)
+        self.assertIn("DATABASE_COMPATIBILITY_JUSTIFICATION", gate)
+        self.assertIn('SECURITY_MODE_EFFECTIVE" != "permissive"', gate)
+        self.assertIn("environment_stage_is_production", gate)
+        self.assertIn("DATABASE_UNSUPPORTED_PROD_OVERRIDE", gate)
+        self.assertIn("DATABASE_COMPATIBILITY_ASSUME_YES", gate)
+        self.assertIn("prompt_yes_no", gate)
+        self.assertIn('DB_COMPATIBILITY_OPERATOR_CONFIRMED="true"', gate)
+        self.assertIn('DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="true"', gate)
+        self.assertIn('EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"', gate)
+
+    def test_database_compatibility_evidence_does_not_write_passwords(self):
+        script = GLPICTL.read_text(encoding="utf-8")
+        evidence_section = script[
+            script.index("write_database_compatibility_evidence()") : script.index(
+                "enforce_managed_db_version_compatibility_gate()"
+            )
+        ]
+
+        self.assertIn("database_compatibility_status", evidence_section)
+        self.assertIn("database_version_detected", evidence_section)
+        self.assertIn("database_compatibility_justification", evidence_section)
+        self.assertNotIn("PASSWORD", evidence_section)
+        self.assertNotIn("MANAGED_DB_PASSWORD", evidence_section)
+
     def test_ansible_failure_summary_is_reported(self):
         script = GLPICTL.read_text(encoding="utf-8")
 

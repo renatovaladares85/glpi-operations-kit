@@ -64,6 +64,7 @@ declare -a EXECUTION_TEST_COMMANDS=()
 EXECUTION_FAILURE_TASK=""
 EXECUTION_FAILURE_MESSAGE=""
 EXECUTION_FAILURE_ACTION=""
+EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS"
 MANAGED_DB_HOST=""
 MANAGED_DB_PORT=""
 MANAGED_DB_NAME=""
@@ -75,6 +76,21 @@ MANAGED_DB_TIMEZONE=""
 MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="false"
 MANAGED_DB_TIMEZONE_MODE="disabled"
 MANAGED_DB_TIMEZONE_LEGACY_GRANT="false"
+MANAGED_DB_COMPATIBILITY_POLICY="block"
+MANAGED_DB_COMPATIBILITY_JUSTIFICATION=""
+MANAGED_DB_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION="true"
+MANAGED_DB_COMPATIBILITY_ASSUME_YES="false"
+MANAGED_DB_UNSUPPORTED_PROD_OVERRIDE="false"
+DB_COMPATIBILITY_STATUS="not_checked"
+DB_COMPATIBILITY_POLICY_EFFECTIVE="block"
+DB_COMPATIBILITY_ENGINE_DETECTED=""
+DB_COMPATIBILITY_VERSION_DETECTED=""
+DB_COMPATIBILITY_REQUIRED_MINIMUM=""
+DB_COMPATIBILITY_REQUIREMENT=""
+DB_COMPATIBILITY_OPERATOR_CONFIRMED="false"
+DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="false"
+DB_COMPATIBILITY_JUSTIFICATION=""
+DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION=""
 
 build_execution_test_commands() {
   local web_service php_service web_server_type web_config_test_command
@@ -163,7 +179,7 @@ print_execution_final_summary() {
     echo "  status: ${status_label}" >&2
     echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}" >&2
     echo "  access_url: ${EXECUTION_ACCESS_URL}" >&2
-    if [[ "$status_label" != "SUCCESS" ]]; then
+    if [[ "$status_label" == "FAILED" ]]; then
       echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}" >&2
       echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}" >&2
       echo "  recommended_action: ${EXECUTION_FAILURE_ACTION:-Review the failing task and rerun after remediation.}" >&2
@@ -187,7 +203,7 @@ print_execution_final_summary() {
   echo "  status: ${status_label}"
   echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}"
   echo "  access_url: ${EXECUTION_ACCESS_URL}"
-  if [[ "$status_label" != "SUCCESS" ]]; then
+  if [[ "$status_label" == "FAILED" ]]; then
     echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}"
     echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}"
     echo "  recommended_action: ${EXECUTION_FAILURE_ACTION:-Review the failing task and rerun after remediation.}"
@@ -233,6 +249,16 @@ append_execution_summary_to_file() {
     echo "failure_task: '$(summary_escape "${EXECUTION_FAILURE_TASK:-}")'"
     echo "failure_message: '$(summary_escape "${EXECUTION_FAILURE_MESSAGE:-}")'"
     echo "recommended_action: '$(summary_escape "${EXECUTION_FAILURE_ACTION:-}")'"
+    echo "database_compatibility_status: '$(summary_escape "$DB_COMPATIBILITY_STATUS")'"
+    echo "database_compatibility_policy: '$(summary_escape "$DB_COMPATIBILITY_POLICY_EFFECTIVE")'"
+    echo "database_engine_detected: '$(summary_escape "$DB_COMPATIBILITY_ENGINE_DETECTED")'"
+    echo "database_version_detected: '$(summary_escape "$DB_COMPATIBILITY_VERSION_DETECTED")'"
+    echo "database_required_minimum: '$(summary_escape "$DB_COMPATIBILITY_REQUIRED_MINIMUM")'"
+    echo "database_requirement: '$(summary_escape "$DB_COMPATIBILITY_REQUIREMENT")'"
+    echo "operator_confirmed_unsupported_database: '$(summary_escape "$DB_COMPATIBILITY_OPERATOR_CONFIRMED")'"
+    echo "schema_bootstrap_deferred: '$(summary_escape "$DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED")'"
+    echo "database_compatibility_justification: '$(summary_escape "$DB_COMPATIBILITY_JUSTIFICATION")'"
+    echo "database_compatibility_recommended_next_action: '$(summary_escape "$DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION")'"
     echo "alerts_count: ${#EXECUTION_WARNINGS[@]}"
     echo "alerts:"
     if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
@@ -350,15 +376,15 @@ finalize_glpictl_operation() {
     append_execution_summary_to_file
   fi
   if [[ "$exit_code" -eq 0 ]]; then
-    echo "FINAL STATUS: SUCCESS"
+    echo "FINAL STATUS: ${EXECUTION_SUCCESS_STATUS_LABEL}"
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
     echo "Execution summary: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.summary.yml"
     if [[ ${#EXECUTION_WARNINGS[@]} -gt 0 ]]; then
       echo "Execution warnings:"
       printf '%s\n' "${EXECUTION_WARNINGS[@]}"
     fi
-    print_execution_final_summary "SUCCESS"
-    echo "END OF EXECUTION (SUCCESS)"
+    print_execution_final_summary "$EXECUTION_SUCCESS_STATUS_LABEL"
+    echo "END OF EXECUTION (${EXECUTION_SUCCESS_STATUS_LABEL})"
   else
     echo "FINAL STATUS: FAILED" >&2
     echo "Execution log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
@@ -1632,6 +1658,11 @@ load_managed_db_runtime_contract() {
   MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_support_enabled" || true)" "false")"
   MANAGED_DB_TIMEZONE_MODE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_mode" || true)"
   MANAGED_DB_TIMEZONE_LEGACY_GRANT="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_legacy_grant" || true)" "false")"
+  MANAGED_DB_COMPATIBILITY_POLICY="$(normalize_database_compatibility_policy "$(read_effective_runtime_value "database_compatibility_policy" "block")")"
+  MANAGED_DB_COMPATIBILITY_JUSTIFICATION="$(read_effective_runtime_value "database_compatibility_justification" "")"
+  MANAGED_DB_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION="$(normalize_bool "$(read_effective_runtime_value "database_compatibility_require_interactive_confirmation" "true")" "true")"
+  MANAGED_DB_COMPATIBILITY_ASSUME_YES="$(normalize_bool "$(read_effective_runtime_value "database_compatibility_assume_yes" "false")" "false")"
+  MANAGED_DB_UNSUPPORTED_PROD_OVERRIDE="$(normalize_bool "$(read_effective_runtime_value "database_unsupported_prod_override" "false")" "false")"
 
   [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
   [[ -z "${MANAGED_DB_GRANT_HOST// }" ]] && MANAGED_DB_GRANT_HOST="%"
@@ -1645,6 +1676,10 @@ load_managed_db_runtime_contract() {
       return 1
       ;;
   esac
+  if [[ "$MANAGED_DB_COMPATIBILITY_POLICY" == "invalid" ]]; then
+    echo "Managed DB validation cannot run: invalid database_compatibility_policy." >&2
+    return 1
+  fi
 
   if [[ -z "${MANAGED_DB_HOST// }" ]]; then
     echo "Managed DB validation cannot run: missing runtime key glpi_db_host." >&2
@@ -1685,9 +1720,40 @@ run_managed_db_version_query() {
   probe_managed_db_version_local "$MANAGED_DB_HOST" "$MANAGED_DB_PORT" "$MANAGED_DB_NAME" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"
 }
 
+persist_database_compatibility_runtime_override() {
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_compatibility_status" "$DB_COMPATIBILITY_STATUS"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_compatibility_policy" "$DB_COMPATIBILITY_POLICY_EFFECTIVE"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_engine_detected" "$DB_COMPATIBILITY_ENGINE_DETECTED"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_version_detected" "$DB_COMPATIBILITY_VERSION_DETECTED"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_required_minimum" "$DB_COMPATIBILITY_REQUIRED_MINIMUM"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_compatibility_operator_confirmed" "$DB_COMPATIBILITY_OPERATOR_CONFIRMED"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_compatibility_schema_bootstrap_deferred" "$DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "database_compatibility_recommended_next_action" "$DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION"
+}
+
+write_database_compatibility_evidence() {
+  local evidence_path
+  evidence_path="$(runtime_evidence_dir "$ENVIRONMENT")/database-compatibility-latest.yml"
+  ensure_directory "$(dirname "$evidence_path")"
+  save_yaml_map "$evidence_path" \
+    environment "$ENVIRONMENT" \
+    generated_at_utc "$(date -u +%FT%TZ)" \
+    database_compatibility_status "$DB_COMPATIBILITY_STATUS" \
+    database_compatibility_policy "$DB_COMPATIBILITY_POLICY_EFFECTIVE" \
+    database_engine_detected "$DB_COMPATIBILITY_ENGINE_DETECTED" \
+    database_version_detected "$DB_COMPATIBILITY_VERSION_DETECTED" \
+    database_required_minimum "$DB_COMPATIBILITY_REQUIRED_MINIMUM" \
+    operator_confirmed_unsupported_database "$DB_COMPATIBILITY_OPERATOR_CONFIRMED" \
+    database_compatibility_justification "$DB_COMPATIBILITY_JUSTIFICATION" \
+    schema_bootstrap_deferred "$DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED" \
+    recommended_next_action "$DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION"
+}
+
 enforce_managed_db_version_compatibility_gate() {
   local gate_context="$1"
   local db_version_output db_compat_report db_compat_status db_compat_message
+  local db_compat_engine db_compat_version db_compat_minimum db_compat_requirement
+  local environment_stage confirmation_prompt warning_message
 
   if ! is_managed_database_mode; then
     return 0
@@ -1702,6 +1768,12 @@ enforce_managed_db_version_compatibility_gate() {
     echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
     return 1
   fi
+
+  DB_COMPATIBILITY_POLICY_EFFECTIVE="$MANAGED_DB_COMPATIBILITY_POLICY"
+  DB_COMPATIBILITY_OPERATOR_CONFIRMED="false"
+  DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="false"
+  DB_COMPATIBILITY_JUSTIFICATION="$MANAGED_DB_COMPATIBILITY_JUSTIFICATION"
+  DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION=""
 
   write_step "Validating managed DB version compatibility before app mutation (${gate_context})"
   echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
@@ -1718,19 +1790,110 @@ enforce_managed_db_version_compatibility_gate() {
   db_compat_report="$(glpi_db_compatibility_report "$(read_effective_runtime_value "glpi_version" "")" "$db_version_output")"
   db_compat_status="$(glpi_db_compatibility_value "$db_compat_report" "status")"
   db_compat_message="$(glpi_db_compatibility_value "$db_compat_report" "message")"
+  db_compat_engine="$(glpi_db_compatibility_value "$db_compat_report" "engine")"
+  db_compat_version="$(glpi_db_compatibility_value "$db_compat_report" "version")"
+  db_compat_minimum="$(glpi_db_compatibility_value "$db_compat_report" "minimum")"
+  db_compat_requirement="$(glpi_db_compatibility_value "$db_compat_report" "requirement")"
+
+  DB_COMPATIBILITY_STATUS="$([[ "$db_compat_status" == "pass" ]] && echo "compatible" || echo "incompatible")"
+  DB_COMPATIBILITY_ENGINE_DETECTED="$db_compat_engine"
+  DB_COMPATIBILITY_VERSION_DETECTED="$db_compat_version"
+  DB_COMPATIBILITY_REQUIRED_MINIMUM="${db_compat_requirement%.}"
+  DB_COMPATIBILITY_REQUIREMENT="$db_compat_requirement"
 
   if [[ "$db_compat_status" == "pass" ]]; then
     echo "$db_compat_message"
     return 0
   fi
 
-  set_failure_context \
-    "managed-db-version-compatible" \
-    "$db_compat_message" \
-    "Ask the DB team to upgrade MariaDB to >= 10.6 / MySQL >= 8.0 for GLPI 11, or set GLPI_VERSION to a GLPI 10.x version compatible with the managed DB."
-  echo "${EXECUTION_FAILURE_MESSAGE}" >&2
-  echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
-  return 1
+  DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION="Upgrade the managed DB to a supported version and rerun deploy apply app and deploy post-check all."
+  if [[ "$MANAGED_DB_COMPATIBILITY_POLICY" != "warn" && "$MANAGED_DB_COMPATIBILITY_POLICY" != "defer" ]]; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "$db_compat_message" \
+      "Ask the DB team to upgrade MariaDB to >= 10.6 / MySQL >= 8.0 for GLPI 11, or set GLPI_VERSION to a GLPI 10.x version compatible with the managed DB."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if [[ -z "${MANAGED_DB_COMPATIBILITY_JUSTIFICATION// }" ]]; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY} requires DATABASE_COMPATIBILITY_JUSTIFICATION when the managed DB is incompatible." \
+      "Set DATABASE_COMPATIBILITY_JUSTIFICATION with the temporary operational reason, or keep DATABASE_COMPATIBILITY_POLICY=block."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if [[ "$SECURITY_MODE_EFFECTIVE" != "permissive" ]]; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY} is allowed only in SECURITY_MODE=permissive for unsupported managed DB deployments." \
+      "Rerun with SECURITY_MODE=permissive only after accepting and documenting the temporary risk, or upgrade the DB first."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  environment_stage="$(read_effective_runtime_value "environment_stage" "$ENVIRONMENT")"
+  if environment_stage_is_production "$environment_stage" && [[ "$MANAGED_DB_UNSUPPORTED_PROD_OVERRIDE" != "true" ]]; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY} is blocked in production by default." \
+      "Upgrade the managed DB before production, or set DATABASE_UNSUPPORTED_PROD_OVERRIDE=true only with explicit exceptional approval."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+  if ! environment_stage_is_production "$environment_stage" && ! environment_stage_allows_unsupported_database "$environment_stage"; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY} is allowed only for known non-production stages. Current ENVIRONMENT_STAGE=${environment_stage}." \
+      "Set ENVIRONMENT_STAGE to dev/hml/homolog/staging/test for temporary non-production use, or keep DATABASE_COMPATIBILITY_POLICY=block."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if [[ "$MANAGED_DB_COMPATIBILITY_ASSUME_YES" == "true" ]]; then
+    DB_COMPATIBILITY_OPERATOR_CONFIRMED="true"
+  elif [[ "$MANAGED_DB_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION" == "true" ]]; then
+    confirmation_prompt="Managed database is incompatible with GLPI $(read_effective_runtime_value "glpi_version" ""). Detected ${db_compat_engine} ${db_compat_version}; required ${DB_COMPATIBILITY_REQUIRED_MINIMUM}. Continue anyway in DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY}? This is unsupported and must not be used for production."
+    if prompt_yes_no "$confirmation_prompt"; then
+      DB_COMPATIBILITY_OPERATOR_CONFIRMED="true"
+    fi
+  else
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "Interactive confirmation is disabled and DATABASE_COMPATIBILITY_ASSUME_YES is false for unsupported managed DB deployment." \
+      "Set DATABASE_COMPATIBILITY_ASSUME_YES=true with DATABASE_COMPATIBILITY_JUSTIFICATION for non-interactive runs, or enable interactive confirmation."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if [[ "$DB_COMPATIBILITY_OPERATOR_CONFIRMED" != "true" ]]; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "Operator declined unsupported managed DB continuation." \
+      "Upgrade the managed DB or use DATABASE_COMPATIBILITY_POLICY=block until compatibility is restored."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if [[ "$MANAGED_DB_COMPATIBILITY_POLICY" == "defer" ]]; then
+    DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="true"
+  fi
+  persist_database_compatibility_runtime_override
+  write_database_compatibility_evidence
+  EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"
+  warning_message="GLPI $(read_effective_runtime_value "glpi_version" "") continues with incompatible managed DB ${db_compat_engine} ${db_compat_version} under DATABASE_COMPATIBILITY_POLICY=${MANAGED_DB_COMPATIBILITY_POLICY}. Schema bootstrap deferred=${DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED}. Upgrade DB to a supported version, then rerun deploy apply app and deploy post-check all."
+  record_execution_warning "$warning_message"
+  echo "$db_compat_message"
+  return 0
 }
 
 effective_managed_timezone_db_mode() {
