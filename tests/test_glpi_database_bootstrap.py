@@ -22,17 +22,23 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
         self.assertIn("public $dbpassword = '{{ glpi_db_password | urlencode }}';", template)
         self.assertNotIn("?>", template)
 
-    def test_app_role_bootstraps_schema_before_http_smoke_without_force(self):
+    def test_app_role_checks_db_compatibility_and_schema_before_redis_and_http(self):
         app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
         )
 
+        version_check_pos = app_tasks.index("Check GLPI database server version")
         schema_marker_pos = app_tasks.index("Check GLPI database schema marker")
         schema_install_pos = app_tasks.index("Install GLPI database schema when absent")
+        redis_pos = app_tasks.index("Configure GLPI Redis cache and PHP-FPM sessions")
         http_check_pos = app_tasks.index("Check GLPI root endpoint for selected engine")
 
+        self.assertLess(version_check_pos, schema_marker_pos)
         self.assertLess(schema_marker_pos, schema_install_pos)
-        self.assertLess(schema_install_pos, http_check_pos)
+        self.assertLess(schema_install_pos, redis_pos)
+        self.assertLess(redis_pos, http_check_pos)
+        self.assertIn("--execute=SELECT VERSION(), @@version_comment;", app_tasks)
+        self.assertIn("GLPI 11 requires MySQL >= 8.0 or MariaDB >= 10.6", app_tasks)
         self.assertIn("SHOW TABLES LIKE 'glpi_configs';", app_tasks)
         self.assertIn("db:install", app_tasks)
         self.assertIn("--no-interaction", app_tasks)

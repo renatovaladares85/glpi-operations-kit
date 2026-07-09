@@ -478,22 +478,82 @@
 - name: Flush handlers before web routing checks
   ansible.builtin.meta: flush_handlers
 
-- name: Configure GLPI Redis cache and PHP-FPM sessions
-  ansible.builtin.command: /usr/local/sbin/glpi-redis-integration.sh
+- name: Check GLPI database server version
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=TCP
+      - "--host={{ glpi_db_host }}"
+      - "--port={{ mariadb_port }}"
+      - "--user={{ glpi_db_user }}"
+      - "--database={{ glpi_db_name }}"
+      - --batch
+      - --skip-column-names
+      - --connect-timeout=10
+      - "--execute=SELECT VERSION(), @@version_comment;"
   environment:
-    GLPI_PATH: "{{ glpi_install_dir }}"
-    GLPI_WEB_USER: "{{ glpi_data_owner }}"
-    GLPI_PHP_FPM_SERVICE: "{{ glpi_php_fpm_service }}"
-    GLPI_WEB_HTTP_PORT: "{{ web_http_port | string }}"
-    GLPI_WEB_HTTPS_PORT: "{{ web_https_port | string }}"
-    GLPI_WEB_HOST_HEADER: "{{ glpi_domain }}"
-    GLPI_TLS_MODE: "{{ glpi_tls_mode }}"
-    GLPI_REDIS_CACHE_PREFIX: "{{ glpi_redis_cache_prefix | default('') }}"
-    GLPI_REDIS_SESSION_LOCKING: "{{ glpi_redis_session_locking | default('0') }}"
-    GLPI_REDIS_MAXMEMORY: "{{ glpi_redis_maxmemory | default('') }}"
-    GLPI_REDIS_MAXMEMORY_POLICY: "{{ glpi_redis_maxmemory_policy | default('') }}"
-  register: glpi_redis_integration
-  changed_when: "'GLPI_REDIS_INTEGRATION_CHANGED=yes' in (glpi_redis_integration.stdout | default(''))"
+    MYSQL_PWD: "{{ glpi_db_password }}"
+  register: glpi_db_server_version_probe
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Assert GLPI database server version can be inspected
+  ansible.builtin.assert:
+    that:
+      - glpi_db_server_version_probe.rc == 0
+    fail_msg: "GLPI database version could not be inspected with configured application credentials. Validate managed DB host, port, database, user, password and grants."
+  changed_when: false
+
+- name: Resolve GLPI database compatibility facts
+  ansible.builtin.set_fact:
+    glpi_major_version_effective: "{{ (glpi_version | string).split('.')[0] | int }}"
+    glpi_db_server_version_output: "{{ glpi_db_server_version_probe.stdout | default('') | trim }}"
+    glpi_db_server_version_number: "{{ (glpi_db_server_version_probe.stdout | default('') | regex_search('[0-9]+\\.[0-9]+(\\.[0-9]+)?')) | default('0.0.0', true) }}"
+    glpi_db_server_engine: "{{ 'mariadb' if ('mariadb' in (glpi_db_server_version_probe.stdout | default('') | lower)) else 'mysql' }}"
+  changed_when: false
+
+- name: Assert GLPI database server version is supported
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          (glpi_major_version_effective | int) >= 11
+          and
+          (
+            (
+              glpi_db_server_engine == 'mariadb'
+              and
+              (glpi_db_server_version_number is version('10.6', '>='))
+            )
+            or
+            (
+              glpi_db_server_engine == 'mysql'
+              and
+              (glpi_db_server_version_number is version('8.0', '>='))
+            )
+          )
+        )
+        or
+        (
+          (glpi_major_version_effective | int) == 10
+          and
+          (
+            (
+              glpi_db_server_engine == 'mariadb'
+              and
+              (glpi_db_server_version_number is version('10.2', '>='))
+            )
+            or
+            (
+              glpi_db_server_engine == 'mysql'
+              and
+              (glpi_db_server_version_number is version('5.7', '>='))
+            )
+          )
+        )
+    fail_msg: "Unsupported database server for GLPI {{ glpi_version }}: detected {{ glpi_db_server_version_output }}. GLPI 11 requires MySQL >= 8.0 or MariaDB >= 10.6; GLPI 10 requires MySQL >= 5.7 or MariaDB >= 10.2."
+  changed_when: false
 
 - name: Check GLPI database schema marker
   ansible.builtin.command:
@@ -575,6 +635,23 @@
       - (glpi_db_schema_marker_after.stdout | default('') | trim) == 'glpi_configs'
     fail_msg: "GLPI database schema is not ready. Web smoke checks are blocked until the configured database contains a valid GLPI schema."
   changed_when: false
+
+- name: Configure GLPI Redis cache and PHP-FPM sessions
+  ansible.builtin.command: /usr/local/sbin/glpi-redis-integration.sh
+  environment:
+    GLPI_PATH: "{{ glpi_install_dir }}"
+    GLPI_WEB_USER: "{{ glpi_data_owner }}"
+    GLPI_PHP_FPM_SERVICE: "{{ glpi_php_fpm_service }}"
+    GLPI_WEB_HTTP_PORT: "{{ web_http_port | string }}"
+    GLPI_WEB_HTTPS_PORT: "{{ web_https_port | string }}"
+    GLPI_WEB_HOST_HEADER: "{{ glpi_domain }}"
+    GLPI_TLS_MODE: "{{ glpi_tls_mode }}"
+    GLPI_REDIS_CACHE_PREFIX: "{{ glpi_redis_cache_prefix | default('') }}"
+    GLPI_REDIS_SESSION_LOCKING: "{{ glpi_redis_session_locking | default('0') }}"
+    GLPI_REDIS_MAXMEMORY: "{{ glpi_redis_maxmemory | default('') }}"
+    GLPI_REDIS_MAXMEMORY_POLICY: "{{ glpi_redis_maxmemory_policy | default('') }}"
+  register: glpi_redis_integration
+  changed_when: "'GLPI_REDIS_INTEGRATION_CHANGED=yes' in (glpi_redis_integration.stdout | default(''))"
 
 - name: Check GLPI HTTP response by hostname header
   ansible.builtin.uri:
