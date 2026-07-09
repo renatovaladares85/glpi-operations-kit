@@ -1700,6 +1700,98 @@ normalize_bool_value() {
   esac
 }
 
+glpi_db_compatibility_report() {
+  local glpi_version="$1"
+  local db_version_output="$2"
+  python3 - "$glpi_version" "$db_version_output" <<'PY'
+import re
+import sys
+
+glpi_version = sys.argv[1]
+db_output = sys.argv[2]
+
+
+def version_tuple(value):
+    parts = [int(part) for part in re.findall(r"\d+", value)]
+    return tuple((parts + [0, 0, 0])[:3])
+
+
+def emit(key, value):
+    print(f"{key}={value}")
+
+
+major_match = re.search(r"\d+", glpi_version)
+glpi_major = int(major_match.group(0)) if major_match else 0
+lower_output = db_output.lower()
+engine = "mariadb" if "mariadb" in lower_output else "mysql"
+version_match = re.search(r"\d+\.\d+(?:\.\d+)?", db_output)
+detected_version = version_match.group(0) if version_match else "unknown"
+
+if glpi_major >= 11:
+    required = {"mysql": "8.0", "mariadb": "10.6"}
+    requirement = "GLPI 11 requires MySQL >= 8.0 or MariaDB >= 10.6."
+elif glpi_major == 10:
+    required = {"mysql": "5.7", "mariadb": "10.2"}
+    requirement = "GLPI 10 requires MySQL >= 5.7 or MariaDB >= 10.2."
+else:
+    required = {}
+    requirement = "Only GLPI 10 and GLPI 11 database compatibility rules are defined by this kit."
+
+minimum = required.get(engine, "")
+status = "fail"
+if minimum and detected_version != "unknown":
+    status = "pass" if version_tuple(detected_version) >= version_tuple(minimum) else "fail"
+
+if not minimum:
+    message = f"Unsupported GLPI version family for compatibility validation: {glpi_version}."
+elif detected_version == "unknown":
+    message = f"Unable to parse database server version from: {db_output}."
+elif status == "pass":
+    message = f"Managed DB is compatible: GLPI {glpi_version}, {engine} {detected_version}, minimum {minimum}."
+else:
+    message = f"Blocking deployment before app mutation: GLPI {glpi_version} is configured, but managed DB reports {engine} {detected_version}. {requirement} Ask the DB team to upgrade the database, or change GLPI_VERSION to a compatible GLPI 10.x version. Do not run deploy apply app until this is resolved."
+
+emit("status", status)
+emit("engine", engine)
+emit("version", detected_version)
+emit("minimum", minimum or "unknown")
+emit("requirement", requirement)
+emit("message", message)
+PY
+}
+
+glpi_db_compatibility_value() {
+  local report="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$report"
+}
+
+probe_managed_db_version_local() {
+  local db_host="$1"
+  local db_port="$2"
+  local db_name="$3"
+  local db_user="$4"
+  local db_password="$5"
+  local output
+
+  if output="$(MYSQL_PWD="$db_password" mysql \
+    --protocol=TCP \
+    --host="$db_host" \
+    --port="$db_port" \
+    --user="$db_user" \
+    --database="$db_name" \
+    --batch \
+    --skip-column-names \
+    --connect-timeout=7 \
+    --execute='SELECT VERSION(), @@version_comment;' 2>&1)"; then
+    printf '%s\n' "$output"
+    return 0
+  fi
+
+  printf '%s\n' "$output"
+  return 1
+}
+
 resolve_execution_mode_for_environment() {
   local environment="$1"
   local mode="${GLPI_EXECUTION_MODE:-}"
@@ -1773,6 +1865,7 @@ run_preflight_checks() {
   local marker_file
   local items_file
   local topology_mode ssh_key_path ssh_user app_host db_host tls_mode glpi_version
+  local db_port db_name db_user db_password
   local require_tls require_https require_promotion_gate
   local security_mode policy_obligation policy_status policy_block
   local execution_mode host_role db_deployment_mode require_privileged_checks
@@ -1957,6 +2050,10 @@ run_preflight_checks() {
     ssh_user="$(read_product_config_value "$environment" "network.ssh.user" || true)"
     app_host="$(read_product_config_value "$environment" "topology.app.host" || true)"
     db_host="$(read_product_config_value "$environment" "topology.db.host" || true)"
+    db_port="$(read_product_config_value "$environment" "DATABASE_PORT" || true)"
+    db_name="$(read_product_config_value "$environment" "DATABASE_NAME" || true)"
+    db_user="$(read_product_config_value "$environment" "DATABASE_USER" || true)"
+    db_password="$(read_product_config_value "$environment" "DATABASE_PASSWORD" || true)"
     glpi_version="$(read_product_config_value "$environment" "glpi.version" || true)"
     tls_mode="$(read_product_config_value "$environment" "tls.mode" || true)"
     security_mode="$(resolve_security_mode_for_environment "$environment")"
@@ -1968,6 +2065,10 @@ run_preflight_checks() {
     [[ -z "${php_fpm_service// }" ]] && php_fpm_service="php${php_version}-fpm"
     [[ -z "${topology_mode// }" ]] && topology_mode="dual-server"
     [[ -z "${tls_mode// }" ]] && tls_mode="none"
+    [[ -z "${db_port// }" ]] && db_port="3306"
+    if [[ -z "${db_password// }" && -f "$(runtime_secret_path "$environment")" ]]; then
+      db_password="$(read_yaml_top_level_value "$(runtime_secret_path "$environment")" "glpi_db_password" || true)"
+    fi
     [[ -z "${db_deployment_mode// }" ]] && db_deployment_mode="self_hosted"
     promotion_gate_path="$SCRIPT_ROOT/../.runtime/promotion/staging-certified.yml"
 
@@ -2037,6 +2138,46 @@ run_preflight_checks() {
     else
       append_precheck_item "$environment" "mysql-client-on-app-host" "local-tooling" "non-app local target or ssh execution" "not-applicable" \
         "MySQL-compatible client on local host is required only for app-host local verification flow." "command -v mysql" "n/a" "false" "skip" "none"
+    fi
+
+    if [[ "$db_deployment_mode" == "managed" ]]; then
+      if [[ "$app_stack_expected" != "true" ]]; then
+        append_precheck_item "$environment" "managed-db-version-compatible" "database" "non-app local target or ssh execution" "not-applicable" \
+          "Managed DB version compatibility is enforced before app deployment." "SELECT VERSION(), @@version_comment" "n/a" "false" "skip" "none"
+      elif [[ -z "${db_password// }" ]]; then
+        append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "conditional-mandatory" \
+          "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "skip" "database password not available in check-only flow; deploy prepare/apply will block before app mutation."
+      elif [[ -z "${db_host// }" || -z "${db_name// }" || -z "${db_user// }" ]]; then
+        append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+          "Managed DB version must be compatible with configured GLPI version before app mutation." "TOPOLOGY_DB_HOST + DATABASE_NAME + DATABASE_USER" "set managed DB connection keys" "true" "fail" "Set TOPOLOGY_DB_HOST, DATABASE_NAME and DATABASE_USER in config/<environment>.env."
+        register_mandatory_failure
+      elif ! command -v mysql >/dev/null 2>&1; then
+        append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+          "Managed DB version must be compatible with configured GLPI version before app mutation." "command -v mysql && SELECT VERSION()" "$(package_install_action "$(package_for_command mysql)")" "true" "fail" "Install a MySQL-compatible client and rerun precheck."
+        register_mandatory_failure
+      else
+        local managed_db_version_output managed_db_compat_report managed_db_compat_status managed_db_compat_message
+        if managed_db_version_output="$(probe_managed_db_version_local "$db_host" "$db_port" "$db_name" "$db_user" "$db_password")"; then
+          managed_db_compat_report="$(glpi_db_compatibility_report "$glpi_version" "$managed_db_version_output")"
+          managed_db_compat_status="$(glpi_db_compatibility_value "$managed_db_compat_report" "status")"
+          managed_db_compat_message="$(glpi_db_compatibility_value "$managed_db_compat_report" "message")"
+          if [[ "$managed_db_compat_status" == "pass" ]]; then
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "pass" "$managed_db_compat_message"
+          else
+            append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+              "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "fail" "$managed_db_compat_message"
+            register_mandatory_failure
+          fi
+        else
+          append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
+            "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "fail" "Unable to inspect managed DB version. Validate host, port, protocol, firewall, database name, user and password. A TCP ping alone is not sufficient."
+          register_mandatory_failure
+        fi
+      fi
+    else
+      append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=self_hosted" "not-applicable" \
+        "Managed DB compatibility gate is not required before self-hosted DB provisioning." "n/a" "n/a" "false" "skip" "none"
     fi
 
     if [[ "$glpi_requires_bcmath" == "true" ]]; then

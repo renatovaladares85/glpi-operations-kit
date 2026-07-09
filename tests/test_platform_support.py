@@ -121,6 +121,32 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("missing modules: community.mysql.mysql_db", result.stdout)
 
+    def test_glpi_database_compatibility_matrix(self):
+        result = self.run_common(
+            'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
+            """
+check_case() {
+  local glpi_version="$1"
+  local db_banner="$2"
+  local expected="$3"
+  local report
+  report="$(glpi_db_compatibility_report "$glpi_version" "$db_banner")"
+  printf '%s|%s|%s\\n' "$glpi_version" "$db_banner" "$(glpi_db_compatibility_value "$report" status)"
+  [[ "$(glpi_db_compatibility_value "$report" status)" == "$expected" ]]
+}
+check_case "11.0.8" "10.5.27-MariaDB MariaDB Server" "fail"
+check_case "11.0.8" "10.6.21-MariaDB MariaDB Server" "pass"
+check_case "11.0.8" "8.0.36 MySQL Community Server" "pass"
+check_case "10.0.18" "10.5.27-MariaDB MariaDB Server" "pass"
+""",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("11.0.8|10.5.27-MariaDB MariaDB Server|fail", result.stdout)
+        self.assertIn("11.0.8|10.6.21-MariaDB MariaDB Server|pass", result.stdout)
+        self.assertIn("11.0.8|8.0.36 MySQL Community Server|pass", result.stdout)
+        self.assertIn("10.0.18|10.5.27-MariaDB MariaDB Server|pass", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

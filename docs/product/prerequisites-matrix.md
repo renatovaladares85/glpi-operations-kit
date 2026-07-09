@@ -30,6 +30,7 @@ Each item defines:
 | Security mode default | Policy control | all | always | mandatory | Defines default policy behavior when `SECURITY_MODE` is not passed | `OPERATIONS_SECURITY_MODE_DEFAULT` in config | No | Yes |
 | Execution mode contract | Execution contract | all | always | mandatory | Prevents wrong orchestration model for local/ssh execution | `EXECUTION_MODE` or `GLPI_EXECUTION_MODE` | No | Yes |
 | Host role contract | Execution contract | all | always | mandatory | Ensures local host runs only allowed mutable actions | `EXECUTION_HOST_ROLE_DEFAULT` or `GLPI_HOST_ROLE` | No | Yes |
+| Managed DB version compatibility | Database | app | `DATABASE_DEPLOYMENT_MODE=managed` + credentials available | conditional-mandatory | GLPI must not be applied when the external DB version is incompatible with the configured GLPI version | `SELECT VERSION(), @@version_comment;` using the GLPI DB user | No | Yes |
 | SSH key pair per environment | Security artifact | all | `EXECUTION_MODE=ssh` | conditional-mandatory | Supports safe environment isolation and host access | key existence + mode `0600` | Partial | Yes |
 | SSH connectivity to app/db | Network access | all | `EXECUTION_MODE=ssh` + `TOPOLOGY_MODE=dual-server` | conditional-mandatory | Confirms execution host can reach both targets | `ssh -i <key> <user>@<host> "echo ok"` | No | Yes |
 | TLS local files | Security artifact | all | `TLS_MODE=provided` | conditional-mandatory | Required to install valid cert/key in app host | local file existence check | No | Yes |
@@ -58,6 +59,18 @@ Each item defines:
 | GLPI PHP extensions | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysql`, `php-xml`, `php-zip`, `php-bz2`, `php-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-redis` | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysqlnd`, `php-xml`, `php-zip`, `php-bz2`, `php-pecl-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-pecl-redis` |
 | MySQL-compatible client | `mariadb-client` | `mysql` |
 | Redis | `redis-server` | `redis` |
+
+## GLPI Database Compatibility
+
+| GLPI version | Supported DB engine | Minimum version |
+|---|---|---|
+| 10.0.x | MySQL | 5.7 |
+| 10.0.x | MariaDB | 10.2 |
+| 11.0.x | MySQL | 8.0 |
+| 11.0.x | MariaDB | 10.6 |
+
+For `DATABASE_DEPLOYMENT_MODE=managed`, confirm the database engine/version before `deploy apply app`.
+MariaDB 10.5 is not compatible with GLPI 11; either upgrade the managed DB to MariaDB 10.6+ / MySQL 8.0+ or use a GLPI 10.x version compatible with MariaDB 10.5.
 
 ## Notes
 

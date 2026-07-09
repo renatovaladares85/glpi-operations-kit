@@ -58,6 +58,34 @@
   - validate APP->RDS TCP connectivity (`mysql --protocol=TCP --host <rds-endpoint> ...`).
 - Safe resume: rerun with a compatible target (`app`, `monitoring`, `backup`).
 
+## Managed DB incompatible with configured GLPI version
+
+- Symptom: `deploy check`, `deploy prepare`, or `deploy apply app` blocks with `managed-db-version-compatible` or `Unsupported database server`.
+- Cause: the configured GLPI version requires a minimum database version:
+  - GLPI 11: MySQL >= 8.0 or MariaDB >= 10.6.
+  - GLPI 10: MySQL >= 5.7 or MariaDB >= 10.2.
+- Validate:
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --database <db-name> --password --batch --skip-column-names --execute "SELECT VERSION(), @@version_comment;"`
+  - Example: `mysql --protocol=TCP --host 192.0.2.20 --port 3306 --user nehemiah_glpi --database glpi --password --batch --skip-column-names --execute "SELECT VERSION(), @@version_comment;"`
+- Fix:
+  - ask the DB team to upgrade the managed DB to MariaDB >= 10.6 or MySQL >= 8.0 when using GLPI 11;
+  - or set `GLPI_VERSION` to a compatible GLPI 10.x version when the database must remain on MariaDB 10.5;
+  - do not bypass the block to install GLPI 11 on MariaDB 10.5.
+- Safe resume: rerun `./scripts/glpictl.sh <env> deploy check all`, then `deploy apply app`.
+
+## MySQL connection drops at `reading initial communication packet`
+
+- Symptom: `mysql -h <db-host> -P <port> ...` returns `Lost connection to MySQL server at 'reading initial communication packet'`.
+- Likely cause: wrong port, non-MySQL service on that port, firewall/proxy closing the handshake, or an endpoint that accepts TCP but does not send a MySQL banner.
+- Note: `ping` validates ICMP only; it does not prove the port speaks the MySQL protocol.
+- Validate:
+  - `nc -vz <db-host> <db-port>`
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --database <db-name> --password --connect-timeout=7 --execute "SELECT 1;"`
+- Fix:
+  - confirm the real MySQL/MariaDB port with the DB team, usually `3306`;
+  - allow the APP host source in firewall/security group/allowlist;
+  - confirm the configured endpoint is the database endpoint, not RDP or another service.
+
 ## SSH key path invalid in `EXECUTION_MODE=ssh`
 
 - Symptom: precheck fails on SSH key policy.

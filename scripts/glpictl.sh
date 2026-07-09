@@ -61,6 +61,9 @@ EXECUTION_ACCESS_PORT="0"
 EXECUTION_ACCESS_URL="unknown"
 EXECUTION_TLS_MODE_EFFECTIVE="unknown"
 declare -a EXECUTION_TEST_COMMANDS=()
+EXECUTION_FAILURE_TASK=""
+EXECUTION_FAILURE_MESSAGE=""
+EXECUTION_FAILURE_ACTION=""
 MANAGED_DB_HOST=""
 MANAGED_DB_PORT=""
 MANAGED_DB_NAME=""
@@ -74,12 +77,25 @@ MANAGED_DB_TIMEZONE_MODE="disabled"
 MANAGED_DB_TIMEZONE_LEGACY_GRANT="false"
 
 build_execution_test_commands() {
-  local web_service php_service
+  local web_service php_service web_server_type web_config_test_command
   web_service="$(read_effective_runtime_value "glpi_web_service" "nginx")"
+  web_server_type="$(read_effective_runtime_value "glpi_web_server_type" "nginx")"
+  web_server_type="${web_server_type,,}"
   php_service="$(read_effective_runtime_value "glpi_php_fpm_service" "php8.3-fpm")"
+  case "$web_server_type" in
+    apache)
+      web_config_test_command="sudo apachectl configtest"
+      ;;
+    lighttpd)
+      web_config_test_command="sudo lighttpd -tt -f /etc/lighttpd/lighttpd.conf"
+      ;;
+    nginx|*)
+      web_config_test_command="sudo nginx -t"
+      ;;
+  esac
   EXECUTION_TEST_COMMANDS=()
   EXECUTION_TEST_COMMANDS+=("curl -k -I ${EXECUTION_ACCESS_URL}")
-  EXECUTION_TEST_COMMANDS+=("sudo nginx -t")
+  EXECUTION_TEST_COMMANDS+=("$web_config_test_command")
   EXECUTION_TEST_COMMANDS+=("sudo systemctl is-active ${web_service} ${php_service}")
   EXECUTION_TEST_COMMANDS+=("tail -n 50 .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log")
   if [[ "$EXECUTION_ACCESS_SCHEME" == "https" ]]; then
@@ -147,6 +163,11 @@ print_execution_final_summary() {
     echo "  status: ${status_label}" >&2
     echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}" >&2
     echo "  access_url: ${EXECUTION_ACCESS_URL}" >&2
+    if [[ "$status_label" != "SUCCESS" ]]; then
+      echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}" >&2
+      echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}" >&2
+      echo "  recommended_action: ${EXECUTION_FAILURE_ACTION:-Review the failing task and rerun after remediation.}" >&2
+    fi
     if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
       echo "  alerts: none" >&2
     else
@@ -166,6 +187,11 @@ print_execution_final_summary() {
   echo "  status: ${status_label}"
   echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}"
   echo "  access_url: ${EXECUTION_ACCESS_URL}"
+  if [[ "$status_label" != "SUCCESS" ]]; then
+    echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}"
+    echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}"
+    echo "  recommended_action: ${EXECUTION_FAILURE_ACTION:-Review the failing task and rerun after remediation.}"
+  fi
   if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
     echo "  alerts: none"
   else
@@ -204,6 +230,9 @@ append_execution_summary_to_file() {
     echo "access_host: '$(summary_escape "$EXECUTION_ACCESS_HOST")'"
     echo "access_port: '$(summary_escape "$EXECUTION_ACCESS_PORT")'"
     echo "access_url: '$(summary_escape "$EXECUTION_ACCESS_URL")'"
+    echo "failure_task: '$(summary_escape "${EXECUTION_FAILURE_TASK:-}")'"
+    echo "failure_message: '$(summary_escape "${EXECUTION_FAILURE_MESSAGE:-}")'"
+    echo "recommended_action: '$(summary_escape "${EXECUTION_FAILURE_ACTION:-}")'"
     echo "alerts_count: ${#EXECUTION_WARNINGS[@]}"
     echo "alerts:"
     if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
@@ -263,6 +292,41 @@ print_failure_diagnostics() {
   fi
 }
 
+record_precheck_failure_summary() {
+  local report_path
+  report_path="$(preflight_report_latest_path "$ENVIRONMENT")"
+  [[ -f "$report_path" ]] || return 1
+
+  local summary item message action
+  if ! summary="$(python3 - "$report_path" <<'PY' 2>/dev/null
+import sys
+from pathlib import Path
+
+try:
+    import yaml
+except Exception:
+    sys.exit(1)
+
+path = Path(sys.argv[1])
+data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+for item in data.get("items", []):
+    if str(item.get("status", "")).lower() == "fail":
+        print(f"item={item.get('item', 'unknown')}")
+        print(f"message={item.get('reason', 'Precheck failed.')}")
+        print(f"action={item.get('suggested_action', 'Fix mandatory precheck item and rerun.')}")
+        sys.exit(0)
+sys.exit(1)
+PY
+)"; then
+    return 1
+  fi
+
+  item="$(awk -F= '$1 == "item" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  message="$(awk -F= '$1 == "message" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  action="$(awk -F= '$1 == "action" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  set_failure_context "precheck:${item}" "$message" "$action"
+}
+
 finalize_glpictl_operation() {
   local exit_code="${1:-0}"
   if [[ "$FINAL_STATUS_EMITTED" == "true" ]]; then
@@ -274,6 +338,9 @@ finalize_glpictl_operation() {
   if [[ "$exit_code" -ne 0 ]]; then
     OPERATION_STATUS="failed"
     remediation_hint="Review console output and .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log"
+    if [[ -z "${EXECUTION_FAILURE_TASK// }" ]]; then
+      record_precheck_failure_summary || true
+    fi
   fi
   resolve_execution_access_context
   emit_execution_alert_if_self_signed
@@ -1598,6 +1665,74 @@ load_managed_db_runtime_contract() {
   return 0
 }
 
+run_managed_db_version_query() {
+  local output db_host_escaped db_port_escaped db_user_escaped db_name_escaped db_password_escaped
+
+  if [[ "$EXECUTION_MODE_EFFECTIVE" == "ssh" ]]; then
+    db_host_escaped="$(shell_escape_single_quotes "$MANAGED_DB_HOST")"
+    db_port_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PORT")"
+    db_user_escaped="$(shell_escape_single_quotes "$MANAGED_DB_USER")"
+    db_name_escaped="$(shell_escape_single_quotes "$MANAGED_DB_NAME")"
+    db_password_escaped="$(shell_escape_single_quotes "$MANAGED_DB_PASSWORD")"
+    if output="$(ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "MYSQL_PWD='${db_password_escaped}' mysql --protocol=TCP --host='${db_host_escaped}' --port='${db_port_escaped}' --user='${db_user_escaped}' --database='${db_name_escaped}' --batch --skip-column-names --connect-timeout=7 --execute='SELECT VERSION(), @@version_comment;'" -o 2>&1)"; then
+      printf '%s\n' "$output" | sed -E 's/^.*\(stdout\)[[:space:]]*//'
+      return 0
+    fi
+    printf '%s\n' "$output" | mask_sensitive_stream | mask_managed_db_secret_values_stream
+    return 1
+  fi
+
+  probe_managed_db_version_local "$MANAGED_DB_HOST" "$MANAGED_DB_PORT" "$MANAGED_DB_NAME" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"
+}
+
+enforce_managed_db_version_compatibility_gate() {
+  local gate_context="$1"
+  local db_version_output db_compat_report db_compat_status db_compat_message
+
+  if ! is_managed_database_mode; then
+    return 0
+  fi
+
+  if ! load_managed_db_runtime_contract; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "Managed DB runtime contract is incomplete; database version compatibility cannot be validated before app mutation." \
+      "Validate managed DB host, port, database, user and runtime secret before deploy apply app."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  write_step "Validating managed DB version compatibility before app mutation (${gate_context})"
+  echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
+  if ! db_version_output="$(run_managed_db_version_query 2>&1)"; then
+    set_failure_context \
+      "managed-db-version-compatible" \
+      "Managed DB version could not be inspected before app mutation. ${db_version_output}" \
+      "Validate host, port, protocol, firewall, database name, user and password from the APP host. Ping only proves ICMP, not MySQL protocol readiness."
+    echo "${EXECUTION_FAILURE_MESSAGE}" | mask_sensitive_stream | mask_managed_db_secret_values_stream >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  db_compat_report="$(glpi_db_compatibility_report "$(read_effective_runtime_value "glpi_version" "")" "$db_version_output")"
+  db_compat_status="$(glpi_db_compatibility_value "$db_compat_report" "status")"
+  db_compat_message="$(glpi_db_compatibility_value "$db_compat_report" "message")"
+
+  if [[ "$db_compat_status" == "pass" ]]; then
+    echo "$db_compat_message"
+    return 0
+  fi
+
+  set_failure_context \
+    "managed-db-version-compatible" \
+    "$db_compat_message" \
+    "Ask the DB team to upgrade MariaDB to >= 10.6 / MySQL >= 8.0 for GLPI 11, or set GLPI_VERSION to a GLPI 10.x version compatible with the managed DB."
+  echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+  echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+  return 1
+}
+
 effective_managed_timezone_db_mode() {
   local mode="$MANAGED_DB_TIMEZONE_MODE"
   if [[ "$MANAGED_DB_TIMEZONE_SUPPORT_ENABLED" == "true" && "$mode" == "disabled" ]]; then
@@ -2028,6 +2163,92 @@ print_operation_log_tail() {
   fi
 }
 
+set_failure_context() {
+  EXECUTION_FAILURE_TASK="${1:-unknown}"
+  EXECUTION_FAILURE_MESSAGE="${2:-Review execution log for details.}"
+  EXECUTION_FAILURE_ACTION="${3:-Review the failing task and rerun after remediation.}"
+}
+
+extract_ansible_failure_summary() {
+  local log_path
+  log_path="$(operation_log_path "$ENVIRONMENT" "$OPERATION_ID")"
+  [[ -f "$log_path" ]] || return 1
+
+  python3 - "$log_path" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+clean = [re.sub(r"^\[[^]]+\]\s*", "", line) for line in lines]
+
+fatal_index = None
+for idx in range(len(clean) - 1, -1, -1):
+    if "fatal: [" in clean[idx] and "FAILED! =>" in clean[idx]:
+        fatal_index = idx
+        break
+
+if fatal_index is None:
+    sys.exit(1)
+
+task = "unknown"
+for idx in range(fatal_index - 1, -1, -1):
+    match = re.search(r"TASK \[(.*?)\]", clean[idx])
+    if match:
+        task = match.group(1)
+        break
+
+line = clean[fatal_index]
+host_match = re.search(r"fatal: \[([^]]+)\]", line)
+host = host_match.group(1) if host_match else "unknown"
+payload_text = line.split("FAILED! =>", 1)[1].strip()
+msg = payload_text
+try:
+    payload = json.loads(payload_text)
+    msg = str(payload.get("msg") or payload.get("stderr") or payload.get("stdout") or msg)
+    stdout = "\n".join(payload.get("stdout_lines") or [])
+    if "Database engine version" in stdout:
+        for stdout_line in payload.get("stdout_lines") or []:
+            if "Database engine version" in stdout_line:
+                msg = stdout_line
+                break
+except Exception:
+    pass
+
+action = "Review the failing Ansible task and rerun after remediation."
+if "Database engine version" in msg or "Unsupported database server" in msg:
+    action = "Ask the DB team to upgrade MariaDB to >= 10.6 / MySQL >= 8.0 for GLPI 11, or use a GLPI 10.x version compatible with the current DB."
+elif "reading initial communication packet" in msg or "could not be inspected" in msg:
+    action = "Validate managed DB host, port, protocol, firewall, database name, user and password from the APP host."
+
+print(f"task={task}")
+print(f"host={host}")
+print(f"message={msg}")
+print(f"action={action}")
+PY
+}
+
+record_ansible_failure_summary() {
+  local summary task host message action
+  if ! summary="$(extract_ansible_failure_summary 2>/dev/null)"; then
+    return 1
+  fi
+  task="$(awk -F= '$1 == "task" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  host="$(awk -F= '$1 == "host" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  message="$(awk -F= '$1 == "message" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  action="$(awk -F= '$1 == "action" {sub(/^[^=]*=/, "", $0); print; exit}' <<<"$summary")"
+  [[ -n "${host// }" && "$host" != "unknown" ]] && task="${task} on ${host}"
+  set_failure_context "$task" "$message" "$action"
+  echo "Ansible failure summary:" >&2
+  echo "  task: ${EXECUTION_FAILURE_TASK}" >&2
+  echo "  message: ${EXECUTION_FAILURE_MESSAGE}" >&2
+  echo "  recommended_action: ${EXECUTION_FAILURE_ACTION}" >&2
+  echo "  log: .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log" >&2
+  return 0
+}
+
 invoke_ansible_or_fail() {
   local failure_context="$1"
   local environment="$2"
@@ -2040,6 +2261,7 @@ invoke_ansible_or_fail() {
 
   echo "Ansible execution failed during: ${failure_context}" >&2
   echo "Ansible tags: ${tags:-all}" >&2
+  record_ansible_failure_summary || set_failure_context "$failure_context" "Ansible execution failed. Review log for task details." "Review .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log and rerun after remediation."
   print_operation_log_tail
   exit 1
 }
@@ -2304,6 +2526,13 @@ run_deploy() {
     esac
     write_step "Validating rendered Ansible inventory"
     ansible-inventory -i "$INVENTORY_RUNTIME_PATH" --list >/dev/null
+    case "$target" in
+      app|all)
+        if ! enforce_managed_db_version_compatibility_gate "deploy prepare ${target}"; then
+          exit 1
+        fi
+        ;;
+    esac
     if [[ "$run_as_deploy_domain" == "true" ]]; then
       notes="Deploy prepare completed. Runtime and inventory were prepared without invoking mutable deployment tasks."
       write_domain_state "deploy" "prepare" "completed" "$notes"
@@ -2339,6 +2568,13 @@ run_deploy() {
 
   case "$mode" in
     apply)
+      case "$target" in
+        app|all)
+          if ! enforce_managed_db_version_compatibility_gate "deploy apply ${target}"; then
+            exit 1
+          fi
+          ;;
+      esac
       enforce_apply_sequence "$target"
       if [[ "$run_as_deploy_domain" == "true" ]]; then
         create_remote_domain_backup_snapshot "deploy" "apply" "$target" "$SCOPE"

@@ -58,6 +58,34 @@
   - validar conectividade APP->RDS via TCP (`mysql --protocol=TCP --host <rds-endpoint> ...`).
 - Retomada segura: repetir com alvo compatível (`app`, `monitoring`, `backup`).
 
+## Banco managed incompatível com a versão do GLPI
+
+- Sintoma: `deploy check`, `deploy prepare` ou `deploy apply app` bloqueia com `managed-db-version-compatible` ou `Unsupported database server`.
+- Causa: a versão configurada do GLPI exige versão mínima do banco:
+  - GLPI 11: MySQL >= 8.0 ou MariaDB >= 10.6.
+  - GLPI 10: MySQL >= 5.7 ou MariaDB >= 10.2.
+- Validação:
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --database <db-name> --password --batch --skip-column-names --execute "SELECT VERSION(), @@version_comment;"`
+  - Exemplo: `mysql --protocol=TCP --host 192.0.2.20 --port 3306 --user nehemiah_glpi --database glpi --password --batch --skip-column-names --execute "SELECT VERSION(), @@version_comment;"`
+- Correção:
+  - pedir upgrade do banco managed para MariaDB >= 10.6 ou MySQL >= 8.0 quando usar GLPI 11;
+  - ou ajustar `GLPI_VERSION` para uma versão GLPI 10.x compatível quando o banco permanecer em MariaDB 10.5;
+  - não burlar o bloqueio para instalar GLPI 11 em MariaDB 10.5.
+- Retomada segura: repetir `./scripts/glpictl.sh <env> deploy check all` e só depois `deploy apply app`.
+
+## Conexão MySQL cai em `reading initial communication packet`
+
+- Sintoma: `mysql -h <db-host> -P <port> ...` retorna `Lost connection to MySQL server at 'reading initial communication packet'`.
+- Causa provável: porta errada, serviço na porta não é MySQL/MariaDB, firewall/proxy encerra o handshake, ou endpoint aceita TCP mas não entrega banner MySQL.
+- Observação: `ping` valida apenas ICMP; não comprova que a porta fala protocolo MySQL.
+- Validação:
+  - `nc -vz <db-host> <db-port>`
+  - `mysql --protocol=TCP --host <db-host> --port <db-port> --user <glpi-db-user> --database <db-name> --password --connect-timeout=7 --execute "SELECT 1;"`
+- Correção:
+  - confirmar com a equipe de banco a porta MySQL/MariaDB real, normalmente `3306`;
+  - liberar a origem do host APP no firewall/security group/allowlist;
+  - confirmar que o endpoint informado é do banco, não de RDP ou outro serviço.
+
 ## Caminho de chave SSH inválido em `EXECUTION_MODE=ssh`
 
 - Sintoma: precheck falha na política de chave SSH.
