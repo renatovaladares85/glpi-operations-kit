@@ -43,6 +43,19 @@
       - glpi_web_server_type in ['nginx', 'apache', 'lighttpd']
     fail_msg: "Invalid glpi_web_server_type. Supported values: nginx, apache, lighttpd."
 
+- name: Resolve GLPI installation mode
+  ansible.builtin.set_fact:
+    glpi_installation_mode_effective: "{{ glpi_installation_mode | default('cli') | string | lower }}"
+    glpi_wizard_reset_config_db_effective: "{{ glpi_wizard_reset_config_db | default(false) | bool }}"
+  changed_when: false
+
+- name: Assert valid GLPI installation mode
+  ansible.builtin.assert:
+    that:
+      - glpi_installation_mode_effective in ['cli', 'wizard', 'defer']
+    fail_msg: "Invalid GLPI installation mode. Supported values: cli, wizard, defer."
+  changed_when: false
+
 - name: Assert provided TLS inputs exist
   ansible.builtin.assert:
     that:
@@ -143,6 +156,7 @@
     group: "{{ glpi_data_group }}"
     mode: "0640"
   no_log: true
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Deploy php.ini overrides for GLPI
   ansible.builtin.template:
@@ -428,6 +442,7 @@
       - item.stat.mode == item.item.mode
     fail_msg: "Permission baseline mismatch for {{ item.item.path }}. Expected {{ item.item.owner }}:{{ item.item.group }} mode {{ item.item.mode }}."
   loop: "{{ glpi_permission_stats.results }}"
+  when: not (glpi_installation_mode_effective == 'wizard' and item.item.path == glpi_config_dir ~ '/config_db.php')
   changed_when: false
 
 - name: Check TLS private key permissions when TLS enabled
@@ -478,6 +493,112 @@
 - name: Flush handlers before web routing checks
   ansible.builtin.meta: flush_handlers
 
+- name: Resolve GLPI schema bootstrap controls
+  ansible.builtin.set_fact:
+    database_compatibility_policy_effective: "{{ database_compatibility_policy | default('block') | string | lower }}"
+    database_compatibility_operator_confirmed_effective: "{{ database_compatibility_operator_confirmed | default(false) | bool }}"
+    database_compatibility_schema_bootstrap_deferred_effective: "{{ database_compatibility_schema_bootstrap_deferred | default(false) | bool }}"
+    glpi_schema_bootstrap_deferred_effective: >-
+      {{
+        (database_compatibility_schema_bootstrap_deferred | default(false) | bool)
+        or
+        glpi_installation_mode_effective in ['wizard', 'defer']
+      }}
+  changed_when: false
+
+- name: Check existing GLPI database configuration for wizard mode
+  ansible.builtin.stat:
+    path: "{{ glpi_config_dir }}/config_db.php"
+  register: glpi_wizard_config_db_stat
+  changed_when: false
+  when: glpi_installation_mode_effective == 'wizard'
+
+- name: Inspect GLPI schema marker when wizard config already exists
+  ansible.builtin.command:
+    argv:
+      - mysql
+      - --protocol=TCP
+      - "--host={{ glpi_db_host }}"
+      - "--port={{ mariadb_port }}"
+      - "--user={{ glpi_db_user }}"
+      - "--database={{ glpi_db_name }}"
+      - --batch
+      - --skip-column-names
+      - --connect-timeout=10
+      - "--execute=SHOW TABLES LIKE 'glpi_configs';"
+  environment:
+    MYSQL_PWD: "{{ glpi_db_password }}"
+  register: glpi_wizard_existing_schema_marker
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_stat.stat.exists | default(false)
+
+- name: Refuse wizard mode with existing database config unless reset is explicit
+  ansible.builtin.assert:
+    that:
+      - glpi_wizard_reset_config_db_effective | bool
+    fail_msg: >-
+      GLPI_INSTALLATION_MODE=wizard requires {{ glpi_config_dir }}/config_db.php to be absent.
+      Existing config_db.php makes GLPI bypass the web wizard and can return HTTP 500 when the
+      database schema is empty. Schema probe status={{ glpi_wizard_existing_schema_marker.rc | default('not-run') }},
+      marker='{{ glpi_wizard_existing_schema_marker.stdout | default('') | trim }}'.
+      If this is a new non-production install, set GLPI_WIZARD_RESET_CONFIG_DB=true to move the
+      active file to a timestamped backup. If GLPI is already installed, use GLPI_INSTALLATION_MODE=cli.
+  changed_when: false
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_stat.stat.exists | default(false)
+    - not (glpi_wizard_reset_config_db_effective | bool)
+
+- name: Assert wizard config reset is restricted to non-production
+  ansible.builtin.assert:
+    that:
+      - (environment_stage | default(environment_name | default('')) | string | lower) not in ['prod', 'production', 'prd']
+    fail_msg: "GLPI_WIZARD_RESET_CONFIG_DB=true is refused in production-like stages."
+  changed_when: false
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_stat.stat.exists | default(false)
+    - glpi_wizard_reset_config_db_effective | bool
+
+- name: Assert wizard config reset only targets empty GLPI schema
+  ansible.builtin.assert:
+    that:
+      - glpi_wizard_existing_schema_marker.rc == 0
+      - (glpi_wizard_existing_schema_marker.stdout | default('') | trim) == ''
+    fail_msg: >-
+      Refusing to reset {{ glpi_config_dir }}/config_db.php because the configured database
+      could not be confirmed empty. Validate the database manually before moving config_db.php.
+  changed_when: false
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_stat.stat.exists | default(false)
+    - glpi_wizard_reset_config_db_effective | bool
+
+- name: Move existing GLPI database config aside for wizard mode
+  ansible.builtin.command:
+    argv:
+      - mv
+      - "{{ glpi_config_dir }}/config_db.php"
+      - "{{ glpi_config_dir }}/config_db.php.bak.{{ ansible_date_time.iso8601_basic_short }}"
+  register: glpi_wizard_config_db_backup
+  changed_when: glpi_wizard_config_db_backup.rc == 0
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_stat.stat.exists | default(false)
+    - glpi_wizard_reset_config_db_effective | bool
+
+- name: Report wizard config reset backup path
+  ansible.builtin.debug:
+    msg: "Moved existing GLPI config_db.php to {{ glpi_config_dir }}/config_db.php.bak.{{ ansible_date_time.iso8601_basic_short }} to allow the web install wizard."
+  when:
+    - glpi_installation_mode_effective == 'wizard'
+    - glpi_wizard_config_db_backup is defined
+    - glpi_wizard_config_db_backup is changed
+
 - name: Check GLPI database server version
   ansible.builtin.command:
     argv:
@@ -497,6 +618,7 @@
   changed_when: false
   failed_when: false
   no_log: true
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Assert GLPI database server version can be inspected
   ansible.builtin.assert:
@@ -504,6 +626,7 @@
       - glpi_db_server_version_probe.rc == 0
     fail_msg: "GLPI database version could not be inspected with configured application credentials. Validate managed DB host, port, database, user, password and grants."
   changed_when: false
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Resolve GLPI database compatibility facts
   ansible.builtin.set_fact:
@@ -512,6 +635,7 @@
     glpi_db_server_version_number: "{{ (glpi_db_server_version_probe.stdout | default('') | regex_search('[0-9]+\\.[0-9]+(\\.[0-9]+)?')) | default('0.0.0', true) }}"
     glpi_db_server_engine: "{{ 'mariadb' if ('mariadb' in (glpi_db_server_version_probe.stdout | default('') | lower)) else 'mysql' }}"
   changed_when: false
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Resolve GLPI database compatibility policy
   ansible.builtin.set_fact:
@@ -564,6 +688,7 @@
         )
       }}
   changed_when: false
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Assert GLPI database server version is supported
   ansible.builtin.assert:
@@ -578,11 +703,13 @@
         )
     fail_msg: "Unsupported database server for GLPI {{ glpi_version }}: detected {{ glpi_db_server_version_output }}. Required: {{ glpi_db_required_minimum }}. Use DATABASE_COMPATIBILITY_POLICY=warn|defer only through glpictl confirmation, never as a silent Ansible bypass."
   changed_when: false
+  when: glpi_installation_mode_effective != 'wizard'
 
 - name: Warn about unsupported managed database accepted by policy
   ansible.builtin.debug:
     msg: "Unsupported database server for GLPI {{ glpi_version }} accepted under DATABASE_COMPATIBILITY_POLICY={{ database_compatibility_policy_effective }}. Detected {{ glpi_db_server_engine }} {{ glpi_db_server_version_number }}; required {{ glpi_db_required_minimum }}. Schema bootstrap deferred={{ database_compatibility_schema_bootstrap_deferred_effective }}."
   when:
+    - glpi_installation_mode_effective != 'wizard'
     - not (glpi_db_server_version_supported | bool)
     - database_compatibility_policy_effective in ['warn', 'defer']
     - database_compatibility_operator_confirmed_effective | bool
@@ -606,7 +733,7 @@
   changed_when: false
   failed_when: false
   no_log: true
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Assert GLPI database is reachable before schema bootstrap
   ansible.builtin.assert:
@@ -614,7 +741,7 @@
       - glpi_db_schema_marker.rc == 0
     fail_msg: "GLPI database is not reachable with configured application credentials. Validate managed DB host, port, database, user, password and grants."
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Install GLPI database schema when absent
   ansible.builtin.command:
@@ -633,7 +760,7 @@
   failed_when: false
   no_log: true
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - (glpi_db_schema_marker.stdout | default('') | trim) == ''
 
 - name: Assert GLPI database schema installation succeeded
@@ -643,7 +770,7 @@
     fail_msg: "GLPI database schema installation failed. Validate managed DB privileges and confirm the target database is empty or already contains a valid GLPI schema."
   changed_when: false
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - (glpi_db_schema_marker.stdout | default('') | trim) == ''
 
 - name: Recheck GLPI database schema marker
@@ -665,7 +792,7 @@
   changed_when: false
   failed_when: false
   no_log: true
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Assert GLPI database schema is ready before web smoke checks
   ansible.builtin.assert:
@@ -674,7 +801,7 @@
       - (glpi_db_schema_marker_after.stdout | default('') | trim) == 'glpi_configs'
     fail_msg: "GLPI database schema is not ready. Web smoke checks are blocked until the configured database contains a valid GLPI schema."
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Configure GLPI Redis cache and PHP-FPM sessions
   ansible.builtin.command: /usr/local/sbin/glpi-redis-integration.sh
@@ -690,7 +817,7 @@
     GLPI_REDIS_SESSION_LOCKING: "{{ glpi_redis_session_locking | default('0') }}"
     GLPI_REDIS_MAXMEMORY: "{{ glpi_redis_maxmemory | default('') }}"
     GLPI_REDIS_MAXMEMORY_POLICY: "{{ glpi_redis_maxmemory_policy | default('') }}"
-    GLPI_DEFER_SCHEMA_BOOTSTRAP: "{{ database_compatibility_schema_bootstrap_deferred_effective | string | lower }}"
+    GLPI_DEFER_SCHEMA_BOOTSTRAP: "{{ glpi_schema_bootstrap_deferred_effective | string | lower }}"
   register: glpi_redis_integration
   changed_when: "'GLPI_REDIS_INTEGRATION_CHANGED=yes' in (glpi_redis_integration.stdout | default(''))"
 
@@ -705,7 +832,7 @@
     validate_certs: false
   register: glpi_http_hostname_check
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_web_server_type == 'nginx'
 
 - name: Check GLPI HTTP response by app IP header
@@ -719,7 +846,7 @@
     validate_certs: false
   register: glpi_http_ip_check
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_web_server_type == 'nginx'
 
 - name: Assert nginx default page is not served for GLPI hostname
@@ -728,7 +855,7 @@
       - "'Welcome to nginx!' not in (glpi_http_hostname_check.content | default(''))"
     fail_msg: "Nginx default page detected for GLPI hostname. GLPI vhost routing is not active."
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_web_server_type == 'nginx'
 
 - name: Assert nginx default page is not served for GLPI app IP
@@ -737,7 +864,7 @@
       - "'Welcome to nginx!' not in (glpi_http_ip_check.content | default(''))"
     fail_msg: "Nginx default page detected for GLPI app IP. GLPI vhost routing is not active."
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_web_server_type == 'nginx'
 
 - name: Resolve web check base URL for selected engine
@@ -746,7 +873,83 @@
     glpi_web_check_port: "{{ web_https_port if glpi_tls_mode != 'none' else web_http_port }}"
     glpi_web_check_host_header: "{{ glpi_domain }}"
     glpi_web_check_base_url: "{{ ('https' if glpi_tls_mode != 'none' else 'http') ~ '://127.0.0.1:' ~ ((web_https_port if glpi_tls_mode != 'none' else web_http_port) | string) }}"
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  changed_when: false
+
+- name: Check GLPI wizard root endpoint
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303, 500]
+    validate_certs: false
+  register: glpi_wizard_root_route_check
+  failed_when: false
+  changed_when: false
+  when: glpi_installation_mode_effective == 'wizard'
+
+- name: Check GLPI wizard installer endpoint
+  ansible.builtin.uri:
+    url: "{{ glpi_web_check_base_url }}/install/install.php"
+    headers:
+      Host: "{{ glpi_web_check_host_header }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303, 404, 500]
+    validate_certs: false
+  register: glpi_wizard_install_route_check
+  failed_when: false
+  changed_when: false
+  when: glpi_installation_mode_effective == 'wizard'
+
+- name: Assert GLPI wizard is reachable without server error
+  ansible.builtin.assert:
+    that:
+      - (glpi_wizard_root_route_check.status | default(0) | int) != 500
+      - (glpi_wizard_install_route_check.status | default(0) | int) != 500
+      - >-
+        (glpi_wizard_root_route_check.status | default(0) | int) in [200, 301, 302, 303]
+        or
+        (glpi_wizard_install_route_check.status | default(0) | int) in [200, 301, 302, 303]
+      - >-
+        'glpi' in ((glpi_wizard_root_route_check.content | default('')) | lower)
+        or
+        'install' in ((glpi_wizard_root_route_check.content | default('')) | lower)
+        or
+        'wizard' in ((glpi_wizard_root_route_check.content | default('')) | lower)
+        or
+        'setup' in ((glpi_wizard_root_route_check.content | default('')) | lower)
+        or
+        'glpi' in ((glpi_wizard_install_route_check.content | default('')) | lower)
+        or
+        'install' in ((glpi_wizard_install_route_check.content | default('')) | lower)
+        or
+        'wizard' in ((glpi_wizard_install_route_check.content | default('')) | lower)
+        or
+        'setup' in ((glpi_wizard_install_route_check.content | default('')) | lower)
+    fail_msg: >-
+      GLPI install wizard is not reachable in GLPI_INSTALLATION_MODE=wizard.
+      HTTP root={{ glpi_wizard_root_route_check.status | default('unknown') }},
+      install={{ glpi_wizard_install_route_check.status | default('unknown') }}.
+      Probable causes: config_db.php exists while schema is missing, permissions on
+      config={{ glpi_config_dir }}, files={{ glpi_var_dir }}, logs={{ glpi_log_dir }},
+      plugins={{ glpi_plugin_dir }},
+      PHP error, or vhost/PHP-FPM socket mismatch. Check GLPI PHP logs, web server logs,
+      apachectl/nginx configtest, and move config_db.php to a timestamped backup for fresh wizard installs.
+  changed_when: false
+  when: glpi_installation_mode_effective == 'wizard'
+
+- name: Report GLPI wizard readiness summary
+  ansible.builtin.debug:
+    msg:
+      glpi_installation_mode: "{{ glpi_installation_mode_effective }}"
+      glpi_app_files_ready: true
+      glpi_wizard_ready: true
+      glpi_schema_ready: false
+      glpi_user_ready: false
+      next_action: "open browser and complete GLPI install wizard after the managed database meets the GLPI version requirements"
+  when: glpi_installation_mode_effective == 'wizard'
 
 - name: Check GLPI root endpoint for selected engine
   ansible.builtin.uri:
@@ -759,13 +962,13 @@
     validate_certs: false
   register: glpi_root_route_check
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Determine whether installer route must be reachable
   ansible.builtin.set_fact:
     glpi_install_route_expected: "{{ '/install/install.php' in (glpi_root_route_check.content | default('')) }}"
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Check GLPI installer compatibility route
   ansible.builtin.uri:
@@ -778,7 +981,7 @@
     validate_certs: false
   register: glpi_install_route_check
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_install_route_expected
   changed_when: false
 
@@ -788,7 +991,7 @@
       - glpi_install_route_check.status in [200, 301, 302, 303]
     fail_msg: "Installer route '/install/install.php' failed. Verify web rewrite compatibility with public root."
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - glpi_install_route_expected
   changed_when: false
 
@@ -804,7 +1007,7 @@
         )[:3]
       }}
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Check representative static assets
   ansible.builtin.uri:
@@ -816,7 +1019,7 @@
     validate_certs: false
   loop: "{{ glpi_asset_paths }}"
   when:
-    - not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
     - (glpi_asset_paths | default([])) | length > 0
   changed_when: false
 
@@ -833,7 +1036,7 @@
     - files/_sessions/
     - vendor/autoload.php
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Ensure arbitrary PHP path is handled by router without server error
   ansible.builtin.uri:
@@ -844,7 +1047,7 @@
     status_code: [200, 301, 302, 303, 404]
     validate_certs: false
   changed_when: false
-  when: not (database_compatibility_schema_bootstrap_deferred_effective | bool)
+  when: not (glpi_schema_bootstrap_deferred_effective | bool)
 
 - name: Validate PHP timezone default when timezone support is enabled
   ansible.builtin.command: php -r 'echo date_default_timezone_get();'

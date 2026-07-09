@@ -129,11 +129,57 @@ class GlpiCtlCliTest(unittest.TestCase):
         self.assertIn('DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="true"', gate)
         self.assertIn('EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"', gate)
 
+    def test_wizard_mode_turns_managed_db_compatibility_into_advisory_warning(self):
+        script = GLPICTL.read_text(encoding="utf-8")
+        gate = script[
+            script.index("enforce_managed_db_version_compatibility_gate()") : script.index(
+                "effective_managed_timezone_db_mode()"
+            )
+        ]
+        wizard_warning = script[
+            script.index("warn_managed_db_compatibility_for_wizard()") : script.index(
+                "enforce_managed_db_version_compatibility_gate()"
+            )
+        ]
+
+        self.assertIn('GLPI_INSTALLATION_MODE_EFFECTIVE" == "wizard"', gate)
+        self.assertIn('warn_managed_db_compatibility_for_wizard "$gate_context"', gate)
+        self.assertIn('DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="true"', wizard_warning)
+        self.assertIn("The APP layer can be prepared, but the wizard must validate the DB later", wizard_warning)
+        self.assertIn("before completing installation through the web wizard", wizard_warning)
+        self.assertNotIn("return 1", wizard_warning)
+
+    def test_wizard_mode_final_summary_distinguishes_ready_states(self):
+        script = GLPICTL.read_text(encoding="utf-8")
+        summary = script[
+            script.index("print_execution_final_summary()") : script.index("summary_escape()")
+        ]
+        wizard_pending = script[
+            script.index("record_glpi_wizard_installation_pending()") : script.index(
+                "resolve_execution_access_context()"
+            )
+        ]
+
+        for field in (
+            "glpi_installation_mode:",
+            "web_infra_ready:",
+            "glpi_wizard_ready:",
+            "glpi_schema_ready:",
+            "glpi_user_ready:",
+            "next_action:",
+        ):
+            self.assertIn(field, summary)
+        self.assertIn('GLPI_WEB_INFRA_READY="true"', wizard_pending)
+        self.assertIn('GLPI_WIZARD_READY="true"', wizard_pending)
+        self.assertIn('GLPI_SCHEMA_READY="false"', wizard_pending)
+        self.assertIn('GLPI_USER_READY="false"', wizard_pending)
+        self.assertIn('EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"', wizard_pending)
+
     def test_database_compatibility_evidence_does_not_write_passwords(self):
         script = GLPICTL.read_text(encoding="utf-8")
         evidence_section = script[
             script.index("write_database_compatibility_evidence()") : script.index(
-                "enforce_managed_db_version_compatibility_gate()"
+                "warn_managed_db_compatibility_for_wizard()"
             )
         ]
 

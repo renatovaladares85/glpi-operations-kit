@@ -10,6 +10,7 @@ EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
 WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
+GLPI_INSTALLATION_MODES = {"cli", "wizard", "defer"}
 TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
@@ -267,6 +268,8 @@ DOTTED_KEY_MAP = {
     "network.database.allowed_source_hosts": "NETWORK_DATABASE_ALLOWED_SOURCE_HOSTS",
     "glpi.version": "GLPI_VERSION",
     "glpi.domain": "GLPI_DOMAIN",
+    "glpi.installation_mode": "GLPI_INSTALLATION_MODE",
+    "glpi.wizard_reset_config_db": "GLPI_WIZARD_RESET_CONFIG_DB",
     "web.server_type": "WEB_SERVER_TYPE",
     "glpi.upload_max_filesize": "GLPI_UPLOAD_MAX_FILESIZE",
     "glpi.post_max_size": "GLPI_POST_MAX_SIZE",
@@ -957,6 +960,10 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
     if web_server_type not in WEB_SERVER_TYPES:
         fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.")
+    glpi_installation_mode = read_value(values, "GLPI_INSTALLATION_MODE", "cli").strip().lower() or "cli"
+    if glpi_installation_mode not in GLPI_INSTALLATION_MODES:
+        fail("GLPI_INSTALLATION_MODE must be one of: cli, wizard, defer.")
+    glpi_wizard_reset_config_db = as_bool(read_value(values, "GLPI_WIZARD_RESET_CONFIG_DB", "false"), False)
     platform_family = detect_platform_family()
     platform_defaults = PLATFORM_DEFAULTS[platform_family]
     web_server_packages = WEB_SERVER_PACKAGES_BY_FAMILY[platform_family]
@@ -1036,6 +1043,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "database_compatibility_assume_yes": database_compatibility_assume_yes,
         "database_unsupported_prod_override": database_unsupported_prod_override,
         "glpi_version": glpi_version,
+        "glpi_installation_mode": glpi_installation_mode,
+        "glpi_wizard_reset_config_db": glpi_wizard_reset_config_db,
         "glpi_download_url": f"https://github.com/glpi-project/glpi/releases/download/{glpi_version}/glpi-{glpi_version}.tgz",
         "glpi_release_root": release_root,
         "glpi_release_dir": f"{release_root}/glpi-{glpi_version}",

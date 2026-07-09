@@ -91,6 +91,13 @@ DB_COMPATIBILITY_OPERATOR_CONFIRMED="false"
 DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="false"
 DB_COMPATIBILITY_JUSTIFICATION=""
 DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION=""
+GLPI_INSTALLATION_MODE_EFFECTIVE="cli"
+GLPI_WEB_INFRA_READY="unknown"
+GLPI_WIZARD_READY="unknown"
+GLPI_SCHEMA_READY="unknown"
+GLPI_USER_READY="unknown"
+GLPI_INSTALLATION_NEXT_ACTION=""
+GLPI_WIZARD_PENDING_WARNING_RECORDED="false"
 
 build_execution_test_commands() {
   local web_service php_service web_server_type web_config_test_command
@@ -116,6 +123,43 @@ build_execution_test_commands() {
   EXECUTION_TEST_COMMANDS+=("tail -n 50 .runtime/${ENVIRONMENT}/logs/${OPERATION_ID}.log")
   if [[ "$EXECUTION_ACCESS_SCHEME" == "https" ]]; then
     EXECUTION_TEST_COMMANDS+=("openssl s_client -connect ${EXECUTION_ACCESS_HOST}:${EXECUTION_ACCESS_PORT} -servername ${EXECUTION_ACCESS_HOST} </dev/null 2>/dev/null | openssl x509 -noout -dates")
+  fi
+}
+
+refresh_glpi_installation_summary_context() {
+  local mode
+  mode="$(read_effective_runtime_value "glpi_installation_mode" "cli")"
+  mode="${mode,,}"
+  case "$mode" in
+    cli|wizard|defer) ;;
+    *) mode="cli" ;;
+  esac
+  GLPI_INSTALLATION_MODE_EFFECTIVE="$mode"
+  if [[ "$mode" == "wizard" ]]; then
+    [[ -z "${GLPI_WEB_INFRA_READY// }" || "$GLPI_WEB_INFRA_READY" == "unknown" ]] && GLPI_WEB_INFRA_READY="unknown"
+    [[ -z "${GLPI_WIZARD_READY// }" || "$GLPI_WIZARD_READY" == "unknown" ]] && GLPI_WIZARD_READY="unknown"
+    [[ -z "${GLPI_SCHEMA_READY// }" || "$GLPI_SCHEMA_READY" == "unknown" ]] && GLPI_SCHEMA_READY="false"
+    [[ -z "${GLPI_USER_READY// }" || "$GLPI_USER_READY" == "unknown" ]] && GLPI_USER_READY="false"
+    if [[ -z "${GLPI_INSTALLATION_NEXT_ACTION// }" || "$GLPI_INSTALLATION_NEXT_ACTION" == *"unknown"* ]]; then
+      GLPI_INSTALLATION_NEXT_ACTION="Upgrade DB if required, then open ${EXECUTION_ACCESS_URL} and complete the GLPI installation wizard."
+    fi
+  fi
+}
+
+record_glpi_wizard_installation_pending() {
+  refresh_glpi_installation_summary_context
+  if [[ "$GLPI_INSTALLATION_MODE_EFFECTIVE" != "wizard" ]]; then
+    return 0
+  fi
+  GLPI_WEB_INFRA_READY="true"
+  GLPI_WIZARD_READY="true"
+  GLPI_SCHEMA_READY="false"
+  GLPI_USER_READY="false"
+  GLPI_INSTALLATION_NEXT_ACTION="Upgrade DB if required, then open ${EXECUTION_ACCESS_URL} and complete the GLPI installation wizard."
+  EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"
+  if [[ "$GLPI_WIZARD_PENDING_WARNING_RECORDED" != "true" ]]; then
+    record_execution_warning "GLPI application layer is deployed, but installation is pending through web wizard."
+    GLPI_WIZARD_PENDING_WARNING_RECORDED="true"
   fi
 }
 
@@ -173,12 +217,21 @@ print_execution_final_summary() {
   local stream="${2:-stdout}"
   local alert_line=""
   local test_cmd=""
+  refresh_glpi_installation_summary_context
 
   if [[ "$stream" == "stderr" ]]; then
     echo "Execution final summary:" >&2
     echo "  status: ${status_label}" >&2
     echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}" >&2
     echo "  access_url: ${EXECUTION_ACCESS_URL}" >&2
+    if [[ "$GLPI_INSTALLATION_MODE_EFFECTIVE" == "wizard" ]]; then
+      echo "  glpi_installation_mode: ${GLPI_INSTALLATION_MODE_EFFECTIVE}" >&2
+      echo "  web_infra_ready: ${GLPI_WEB_INFRA_READY}" >&2
+      echo "  glpi_wizard_ready: ${GLPI_WIZARD_READY}" >&2
+      echo "  glpi_schema_ready: ${GLPI_SCHEMA_READY}" >&2
+      echo "  glpi_user_ready: ${GLPI_USER_READY}" >&2
+      echo "  next_action: ${GLPI_INSTALLATION_NEXT_ACTION}" >&2
+    fi
     if [[ "$status_label" == "FAILED" ]]; then
       echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}" >&2
       echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}" >&2
@@ -203,6 +256,14 @@ print_execution_final_summary() {
   echo "  status: ${status_label}"
   echo "  tls_mode: ${EXECUTION_TLS_MODE_EFFECTIVE}"
   echo "  access_url: ${EXECUTION_ACCESS_URL}"
+  if [[ "$GLPI_INSTALLATION_MODE_EFFECTIVE" == "wizard" ]]; then
+    echo "  glpi_installation_mode: ${GLPI_INSTALLATION_MODE_EFFECTIVE}"
+    echo "  web_infra_ready: ${GLPI_WEB_INFRA_READY}"
+    echo "  glpi_wizard_ready: ${GLPI_WIZARD_READY}"
+    echo "  glpi_schema_ready: ${GLPI_SCHEMA_READY}"
+    echo "  glpi_user_ready: ${GLPI_USER_READY}"
+    echo "  next_action: ${GLPI_INSTALLATION_NEXT_ACTION}"
+  fi
   if [[ "$status_label" == "FAILED" ]]; then
     echo "  failure_task: ${EXECUTION_FAILURE_TASK:-unknown}"
     echo "  failure_message: ${EXECUTION_FAILURE_MESSAGE:-Review execution log for details.}"
@@ -240,6 +301,7 @@ append_execution_summary_to_file() {
   if [[ ! -f "$summary_path" ]]; then
     return 0
   fi
+  refresh_glpi_installation_summary_context
   {
     echo "tls_mode_effective: '$(summary_escape "$EXECUTION_TLS_MODE_EFFECTIVE")'"
     echo "access_scheme: '$(summary_escape "$EXECUTION_ACCESS_SCHEME")'"
@@ -259,6 +321,14 @@ append_execution_summary_to_file() {
     echo "schema_bootstrap_deferred: '$(summary_escape "$DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED")'"
     echo "database_compatibility_justification: '$(summary_escape "$DB_COMPATIBILITY_JUSTIFICATION")'"
     echo "database_compatibility_recommended_next_action: '$(summary_escape "$DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION")'"
+    if [[ "$GLPI_INSTALLATION_MODE_EFFECTIVE" == "wizard" ]]; then
+      echo "glpi_installation_mode: '$(summary_escape "$GLPI_INSTALLATION_MODE_EFFECTIVE")'"
+      echo "web_infra_ready: '$(summary_escape "$GLPI_WEB_INFRA_READY")'"
+      echo "glpi_wizard_ready: '$(summary_escape "$GLPI_WIZARD_READY")'"
+      echo "glpi_schema_ready: '$(summary_escape "$GLPI_SCHEMA_READY")'"
+      echo "glpi_user_ready: '$(summary_escape "$GLPI_USER_READY")'"
+      echo "glpi_installation_next_action: '$(summary_escape "$GLPI_INSTALLATION_NEXT_ACTION")'"
+    fi
     echo "alerts_count: ${#EXECUTION_WARNINGS[@]}"
     echo "alerts:"
     if [[ ${#EXECUTION_WARNINGS[@]} -eq 0 ]]; then
@@ -1976,6 +2046,73 @@ write_database_compatibility_evidence() {
     recommended_next_action "$DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION"
 }
 
+warn_managed_db_compatibility_for_wizard() {
+  local gate_context="$1"
+  local db_version_output db_compat_report db_compat_status db_compat_message
+  local db_compat_engine db_compat_version db_compat_requirement
+
+  MANAGED_DB_HOST="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_host" || true)"
+  MANAGED_DB_PORT="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "mariadb_port" || true)"
+  MANAGED_DB_NAME="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_name" || true)"
+  MANAGED_DB_USER="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_db_user" || true)"
+  MANAGED_DB_PASSWORD="$(read_yaml_top_level_value "$SECRET_PATH" "glpi_db_password" || true)"
+  [[ -z "${MANAGED_DB_PORT// }" ]] && MANAGED_DB_PORT="3306"
+
+  DB_COMPATIBILITY_POLICY_EFFECTIVE="$(normalize_database_compatibility_policy "$(read_effective_runtime_value "database_compatibility_policy" "block")")"
+  [[ "$DB_COMPATIBILITY_POLICY_EFFECTIVE" == "invalid" ]] && DB_COMPATIBILITY_POLICY_EFFECTIVE="block"
+  DB_COMPATIBILITY_OPERATOR_CONFIRMED="false"
+  DB_COMPATIBILITY_SCHEMA_BOOTSTRAP_DEFERRED="true"
+  DB_COMPATIBILITY_JUSTIFICATION="$(read_effective_runtime_value "database_compatibility_justification" "")"
+  DB_COMPATIBILITY_RECOMMENDED_NEXT_ACTION="Upgrade the managed DB to the GLPI-supported version before completing the web install wizard."
+
+  write_step "GLPI_INSTALLATION_MODE=wizard: managed DB compatibility is advisory before app mutation (${gate_context})"
+
+  if [[ -z "${MANAGED_DB_HOST// }" || -z "${MANAGED_DB_USER// }" || -z "${MANAGED_DB_NAME// }" || -z "${MANAGED_DB_PASSWORD// }" ]]; then
+    DB_COMPATIBILITY_STATUS="not_checked"
+    DB_COMPATIBILITY_REQUIRED_MINIMUM="MariaDB >= 10.6 or MySQL >= 8.0 for GLPI 11"
+    DB_COMPATIBILITY_REQUIREMENT="$DB_COMPATIBILITY_REQUIRED_MINIMUM"
+    write_database_compatibility_evidence
+    EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"
+    record_execution_warning "Managed DB compatibility was not inspected in wizard mode because runtime DB connection data or secret is incomplete. The wizard must validate the DB later, and GLPI 11 requires MariaDB >= 10.6 or MySQL >= 8.0."
+    return 0
+  fi
+
+  if ! db_version_output="$(run_managed_db_version_query 2>&1)"; then
+    DB_COMPATIBILITY_STATUS="not_checked"
+    DB_COMPATIBILITY_REQUIRED_MINIMUM="MariaDB >= 10.6 or MySQL >= 8.0 for GLPI 11"
+    DB_COMPATIBILITY_REQUIREMENT="$DB_COMPATIBILITY_REQUIRED_MINIMUM"
+    write_database_compatibility_evidence
+    EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"
+    record_execution_warning "Managed DB version could not be inspected in wizard mode. The APP layer can be prepared, but the wizard must validate the DB later. Ping only proves ICMP, not MySQL readiness."
+    printf '%s\n' "$db_version_output" | mask_sensitive_stream | mask_managed_db_secret_values_stream
+    return 0
+  fi
+
+  db_compat_report="$(glpi_db_compatibility_report "$(read_effective_runtime_value "glpi_version" "")" "$db_version_output")"
+  db_compat_status="$(glpi_db_compatibility_value "$db_compat_report" "status")"
+  db_compat_message="$(glpi_db_compatibility_value "$db_compat_report" "message")"
+  db_compat_engine="$(glpi_db_compatibility_value "$db_compat_report" "engine")"
+  db_compat_version="$(glpi_db_compatibility_value "$db_compat_report" "version")"
+  db_compat_requirement="$(glpi_db_compatibility_value "$db_compat_report" "requirement")"
+
+  DB_COMPATIBILITY_STATUS="$([[ "$db_compat_status" == "pass" ]] && echo "compatible" || echo "incompatible")"
+  DB_COMPATIBILITY_ENGINE_DETECTED="$db_compat_engine"
+  DB_COMPATIBILITY_VERSION_DETECTED="$db_compat_version"
+  DB_COMPATIBILITY_REQUIRED_MINIMUM="${db_compat_requirement%.}"
+  DB_COMPATIBILITY_REQUIREMENT="$db_compat_requirement"
+  write_database_compatibility_evidence
+
+  if [[ "$db_compat_status" == "pass" ]]; then
+    echo "$db_compat_message"
+    return 0
+  fi
+
+  EXECUTION_SUCCESS_STATUS_LABEL="SUCCESS_WITH_WARNINGS"
+  record_execution_warning "Managed DB is ${db_compat_engine} ${db_compat_version}; GLPI $(read_effective_runtime_value "glpi_version" "") requires ${DB_COMPATIBILITY_REQUIRED_MINIMUM} before completing installation through the web wizard."
+  echo "$db_compat_message"
+  return 0
+}
+
 enforce_managed_db_version_compatibility_gate() {
   local gate_context="$1"
   local db_version_output db_compat_report db_compat_status db_compat_message
@@ -1983,6 +2120,12 @@ enforce_managed_db_version_compatibility_gate() {
   local environment_stage confirmation_prompt warning_message
 
   if ! is_managed_database_mode; then
+    return 0
+  fi
+
+  refresh_glpi_installation_summary_context
+  if [[ "$GLPI_INSTALLATION_MODE_EFFECTIVE" == "wizard" ]]; then
+    warn_managed_db_compatibility_for_wizard "$gate_context"
     return 0
   fi
 
@@ -2977,6 +3120,7 @@ run_deploy() {
         if ! enforce_selected_web_engine_runtime_ready "deploy ${mode} ${target}"; then
           exit 1
         fi
+        record_glpi_wizard_installation_pending
       fi
       if is_managed_database_mode && [[ "$target" == "app" || "$target" == "all" ]]; then
         write_step "Stage 2/2 (managed): validating managed DB connectivity (controlled gate)"
@@ -3019,6 +3163,7 @@ run_deploy() {
         if ! enforce_selected_web_engine_runtime_ready "deploy ${mode} ${target}"; then
           exit 1
         fi
+        record_glpi_wizard_installation_pending
       fi
       mark_apply_sequence "$mode" "$target"
       ;;

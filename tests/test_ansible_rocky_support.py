@@ -77,6 +77,15 @@ class AnsibleRockySupportTest(unittest.TestCase):
             renderer.DOTTED_KEY_MAP["database.compatibility_assume_yes"],
             "DATABASE_COMPATIBILITY_ASSUME_YES",
         )
+        self.assertEqual(
+            renderer.DOTTED_KEY_MAP["glpi.installation_mode"],
+            "GLPI_INSTALLATION_MODE",
+        )
+        self.assertEqual(
+            renderer.DOTTED_KEY_MAP["glpi.wizard_reset_config_db"],
+            "GLPI_WIZARD_RESET_CONFIG_DB",
+        )
+        self.assertEqual(renderer.GLPI_INSTALLATION_MODES, {"cli", "wizard", "defer"})
 
 
 if __name__ == "__main__":

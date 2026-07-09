@@ -66,6 +66,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
 | `DATABASE_DEPLOYMENT_MODE` | Defines self-hosted DB vs external managed DB flow. | `self_hosted`, `managed` |
 | `DATABASE_COMPATIBILITY_POLICY` | Controls managed DB incompatibility handling. Default is blocking. | `block`, `warn`, `defer` |
+| `GLPI_INSTALLATION_MODE` | Selects CLI schema bootstrap, manual web wizard, or technical schema deferral. | `cli`, `wizard`, `defer` |
+| `GLPI_WIZARD_RESET_CONFIG_DB` | Allows wizard mode to back up an existing `config_db.php` in non-production fresh installs. | `true`, `false` |
 | `WEB_SERVER_TYPE` | Selects the Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
 | `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
 | `SECURITY_REQUIRE_*` | Enables policy checks for TLS/HTTPS/promotion/ordered execution. | `true`, `false` |
@@ -88,6 +90,9 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 - `DATABASE_COMPATIBILITY_POLICY=block`: default; incompatible managed DB blocks precheck/prepare/apply.
 - `DATABASE_COMPATIBILITY_POLICY=warn`: non-production only; requires justification and explicit confirmation, then continues with schema install/checks unsupported.
 - `DATABASE_COMPATIBILITY_POLICY=defer`: non-production only; requires justification and explicit confirmation, then skips GLPI schema bootstrap and web smoke checks until the DB is upgraded.
+- `GLPI_INSTALLATION_MODE=cli`: default; deploys `config_db.php`, validates DB compatibility, and can run `php bin/console db:install` when schema is absent.
+- `GLPI_INSTALLATION_MODE=wizard`: prepares APP files, web server, PHP-FPM, Redis, FHS paths, and permissions, but does not create `config_db.php`, does not run `db:install`, and does not require `glpi_configs`.
+- `GLPI_INSTALLATION_MODE=defer`: keeps technical schema deferral behavior for controlled compatibility exceptions; use `wizard` when the intended installation path is the browser installer.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - Redis is installed and configured on GLPI app hosts by default for GLPI cache (DB 0) and PHP-FPM sessions (DB 1).
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
@@ -154,4 +159,21 @@ After the managed DB is upgraded, rerun:
 ```bash
 ./scripts/glpictl.sh <env> deploy apply app
 ./scripts/glpictl.sh <env> deploy post-check all
+```
+
+## GLPI Installation Modes
+
+`GLPI_INSTALLATION_MODE=cli` is the automated path. The kit deploys `/etc/glpi/config_db.php`, checks DB compatibility, checks for `glpi_configs`, and runs `php bin/console db:install` when the schema is absent.
+
+`GLPI_INSTALLATION_MODE=wizard` is the manual browser-installer path. The kit prepares Apache/Nginx/Lighttpd, PHP-FPM, Redis integration, GLPI files, and external FHS paths (`/etc/glpi`, `/var/lib/glpi/files`, `/var/log/glpi`, `/var/lib/glpi/plugins`). It then verifies that the web wizard is reachable and rejects HTTP 500. The final state is `SUCCESS_WITH_WARNINGS` because `APP_DEPLOY_READY` and `WIZARD_READY` are true, while `DB_SCHEMA_READY` and `GLPI_USER_READY` remain false until the operator completes the GLPI installer.
+
+If `GLPI_INSTALLATION_MODE=wizard` finds an existing `/etc/glpi/config_db.php`, the run fails by default because GLPI will bypass the wizard and may return HTTP 500 against an empty schema. For a fresh non-production install only, set `GLPI_WIZARD_RESET_CONFIG_DB=true`; the kit will move the active file to a timestamped backup such as `/etc/glpi/config_db.php.bak.YYYYMMDDTHHMMSS`, never delete it outright.
+
+Validation commands after a wizard-mode APP deploy:
+
+```bash
+sudo systemctl is-active httpd nginx php-fpm php8.3-fpm
+sudo apachectl configtest || sudo nginx -t
+curl -I -H "Host: <glpi-domain>" http://127.0.0.1:<http-port>/
+sudo test -f /etc/glpi/config_db.php && echo "config_db.php exists" || echo "wizard can create config_db.php"
 ```
