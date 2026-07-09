@@ -1255,44 +1255,202 @@ validate_monitoring_runtime_contract() {
 
 is_service_active() {
   local service_name="$1"
+  [[ "$(service_status "$service_name")" == "active" ]]
+}
+
+service_status() {
+  local service_name="$1"
+  local status=""
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl is-active --quiet "$service_name" 2>/dev/null
+    status="$(systemctl is-active "$service_name" 2>/dev/null || true)"
+  fi
+  [[ -z "${status// }" ]] && status="unknown"
+  echo "$status"
+}
+
+web_engine_selected_type() {
+  local selected_type
+  selected_type="$(read_effective_runtime_value "glpi_web_server_type" "")"
+  [[ -z "${selected_type// }" ]] && selected_type="$(read_product_config_value "$ENVIRONMENT" "WEB_SERVER_TYPE" || true)"
+  selected_type="${selected_type,,}"
+  [[ -z "${selected_type// }" ]] && selected_type="unknown"
+  echo "$selected_type"
+}
+
+web_engine_expected_service() {
+  local selected_type="$1"
+  local expected_service
+  expected_service="$(read_effective_runtime_value "glpi_web_service" "")"
+  if [[ -n "${expected_service// }" ]]; then
+    echo "$expected_service"
+    return 0
+  fi
+  case "$selected_type" in
+    nginx) echo "nginx" ;;
+    apache)
+      if [[ "$(platform_family)" == "rhel" ]]; then
+        echo "httpd"
+      else
+        echo "apache2"
+      fi
+      ;;
+    lighttpd) echo "lighttpd" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+web_engine_configtest_command() {
+  local selected_type="$1"
+  case "$selected_type" in
+    apache) echo "apachectl configtest" ;;
+    lighttpd) echo "lighttpd -tt -f /etc/lighttpd/lighttpd.conf" ;;
+    nginx) echo "nginx -t" ;;
+    *) echo "false" ;;
+  esac
+}
+
+web_engine_error_log_path() {
+  local selected_type="$1"
+  local expected_service="$2"
+  case "$selected_type" in
+    apache)
+      if [[ "$expected_service" == "httpd" ]]; then
+        echo "/var/log/httpd/error_log"
+      else
+        echo "/var/log/apache2/error.log"
+      fi
+      ;;
+    nginx) echo "/var/log/nginx/error.log" ;;
+    lighttpd) echo "/var/log/lighttpd/error.log" ;;
+    *) echo "" ;;
+  esac
+}
+
+web_engine_expected_ports() {
+  local http_port https_port tls_mode
+  http_port="$(read_effective_runtime_value "web_http_port" "80")"
+  https_port="$(read_effective_runtime_value "web_https_port" "443")"
+  tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+  if [[ "$tls_mode" == "none" ]]; then
+    echo "$http_port"
+  else
+    echo "${http_port},${https_port}"
+  fi
+}
+
+port_listener_detected() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH 2>/dev/null | awk -v port=":${port}$" '$4 ~ port {found=1} END {exit found ? 0 : 1}'
+    return $?
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk -v port=":${port}$" '$4 ~ port {found=1} END {exit found ? 0 : 1}'
     return $?
   fi
   return 1
 }
 
+web_engine_listener_summary() {
+  local expected_ports="$1"
+  local port summary=""
+  local -a ports_array=()
+  IFS=',' read -r -a ports_array <<<"$expected_ports"
+  for port in "${ports_array[@]}"; do
+    if port_listener_detected "$port"; then
+      summary="${summary}${port}:true,"
+    else
+      summary="${summary}${port}:false,"
+    fi
+  done
+  summary="${summary%,}"
+  [[ -z "${summary// }" ]] && summary="none"
+  echo "$summary"
+}
+
+web_engine_all_listeners_detected() {
+  local expected_ports="$1"
+  local port
+  local -a ports_array=()
+  IFS=',' read -r -a ports_array <<<"$expected_ports"
+  for port in "${ports_array[@]}"; do
+    if ! port_listener_detected "$port"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+web_engine_local_connectivity_detected() {
+  local expected_ports="$1"
+  local glpi_domain tls_mode port scheme
+  local -a ports_array=()
+  command -v curl >/dev/null 2>&1 || return 0
+  glpi_domain="$(read_effective_runtime_value "glpi_domain" "localhost")"
+  tls_mode="$(read_effective_runtime_value "glpi_tls_mode" "none")"
+  IFS=',' read -r -a ports_array <<<"$expected_ports"
+  for port in "${ports_array[@]}"; do
+    scheme="http"
+    if [[ "$tls_mode" != "none" && "$port" == "$(read_effective_runtime_value "web_https_port" "443")" ]]; then
+      scheme="https"
+    fi
+    if ! curl -k -sS --connect-timeout 5 --max-time 8 -o /dev/null -H "Host: ${glpi_domain}" "${scheme}://127.0.0.1:${port}/"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+web_engine_active_engines() {
+  local active_list=""
+  is_service_active "nginx" && active_list="${active_list}nginx,"
+  if is_service_active "apache2"; then
+    active_list="${active_list}apache(apache2),"
+  fi
+  if is_service_active "httpd"; then
+    active_list="${active_list}apache(httpd),"
+  fi
+  is_service_active "lighttpd" && active_list="${active_list}lighttpd,"
+  active_list="${active_list%,}"
+  [[ -z "${active_list// }" ]] && active_list="none"
+  echo "$active_list"
+}
+
+web_engine_conflicts_for_selected() {
+  local selected_type="$1"
+  local conflict_list=""
+  case "$selected_type" in
+    nginx)
+      is_service_active "apache2" && conflict_list="${conflict_list}apache(apache2),"
+      is_service_active "httpd" && conflict_list="${conflict_list}apache(httpd),"
+      is_service_active "lighttpd" && conflict_list="${conflict_list}lighttpd,"
+      ;;
+    apache)
+      is_service_active "nginx" && conflict_list="${conflict_list}nginx,"
+      is_service_active "lighttpd" && conflict_list="${conflict_list}lighttpd,"
+      ;;
+    lighttpd)
+      is_service_active "nginx" && conflict_list="${conflict_list}nginx,"
+      is_service_active "apache2" && conflict_list="${conflict_list}apache(apache2),"
+      is_service_active "httpd" && conflict_list="${conflict_list}apache(httpd),"
+      ;;
+  esac
+  conflict_list="${conflict_list%,}"
+  [[ -z "${conflict_list// }" ]] && conflict_list="none"
+  echo "$conflict_list"
+}
+
 enforce_single_web_server_contract() {
   local selected_type
-  selected_type="$(read_product_config_value "$ENVIRONMENT" "WEB_SERVER_TYPE" || true)"
-  if [[ -z "${selected_type// }" ]]; then
+  selected_type="$(web_engine_selected_type)"
+  if [[ -z "${selected_type// }" || "$selected_type" == "unknown" ]]; then
     echo "Missing required config key: WEB_SERVER_TYPE" >&2
     exit 1
   fi
-  selected_type="${selected_type,,}"
+  local conflict_details
+  conflict_details="$(web_engine_conflicts_for_selected "$selected_type")"
 
-  local active_nginx="false" active_apache="false" active_lighttpd="false"
-  is_service_active "nginx" && active_nginx="true"
-  is_service_active "apache2" && active_apache="true"
-  is_service_active "lighttpd" && active_lighttpd="true"
-
-  local conflict_details=""
-  case "$selected_type" in
-    nginx)
-      [[ "$active_apache" == "true" ]] && conflict_details="${conflict_details}apache2 active; "
-      [[ "$active_lighttpd" == "true" ]] && conflict_details="${conflict_details}lighttpd active; "
-      ;;
-    apache)
-      [[ "$active_nginx" == "true" ]] && conflict_details="${conflict_details}nginx active; "
-      [[ "$active_lighttpd" == "true" ]] && conflict_details="${conflict_details}lighttpd active; "
-      ;;
-    lighttpd)
-      [[ "$active_nginx" == "true" ]] && conflict_details="${conflict_details}nginx active; "
-      [[ "$active_apache" == "true" ]] && conflict_details="${conflict_details}apache2 active; "
-      ;;
-  esac
-
-  if [[ -n "${conflict_details// }" ]]; then
+  if [[ "$conflict_details" != "none" ]]; then
     policy_violation \
       "single-web-server" \
       "WEB_SERVER_TYPE=$selected_type but conflicting web service(s) detected: ${conflict_details}" \
@@ -1301,48 +1459,117 @@ enforce_single_web_server_contract() {
 }
 
 print_web_engine_postcheck_summary() {
-  local selected_type
-  selected_type="$(read_product_config_value "$ENVIRONMENT" "WEB_SERVER_TYPE" || true)"
-  selected_type="${selected_type,,}"
-  [[ -z "${selected_type// }" ]] && selected_type="unknown"
-
-  local nginx_state="inactive" apache_state="inactive" lighttpd_state="inactive"
-  is_service_active "nginx" && nginx_state="active"
-  is_service_active "apache2" && apache_state="active"
-  is_service_active "lighttpd" && lighttpd_state="active"
-
-  local active_list=""
-  [[ "$nginx_state" == "active" ]] && active_list="${active_list}nginx,"
-  [[ "$apache_state" == "active" ]] && active_list="${active_list}apache,"
-  [[ "$lighttpd_state" == "active" ]] && active_list="${active_list}lighttpd,"
-  active_list="${active_list%,}"
-  [[ -z "${active_list// }" ]] && active_list="none"
-
-  local conflict_list=""
-  case "$selected_type" in
-    nginx)
-      [[ "$apache_state" == "active" ]] && conflict_list="${conflict_list}apache,"
-      [[ "$lighttpd_state" == "active" ]] && conflict_list="${conflict_list}lighttpd,"
-      ;;
-    apache)
-      [[ "$nginx_state" == "active" ]] && conflict_list="${conflict_list}nginx,"
-      [[ "$lighttpd_state" == "active" ]] && conflict_list="${conflict_list}lighttpd,"
-      ;;
-    lighttpd)
-      [[ "$nginx_state" == "active" ]] && conflict_list="${conflict_list}nginx,"
-      [[ "$apache_state" == "active" ]] && conflict_list="${conflict_list}apache,"
-      ;;
-  esac
-  conflict_list="${conflict_list%,}"
-  [[ -z "${conflict_list// }" ]] && conflict_list="none"
+  local selected_type expected_service expected_ports listener_summary listener_detected service_state diagnostic_command
+  selected_type="$(web_engine_selected_type)"
+  expected_service="$(web_engine_expected_service "$selected_type")"
+  expected_ports="$(web_engine_expected_ports)"
+  listener_summary="$(web_engine_listener_summary "$expected_ports")"
+  listener_detected="false"
+  web_engine_all_listeners_detected "$expected_ports" && listener_detected="true"
+  service_state="$(service_status "$expected_service")"
+  diagnostic_command="sudo systemctl status ${expected_service} --no-pager; sudo journalctl -u ${expected_service} -n 80 --no-pager; sudo $(web_engine_configtest_command "$selected_type")"
 
   echo "Web engine post-check summary:"
   echo "  selected_engine: $selected_type"
-  echo "  active_engines: $active_list"
-  echo "  nginx_status: $nginx_state"
-  echo "  apache_status: $apache_state"
-  echo "  lighttpd_status: $lighttpd_state"
-  echo "  conflicts: $conflict_list"
+  echo "  expected_service: $expected_service"
+  echo "  service_status: $service_state"
+  echo "  expected_ports: $expected_ports"
+  echo "  listener_detected: $listener_detected"
+  echo "  listener_details: $listener_summary"
+  echo "  suggested_diagnostic_command: $diagnostic_command"
+  echo "  active_engines: $(web_engine_active_engines)"
+  echo "  nginx_status: $(service_status "nginx")"
+  echo "  apache_status: apache2=$(service_status "apache2"),httpd=$(service_status "httpd")"
+  echo "  lighttpd_status: $(service_status "lighttpd")"
+  echo "  conflicts: $(web_engine_conflicts_for_selected "$selected_type")"
+}
+
+print_web_engine_failure_diagnostics() {
+  local selected_type="$1"
+  local expected_service="$2"
+  local configtest_command="$3"
+  local error_log_path
+  error_log_path="$(web_engine_error_log_path "$selected_type" "$expected_service")"
+
+  echo "Web engine diagnostics for ${selected_type}/${expected_service}:" >&2
+  if command -v journalctl >/dev/null 2>&1; then
+    echo "+ journalctl -u ${expected_service} -n 80 --no-pager" >&2
+    journalctl -u "$expected_service" -n 80 --no-pager >&2 || true
+  fi
+  echo "+ ${configtest_command}" >&2
+  bash -lc "$configtest_command" >&2 || true
+  if [[ -n "${error_log_path// }" && -f "$error_log_path" ]]; then
+    echo "+ tail -n 80 ${error_log_path}" >&2
+    tail -n 80 "$error_log_path" >&2 || true
+  else
+    echo "No web engine error log found at expected path: ${error_log_path:-unknown}" >&2
+  fi
+}
+
+enforce_selected_web_engine_runtime_ready() {
+  local context="$1"
+  local selected_type expected_service expected_ports expected_service_status configtest_command configtest_output
+  selected_type="$(web_engine_selected_type)"
+  expected_service="$(web_engine_expected_service "$selected_type")"
+  expected_ports="$(web_engine_expected_ports)"
+  expected_service_status="$(service_status "$expected_service")"
+  configtest_command="$(web_engine_configtest_command "$selected_type")"
+
+  print_web_engine_postcheck_summary
+
+  if [[ "$expected_service" == "unknown" || "$selected_type" == "unknown" ]]; then
+    set_failure_context \
+      "web-engine-runtime" \
+      "Invalid or missing WEB_SERVER_TYPE; selected_engine=${selected_type}, expected_service=${expected_service}." \
+      "Set WEB_SERVER_TYPE to nginx, apache, or lighttpd and rerun ${context}."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    return 1
+  fi
+
+  if ! configtest_output="$(bash -lc "$configtest_command" 2>&1)"; then
+    set_failure_context \
+      "web-engine-runtime" \
+      "Selected web engine configtest failed: ${configtest_command}. ${configtest_output}" \
+      "Fix the selected web server configuration and rerun ${context}."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    print_web_engine_failure_diagnostics "$selected_type" "$expected_service" "$configtest_command"
+    return 1
+  fi
+
+  if [[ "$expected_service_status" != "active" ]]; then
+    set_failure_context \
+      "web-engine-runtime" \
+      "Selected web engine '${selected_type}' expected service '${expected_service}' is '${expected_service_status}', not active." \
+      "Inspect service status and logs, fix startup failure, then rerun ${context}."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    print_web_engine_failure_diagnostics "$selected_type" "$expected_service" "$configtest_command"
+    return 1
+  fi
+
+  if ! web_engine_all_listeners_detected "$expected_ports"; then
+    set_failure_context \
+      "web-engine-runtime" \
+      "Selected web engine '${selected_type}' service '${expected_service}' is active, but no listener was detected for all expected port(s): ${expected_ports}. Details: $(web_engine_listener_summary "$expected_ports")." \
+      "Check Listen/VirtualHost directives, firewall/local bind, and rerun ${context}."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    print_web_engine_failure_diagnostics "$selected_type" "$expected_service" "$configtest_command"
+    return 1
+  fi
+
+  if ! web_engine_local_connectivity_detected "$expected_ports"; then
+    set_failure_context \
+      "web-engine-runtime" \
+      "Selected web engine '${selected_type}' has expected listener(s), but local curl connectivity to 127.0.0.1 with the GLPI Host header failed." \
+      "Validate vhost binding and local firewall, then rerun ${context}."
+    echo "${EXECUTION_FAILURE_MESSAGE}" >&2
+    echo "Recommended action: ${EXECUTION_FAILURE_ACTION}" >&2
+    print_web_engine_failure_diagnostics "$selected_type" "$expected_service" "$configtest_command"
+    return 1
+  fi
 }
 
 enforce_local_target_consistency() {
@@ -2746,6 +2973,11 @@ run_deploy() {
         write_step "Stage 1/2 (managed): applying application deployment (hard gate)"
       fi
       invoke_ansible_or_fail "deploy ${mode} ${target}" "$ENVIRONMENT" "$tags" "${extra_var_files[@]}"
+      if [[ "$target" == "app" || "$target" == "all" ]]; then
+        if ! enforce_selected_web_engine_runtime_ready "deploy ${mode} ${target}"; then
+          exit 1
+        fi
+      fi
       if is_managed_database_mode && [[ "$target" == "app" || "$target" == "all" ]]; then
         write_step "Stage 2/2 (managed): validating managed DB connectivity (controlled gate)"
         if ! handle_managed_db_validation_after_app_apply; then
@@ -2784,7 +3016,9 @@ run_deploy() {
       esac
       invoke_ansible_or_fail "deploy ${mode} ${target}" "$ENVIRONMENT" "$post_check_tags" "$PUBLIC_RUNTIME_PATH" "$OVERRIDE_RUNTIME_PATH" "$SECRET_PATH"
       if [[ "$target" == "app" || "$target" == "all" ]]; then
-        print_web_engine_postcheck_summary
+        if ! enforce_selected_web_engine_runtime_ready "deploy ${mode} ${target}"; then
+          exit 1
+        fi
       fi
       mark_apply_sequence "$mode" "$target"
       ;;
