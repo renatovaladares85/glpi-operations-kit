@@ -1,0 +1,4 @@
+---
+base_chrony_service_by_family:
+  debian: chrony
+  rhel: chronyd

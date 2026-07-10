@@ -156,7 +156,7 @@
 ## Apache não escuta em HTTPS ou exibe o vhost padrão no Rocky
 
 - Sintoma: porta 443 ausente, certificado incorreto ou página padrão do Apache.
-- Validação: `sudo apachectl configtest; sudo apachectl -M | grep ssl; sudo ss -lntp | grep ':443'`.
+- Validação: `sudo apachectl configtest; sudo httpd -M | grep ssl; sudo httpd -S; sudo ss -lntp | grep ':443'`.
 - Causa provável: `WEB_SERVER_TYPE`/`TLS_MODE` incorretos, override `GLPI_APP_PACKAGES`
   sem `mod_ssl`, ou `/etc/httpd/conf.d/ssl.conf` recriado após atualização do pacote.
 - Correção: ajustar o `.env`, deixar `GLPI_APP_PACKAGES` vazio ou incluir todos os

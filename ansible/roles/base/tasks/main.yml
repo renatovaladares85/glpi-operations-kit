@@ -1,4 +1,13 @@
 ---
+- name: Validate base role platform family
+  ansible.builtin.assert:
+    that:
+      - platform_family is defined
+      - platform_family in base_chrony_service_by_family
+    fail_msg: >-
+      Unsupported platform_family '{{ platform_family | default('undefined') }}' for the base role.
+      Supported families: {{ base_chrony_service_by_family.keys() | list | sort | join(', ') }}.
+
 - name: Update apt cache on Debian-like hosts
   ansible.builtin.apt:
     update_cache: true
@@ -45,9 +54,9 @@
   ansible.builtin.command: "timedatectl set-timezone {{ timezone_name }}"
   when: current_timezone.stdout != timezone_name
 
-- name: Ensure chrony is enabled
+- name: Ensure chrony service is enabled
   ansible.builtin.service:
-    name: chrony
+    name: "{{ base_chrony_service_by_family[platform_family] }}"
     state: started
     enabled: true
 

@@ -6,9 +6,62 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+BASE_TASKS_PATH = REPO_ROOT / "ansible" / "roles" / "base" / "tasks" / "main.yml"
+BASE_DEFAULTS_PATH = REPO_ROOT / "ansible" / "roles" / "base" / "defaults" / "main.yml"
 
 
 class AnsibleRockySupportTest(unittest.TestCase):
+    def test_chrony_service_is_mapped_by_platform_family(self):
+        defaults = yaml.safe_load(BASE_DEFAULTS_PATH.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            defaults["base_chrony_service_by_family"],
+            {"debian": "chrony", "rhel": "chronyd"},
+        )
+
+    def test_rhel_keeps_chrony_package_and_uses_chronyd_service(self):
+        tasks = yaml.safe_load(BASE_TASKS_PATH.read_text(encoding="utf-8"))
+        package_task = next(
+            task for task in tasks if task["name"] == "Install base operating system packages"
+        )
+        service_task = next(
+            task for task in tasks if task["name"] == "Ensure chrony service is enabled"
+        )
+
+        self.assertIn("chrony", package_task["vars"]["base_os_packages_by_family"]["rhel"])
+        self.assertEqual(
+            service_task["ansible.builtin.service"]["name"],
+            "{{ base_chrony_service_by_family[platform_family] }}",
+        )
+        self.assertNotEqual(service_task["ansible.builtin.service"]["name"], "chrony")
+
+    def test_base_role_rejects_unknown_platform_family_clearly(self):
+        tasks = yaml.safe_load(BASE_TASKS_PATH.read_text(encoding="utf-8"))
+        validation = tasks[0]["ansible.builtin.assert"]
+
+        self.assertIn("platform_family is defined", validation["that"])
+        self.assertIn("platform_family in base_chrony_service_by_family", validation["that"])
+        self.assertIn("Unsupported platform_family", validation["fail_msg"])
+
+    def test_base_firewall_uses_configured_ports_and_platform_tools(self):
+        tasks = BASE_TASKS_PATH.read_text(encoding="utf-8")
+        rocky_8443 = tasks.replace("{{ web_https_port | default(443) }}", "8443")
+
+        self.assertIn("ufw allow {{ web_http_port | default(80) }}/tcp", tasks)
+        self.assertIn("ufw allow {{ web_https_port | default(443) }}/tcp", tasks)
+        self.assertIn("firewall-cmd --permanent --add-port={{ web_http_port | default(80) }}/tcp", tasks)
+        self.assertIn("firewall-cmd --permanent --add-port={{ web_https_port | default(443) }}/tcp", tasks)
+        self.assertIn("firewall-cmd --permanent --remove-port={{ web_https_port | default(443) }}/tcp", tasks)
+        self.assertIn("firewall-cmd --permanent --add-port=8443/tcp", rocky_8443)
+        self.assertIn("firewall-cmd --permanent --remove-port=8443/tcp", rocky_8443)
+        self.assertGreaterEqual(tasks.count("glpi_tls_mode | default('none') != 'none'"), 2)
+        self.assertGreaterEqual(tasks.count("glpi_tls_mode | default('none') == 'none'"), 2)
+        self.assertIn("name: firewalld", tasks)
+        self.assertIn("ufw --force enable", tasks)
+        self.assertIn("firewall-cmd --reload", tasks)
+        self.assertNotIn("--add-service=http\n", tasks)
+        self.assertNotIn("--add-service=https", tasks)
+
     def test_site_uses_dynamic_role_includes_for_tagged_runs(self):
         site = yaml.safe_load((REPO_ROOT / "ansible" / "site.yml").read_text(encoding="utf-8"))
 

@@ -153,11 +153,18 @@ Use os checks do kit primeiro:
 ./scripts/glpictl.sh production ops cert check
 ```
 
-Quando estiver no host APP, valide o engine selecionado. Exemplo Apache com valores fictícios:
+Quando estiver no host APP, valide o engine selecionado. Exemplos Apache com valores fictícios:
 
 ```bash
+# Debian/Ubuntu
 sudo apachectl configtest
 sudo apachectl -M | grep ssl
+
+# Rocky/RHEL-like
+sudo apachectl configtest
+sudo httpd -M | grep ssl
+sudo httpd -S
+
 sudo ss -lntp | grep ':443'
 curl -vk --resolve glpi.example.internal:443:127.0.0.1 https://glpi.example.internal/
 openssl s_client -connect 127.0.0.1:443 -servername glpi.example.internal </dev/null 2>/dev/null |
