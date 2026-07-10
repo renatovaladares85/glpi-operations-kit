@@ -34,6 +34,7 @@ Each item defines:
 | SSH key pair per environment | Security artifact | all | `EXECUTION_MODE=ssh` | conditional-mandatory | Supports safe environment isolation and host access | key existence + mode `0600` | Partial | Yes |
 | SSH connectivity to app/db | Network access | all | `EXECUTION_MODE=ssh` + `TOPOLOGY_MODE=dual-server` | conditional-mandatory | Confirms execution host can reach both targets | `ssh -i <key> <user>@<host> "echo ok"` | No | Yes |
 | TLS local files | Security artifact | all | `TLS_MODE=provided` | conditional-mandatory | Required to install valid cert/key in app host | local file existence check | No | Yes |
+| Apache TLS component | Web/TLS | app | `WEB_SERVER_TYPE=apache` + `TLS_MODE!=none` | conditional-mandatory | Apache must load SSL and own the configured HTTPS listener | Debian: `apachectl -M`; Rocky: `mod_ssl` + `apachectl -M` | Yes through automatic package/module resolution | Yes |
 | Promotion gate file | Promotion control | all | `SECURITY_REQUIRE_PROMOTION_GATE=true` | conditional-mandatory | Enforces certification before mutable rollout when policy is enabled | `.runtime/promotion/staging-certified.yml` exists | No | Yes in `secure`; No in `permissive` |
 | TLS mode policy | Security policy | all | `SECURITY_REQUIRE_TLS=true` | conditional-mandatory | Requires valid provided certificate mode when policy is enabled | `TLS_MODE=provided` | No | Yes in `secure`; No in `permissive` |
 | HTTPS policy | Security policy | all | `SECURITY_REQUIRE_HTTPS=true` | conditional-mandatory | Requires encrypted transport when policy is enabled | `TLS_MODE!=none` | No | Yes in `secure`; No in `permissive` |
@@ -55,6 +56,7 @@ Each item defines:
 | Ansible commands | `ansible` | `ansible-core` |
 | SSH client | `openssh-client` | `openssh-clients` |
 | Nginx | `nginx` | `nginx` |
+| Apache TLS | `apache2` module `ssl` | `mod_ssl` |
 | PHP-FPM | `php-fpm` / service `php8.3-fpm` | `php-fpm` / service `php-fpm` |
 | GLPI PHP extensions | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysql`, `php-xml`, `php-zip`, `php-bz2`, `php-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-redis` | `php-curl`, `php-gd`, `php-intl`, `php-mbstring`, `php-bcmath`, `php-mysqlnd`, `php-xml`, `php-zip`, `php-bz2`, `php-pecl-apcu`, `php-ldap`, `php-imap`, `php-opcache`, `php-pecl-redis` |
 | MySQL-compatible client | `mariadb-client` | `mysql` |

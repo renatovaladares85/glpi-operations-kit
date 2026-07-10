@@ -22,9 +22,14 @@ Comandos operacionais:
 Validação:
 
 ```bash
-nginx -t
+sudo apachectl configtest # quando WEB_SERVER_TYPE=apache
+sudo nginx -t             # quando WEB_SERVER_TYPE=nginx
 curl -I https://glpi.empresa.example
 ```
+
+O `.env` controla integralmente o protocolo e a engine: `WEB_SERVER_TYPE`, `TLS_MODE`,
+`WEB_HTTP_PORT` e `WEB_HTTPS_PORT`. Em Rocky/RHEL-like, `mod_ssl` é instalado apenas
+para Apache com TLS ativo; em Debian/Ubuntu, o módulo `ssl` segue a mesma condição.
 
 Escopo Let\'s Encrypt nesta fase:
 

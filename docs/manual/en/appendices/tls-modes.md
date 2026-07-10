@@ -105,7 +105,10 @@ Apply:
 
 Expected result:
 
-- certificate/key generated on APP host;
+- certificate/key generated on APP host with `serverAuth` and DNS SANs derived
+  from `TLS_COMMON_NAME` and `GLPI_DOMAIN`, without duplicates;
+- repeated runs preserve a valid certificate; identity changes, key mismatch, or
+  expiration create backups and renew it;
 - application reconfigured for HTTPS;
 - web server configuration validated before reload;
 - evidence under `.runtime/<environment>/evidence/tls/` when available.
@@ -150,14 +153,29 @@ Use kit checks first:
 ./scripts/glpictl.sh production ops cert check
 ```
 
-When on the APP host and the engine is Nginx, manual validation is also useful:
+On the APP host, validate the selected engine. Apache example with fictional values:
 
 ```bash
-sudo nginx -t
-curl -I https://glpi.company.com
+sudo apachectl configtest
+sudo apachectl -M | grep ssl
+sudo ss -lntp | grep ':443'
+curl -vk --resolve glpi.example.internal:443:127.0.0.1 https://glpi.example.internal/
+openssl s_client -connect 127.0.0.1:443 -servername glpi.example.internal </dev/null 2>/dev/null |
+  openssl x509 -noout -subject -issuer -dates -ext subjectAltName
 ```
 
-For Apache or lighttpd, use the equivalent test for the selected service.
+For Nginx or Lighttpd, use the equivalent configtest for the selected engine.
+
+## Reverse proxy with an HTTPS backend
+
+The kit does not configure the external proxy. It must preserve `Host`, use the
+same FQDN for SNI, forward `X-Forwarded-Proto`, `X-Forwarded-Host`,
+`X-Forwarded-Port`, and the `X-Forwarded-For` chain, and trust the backend
+certificate/CA specifically. Do not disable TLS validation globally.
+
+Because proxy-to-Apache traffic also uses HTTPS, GLPI receives a real TLS
+connection. No documented GLPI 11.0.8 setting was found that justifies automating
+a trusted-proxy list in this project.
 
 ## Renewal
 

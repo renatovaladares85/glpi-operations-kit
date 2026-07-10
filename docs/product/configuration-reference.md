@@ -96,6 +96,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - Redis is installed and configured on GLPI app hosts by default for GLPI cache (DB 0) and PHP-FPM sessions (DB 1).
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
+- `TLS_COMMON_NAME`: optional; falls back to `GLPI_DOMAIN`. For `self_signed`, both DNS names are deduplicated into SAN entries; IP SANs are never inferred.
+- `WEB_SERVER_TYPE=apache` with TLS: installs/enables the platform SSL component (`mod_ssl` on Rocky/RHEL-like, module `ssl` on Debian/Ubuntu). Apache HTTP redirects to the canonical HTTPS hostname.
 - `EMAIL_MAILPIT_ENABLED=true`: enables `glpictl email prepare/install mailpit`; Docker/Compose must already exist on the app host.
 
 ## Secret contract
@@ -123,6 +125,7 @@ Mailpit UI/SMTP auth is prompted by `glpictl email prepare mailpit` and stored a
 
 - Empty (`GLPI_APP_PACKAGES=`): automatic package mapping from renderer.
 - Filled: full manual override; operator owns coherence with selected engine.
+- Filled overrides fail validation when a mandatory selected-engine package is missing, including `mod_ssl` for Rocky/RHEL-like Apache with TLS.
 
 Automatic source of truth is `scripts/lib/render_product_config.py`, which detects the local platform family from `/etc/os-release` and maps:
 
@@ -137,6 +140,7 @@ Platform-sensitive defaults:
 | PHP-FPM service | `php8.3-fpm` | `php-fpm` |
 | PHP-FPM socket | `/run/php/php8.3-fpm.sock` | `/run/php-fpm/glpi.sock` |
 | MySQL-compatible client package | `mariadb-client` | `mysql` |
+| Apache TLS component | module `ssl` from `apache2` | package `mod_ssl` |
 | Python YAML package | `python3-yaml` | `python3-PyYAML` |
 
 Redis memory sizing is not forced by default. `GLPI_REDIS_MAXMEMORY` and `GLPI_REDIS_MAXMEMORY_POLICY` are optional overrides and should be set only after host capacity is known.

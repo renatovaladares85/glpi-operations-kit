@@ -153,6 +153,16 @@
 - Retomada segura: `./scripts/glpictl.sh <env> tls install-provided`.
   - Exemplo: `./scripts/glpictl.sh staging tls install-provided`
 
+## Apache não escuta em HTTPS ou exibe o vhost padrão no Rocky
+
+- Sintoma: porta 443 ausente, certificado incorreto ou página padrão do Apache.
+- Validação: `sudo apachectl configtest; sudo apachectl -M | grep ssl; sudo ss -lntp | grep ':443'`.
+- Causa provável: `WEB_SERVER_TYPE`/`TLS_MODE` incorretos, override `GLPI_APP_PACKAGES`
+  sem `mod_ssl`, ou `/etc/httpd/conf.d/ssl.conf` recriado após atualização do pacote.
+- Correção: ajustar o `.env`, deixar `GLPI_APP_PACKAGES` vazio ou incluir todos os
+  pacotes obrigatórios, e repetir `tls apply` ou `deploy apply app`.
+- Não remova `/etc/httpd/conf.modules.d/00-ssl.conf`; ele carrega o módulo SSL.
+
 ## Falta de `bcmath` durante a instalação do GLPI (requisito de QR Code)
 
 - Sintoma: instalador do GLPI informa falta de `bcmath` ou o `deploy apply app` falha na validação de extensão PHP.

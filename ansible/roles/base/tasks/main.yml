@@ -71,18 +71,35 @@
   when: platform_family | default('debian') == 'debian'
 
 - name: Allow HTTP access on Debian-like app hosts
-  ansible.builtin.command: ufw allow 80/tcp
+  ansible.builtin.command: "ufw allow {{ web_http_port | default(80) }}/tcp"
   changed_when: false
   when:
     - platform_family | default('debian') == 'debian'
     - "'glpi_app' in group_names"
 
 - name: Allow HTTPS access on Debian-like app hosts
-  ansible.builtin.command: ufw allow 443/tcp
+  ansible.builtin.command: "ufw allow {{ web_https_port | default(443) }}/tcp"
   changed_when: false
   when:
     - platform_family | default('debian') == 'debian'
     - "'glpi_app' in group_names"
+    - glpi_tls_mode | default('none') != 'none'
+
+- name: Close HTTPS access on Debian-like app hosts when TLS is disabled
+  ansible.builtin.shell: |
+    set -o pipefail
+    if ufw status | grep -Fq "{{ web_https_port | default(443) }}/tcp"; then
+      ufw --force delete allow {{ web_https_port | default(443) }}/tcp
+      echo FIREWALL_RULE_REMOVED
+    fi
+  args:
+    executable: /bin/bash
+  register: glpi_ufw_https_disabled
+  changed_when: "'FIREWALL_RULE_REMOVED' in (glpi_ufw_https_disabled.stdout | default(''))"
+  when:
+    - platform_family | default('debian') == 'debian'
+    - "'glpi_app' in group_names"
+    - glpi_tls_mode | default('none') == 'none'
 
 - name: Ensure ufw is enabled on Debian-like hosts
   ansible.builtin.command: ufw --force enable
@@ -101,19 +118,63 @@
   changed_when: false
   when: platform_family | default('debian') == 'rhel'
 
+- name: Remove legacy fixed HTTP service rule on RHEL-like app hosts
+  ansible.builtin.shell: |
+    if firewall-cmd --permanent --query-service=http >/dev/null 2>&1; then
+      firewall-cmd --permanent --remove-service=http
+      echo FIREWALL_RULE_REMOVED
+    fi
+  args:
+    executable: /bin/bash
+  register: glpi_firewalld_legacy_http_service
+  changed_when: "'FIREWALL_RULE_REMOVED' in (glpi_firewalld_legacy_http_service.stdout | default(''))"
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - "'glpi_app' in group_names"
+
 - name: Allow HTTP access on RHEL-like app hosts
-  ansible.builtin.command: firewall-cmd --permanent --add-service=http
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ web_http_port | default(80) }}/tcp"
   changed_when: false
   when:
     - platform_family | default('debian') == 'rhel'
     - "'glpi_app' in group_names"
 
+- name: Remove legacy fixed HTTPS service rule on RHEL-like app hosts
+  ansible.builtin.shell: |
+    if firewall-cmd --permanent --query-service=https >/dev/null 2>&1; then
+      firewall-cmd --permanent --remove-service=https
+      echo FIREWALL_RULE_REMOVED
+    fi
+  args:
+    executable: /bin/bash
+  register: glpi_firewalld_legacy_https_service
+  changed_when: "'FIREWALL_RULE_REMOVED' in (glpi_firewalld_legacy_https_service.stdout | default(''))"
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - "'glpi_app' in group_names"
+
 - name: Allow HTTPS access on RHEL-like app hosts
-  ansible.builtin.command: firewall-cmd --permanent --add-service=https
+  ansible.builtin.command: "firewall-cmd --permanent --add-port={{ web_https_port | default(443) }}/tcp"
   changed_when: false
   when:
     - platform_family | default('debian') == 'rhel'
     - "'glpi_app' in group_names"
+    - glpi_tls_mode | default('none') != 'none'
+
+- name: Close HTTPS access on RHEL-like app hosts when TLS is disabled
+  ansible.builtin.shell: |
+    if firewall-cmd --permanent --query-port={{ web_https_port | default(443) }}/tcp >/dev/null 2>&1; then
+      firewall-cmd --permanent --remove-port={{ web_https_port | default(443) }}/tcp
+      echo FIREWALL_RULE_REMOVED
+    fi
+  args:
+    executable: /bin/bash
+  register: glpi_firewalld_https_disabled
+  changed_when: "'FIREWALL_RULE_REMOVED' in (glpi_firewalld_https_disabled.stdout | default(''))"
+  when:
+    - platform_family | default('debian') == 'rhel'
+    - "'glpi_app' in group_names"
+    - glpi_tls_mode | default('none') == 'none'
 
 - name: Reload firewalld on RHEL-like hosts
   ansible.builtin.command: firewall-cmd --reload

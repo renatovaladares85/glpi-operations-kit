@@ -64,6 +64,18 @@
     fail_msg: "Provided TLS mode requires non-empty local certificate and key paths."
   when: glpi_tls_mode == 'provided'
 
+- name: Ensure TLS target directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ glpi_tls_certificate_path | dirname }}"
+    - "{{ glpi_tls_certificate_key_path | dirname }}"
+  when: glpi_tls_mode != 'none'
+
 - name: Copy provided TLS certificate
   ansible.builtin.copy:
     src: "{{ glpi_tls_provided_local_cert_path }}"
@@ -72,7 +84,7 @@
     group: root
     mode: "0644"
   when: glpi_tls_mode == 'provided'
-  notify: Reload nginx
+  notify: Reload selected web server
 
 - name: Copy provided TLS private key
   ansible.builtin.copy:
@@ -82,20 +94,86 @@
     group: root
     mode: "0600"
   when: glpi_tls_mode == 'provided'
-  notify: Reload nginx
+  notify: Reload selected web server
 
-- name: Generate self-signed TLS certificate
-  ansible.builtin.command:
-    cmd: >-
-      openssl req -x509 -nodes -newkey rsa:4096
-      -keyout {{ glpi_tls_certificate_key_path }}
-      -out {{ glpi_tls_certificate_path }}
-      -days 365
-      -subj /CN={{ glpi_tls_common_name }}
-  args:
-    creates: "{{ glpi_tls_certificate_path }}"
+- name: Assert self-signed TLS identity is a DNS name
+  ansible.builtin.assert:
+    that:
+      - glpi_tls_common_name | length > 0
+      - glpi_tls_san_dns | default([]) | length > 0
+      - glpi_tls_common_name is match('^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$')
+    fail_msg: "TLS_COMMON_NAME must be a valid DNS hostname when TLS_MODE=self_signed. IP addresses are not added to SAN automatically."
   when: glpi_tls_mode == 'self_signed'
-  notify: Reload nginx
+
+- name: Validate or generate self-signed TLS certificate
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cert={{ glpi_tls_certificate_path | quote }}
+    key={{ glpi_tls_certificate_key_path | quote }}
+    common_name={{ glpi_tls_common_name | quote }}
+    expected_csv={{ (glpi_tls_san_dns | default([glpi_tls_common_name]) | sort | join(',')) | quote }}
+    valid=true
+
+    if [[ ! -r "$cert" || ! -r "$key" ]]; then
+      valid=false
+    elif ! openssl x509 -in "$cert" -noout -checkend 0 >/dev/null 2>&1; then
+      valid=false
+    elif ! openssl x509 -in "$cert" -noout -subject -nameopt RFC2253 2>/dev/null | grep -Fq "CN=${common_name}"; then
+      valid=false
+    else
+      cert_pub="$(openssl x509 -in "$cert" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | openssl sha256)"
+      key_pub="$(openssl pkey -in "$key" -pubout -outform DER 2>/dev/null | openssl sha256)"
+      actual_csv="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null | grep -o 'DNS:[^, ]*' | cut -d: -f2- | tr '[:upper:]' '[:lower:]' | sort -u | paste -sd, -)"
+      if [[ -z "$cert_pub" || "$cert_pub" != "$key_pub" || "$actual_csv" != "$expected_csv" ]]; then
+        valid=false
+      elif ! openssl x509 -in "$cert" -noout -ext extendedKeyUsage 2>/dev/null | grep -Fq 'TLS Web Server Authentication'; then
+        valid=false
+      fi
+    fi
+
+    if [[ "$valid" == true ]]; then
+      echo CERTIFICATE_UNCHANGED
+      exit 0
+    fi
+
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' EXIT
+    san_ext="$(printf '%s' "$expected_csv" | awk -F, '{for (i=1; i<=NF; i++) printf "%sDNS:%s", (i > 1 ? "," : ""), $i}')"
+    openssl req -x509 -nodes -newkey rsa:4096 \
+      -keyout "$tmpdir/tls.key" \
+      -out "$tmpdir/tls.crt" \
+      -days 365 \
+      -subj "/CN=${common_name}" \
+      -addext "subjectAltName=${san_ext}" \
+      -addext "extendedKeyUsage=serverAuth"
+    openssl x509 -in "$tmpdir/tls.crt" -noout -checkend 0 >/dev/null
+    test "$(openssl x509 -in "$tmpdir/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256)" = \
+      "$(openssl pkey -in "$tmpdir/tls.key" -pubout -outform DER | openssl sha256)"
+
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    [[ ! -e "$cert" ]] || cp -a "$cert" "${cert}.bak.${timestamp}"
+    [[ ! -e "$key" ]] || cp -a "$key" "${key}.bak.${timestamp}"
+    install -o root -g root -m 0644 "$tmpdir/tls.crt" "$cert"
+    install -o root -g root -m 0600 "$tmpdir/tls.key" "$key"
+    echo CERTIFICATE_GENERATED
+  args:
+    executable: /bin/bash
+  register: glpi_self_signed_certificate
+  changed_when: "'CERTIFICATE_GENERATED' in (glpi_self_signed_certificate.stdout | default(''))"
+  when: glpi_tls_mode == 'self_signed'
+  notify: Reload selected web server
+
+- name: Validate provided TLS certificate and private key match
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cert_pub="$(openssl x509 -in {{ glpi_tls_certificate_path | quote }} -pubkey -noout | openssl pkey -pubin -outform DER | openssl sha256)"
+    key_pub="$(openssl pkey -in {{ glpi_tls_certificate_key_path | quote }} -pubout -outform DER | openssl sha256)"
+    test "$cert_pub" = "$key_pub"
+    openssl x509 -in {{ glpi_tls_certificate_path | quote }} -noout -checkend 0 >/dev/null
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: glpi_tls_mode == 'provided'
 
 - name: Ensure self-signed TLS private key permissions
   ansible.builtin.file:
@@ -104,6 +182,26 @@
     group: root
     mode: "0600"
   when: glpi_tls_mode == 'self_signed'
+
+- name: Ensure TLS certificate permissions
+  ansible.builtin.file:
+    path: "{{ glpi_tls_certificate_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: glpi_tls_mode != 'none'
+
+- name: Validate TLS certificate covers GLPI domain
+  ansible.builtin.shell: |
+    set -o pipefail
+    openssl x509 -in {{ glpi_tls_certificate_path | quote }} -noout -checkhost {{ glpi_domain | quote }} |
+      grep -Fq 'does match certificate'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - glpi_tls_mode != 'none'
+    - glpi_web_server_type in ['apache', 'nginx']
 
 - name: Download GLPI archive
   ansible.builtin.get_url:
@@ -191,12 +289,51 @@
   notify: Restart php-fpm
 
 - name: Enable Apache modules on Debian-like hosts
-  ansible.builtin.command: a2enmod rewrite proxy proxy_fcgi setenvif
+  ansible.builtin.command: >-
+    a2enmod rewrite proxy proxy_fcgi setenvif{% if glpi_tls_mode != 'none' %} ssl{% endif %}
   register: apache_rewrite_module
   changed_when: "'already enabled' not in (apache_rewrite_module.stdout | default(''))"
   when:
     - glpi_web_server_type == 'apache'
     - platform_family | default('debian') == 'debian'
+  notify: Reload apache2
+
+- name: Check Rocky default SSL virtual host
+  ansible.builtin.stat:
+    path: "{{ glpi_apache_ssl_default_conf_path }}"
+  register: glpi_apache_ssl_default_conf
+  changed_when: false
+  when:
+    - glpi_web_server_type == 'apache'
+    - glpi_tls_mode != 'none'
+    - platform_family | default('debian') == 'rhel'
+    - glpi_apache_ssl_default_conf_path | length > 0
+
+- name: Back up Rocky default SSL virtual host before disabling it
+  ansible.builtin.copy:
+    src: "{{ glpi_apache_ssl_default_conf_path }}"
+    dest: "{{ glpi_apache_ssl_default_conf_path }}.glpi-disabled"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  when:
+    - glpi_web_server_type == 'apache'
+    - glpi_tls_mode != 'none'
+    - platform_family | default('debian') == 'rhel'
+    - glpi_apache_ssl_default_conf_path | length > 0
+    - glpi_apache_ssl_default_conf.stat.exists | default(false)
+
+- name: Disable Rocky default SSL virtual host
+  ansible.builtin.file:
+    path: "{{ glpi_apache_ssl_default_conf_path }}"
+    state: absent
+  when:
+    - glpi_web_server_type == 'apache'
+    - glpi_tls_mode != 'none'
+    - platform_family | default('debian') == 'rhel'
+    - glpi_apache_ssl_default_conf_path | length > 0
   notify: Reload apache2
 
 - name: Deploy Nginx virtual host
@@ -246,6 +383,7 @@
     owner: root
     group: root
     mode: "0644"
+    backup: true
   when: glpi_web_server_type == 'apache'
   notify: Reload apache2
 
@@ -874,6 +1012,73 @@
     glpi_web_check_host_header: "{{ glpi_domain }}"
     glpi_web_check_base_url: "{{ ('https' if glpi_tls_mode != 'none' else 'http') ~ '://127.0.0.1:' ~ ((web_https_port if glpi_tls_mode != 'none' else web_http_port) | string) }}"
   changed_when: false
+
+- name: Validate HTTP redirects to canonical HTTPS endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ web_http_port }}/glpi-tls-redirect-check?source=local"
+    headers:
+      Host: "{{ glpi_domain }}"
+    follow_redirects: none
+    status_code: 301
+    validate_certs: false
+  register: glpi_http_tls_redirect_check
+  changed_when: false
+  when:
+    - glpi_tls_mode != 'none'
+    - glpi_web_server_type in ['apache', 'nginx']
+
+- name: Assert HTTP redirect preserves path and query string
+  ansible.builtin.assert:
+    that:
+      - >-
+        glpi_http_tls_redirect_check.location
+        == 'https://' ~ glpi_domain ~ ((':' ~ (web_https_port | string)) if (web_https_port | int != 443) else '') ~ '/glpi-tls-redirect-check?source=local'
+    fail_msg: "Apache/web HTTP redirect must target the canonical HTTPS hostname while preserving path and query string."
+  changed_when: false
+  when:
+    - glpi_tls_mode != 'none'
+    - glpi_web_server_type in ['apache', 'nginx']
+
+- name: Validate local HTTPS virtual host response
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ web_https_port }}/"
+    headers:
+      Host: "{{ glpi_domain }}"
+    return_content: true
+    follow_redirects: safe
+    status_code: [200, 301, 302, 303]
+    validate_certs: false
+  register: glpi_https_vhost_check
+  changed_when: false
+  when:
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
+    - glpi_tls_mode != 'none'
+    - glpi_web_server_type in ['apache', 'nginx']
+
+- name: Assert HTTPS does not serve a default web server page
+  ansible.builtin.assert:
+    that:
+      - "'Apache HTTP Server Test Page' not in (glpi_https_vhost_check.content | default(''))"
+      - "'Welcome to nginx!' not in (glpi_https_vhost_check.content | default(''))"
+      - "'Placeholder page' not in (glpi_https_vhost_check.content | default(''))"
+    fail_msg: "Default web server page detected on the canonical HTTPS virtual host."
+  changed_when: false
+  when:
+    - not (glpi_schema_bootstrap_deferred_effective | bool)
+    - glpi_tls_mode != 'none'
+    - glpi_web_server_type in ['apache', 'nginx']
+
+- name: Validate Apache SSL module and HTTPS listener
+  ansible.builtin.shell: |
+    set -o pipefail
+    apachectl -M 2>/dev/null | grep -Fq ssl_module
+    ss -lnt | awk '{print $4}' | grep -Eq '(^|:){{ web_https_port }}$'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when:
+    - glpi_web_server_type == 'apache'
+    - glpi_tls_mode != 'none'
 
 - name: Check GLPI wizard root endpoint
   ansible.builtin.uri:

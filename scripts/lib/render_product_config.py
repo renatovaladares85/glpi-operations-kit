@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import ipaddress
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -18,6 +20,22 @@ GLPI_TIMEZONE_DB_MODES = {"disabled", "validate", "apply"}
 MONITORING_PROFILES = {"minimal", "standard", "full", "external_prometheus", "external_grafana"}
 MONITORING_GRAFANA_PUBLIC_MODES = {"disabled", "path", "subdomain"}
 DEFAULT_MAILPIT_IMAGE = "axllent/mailpit:v1.30.1"
+
+DNS_NAME_PATTERN = re.compile(
+    r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
+)
+
+
+def is_dns_name(value: str) -> bool:
+    candidate = value.strip().rstrip(".")
+    if not DNS_NAME_PATTERN.fullmatch(candidate):
+        return False
+    try:
+        ipaddress.ip_address(candidate)
+    except ValueError:
+        return True
+    return False
 
 DEFAULT_GLPI_APP_PACKAGES_DEBIAN = [
     "php-fpm",
@@ -108,6 +126,7 @@ PLATFORM_DEFAULTS = {
         "apache_service": "apache2",
         "apache_conf_path": "/etc/apache2/sites-available/glpi.conf",
         "apache_default_conf_path": "/etc/apache2/sites-enabled/000-default.conf",
+        "apache_ssl_default_conf_path": "",
     },
     "rhel": {
         "glpi_data_owner": "apache",
@@ -127,6 +146,7 @@ PLATFORM_DEFAULTS = {
         "apache_service": "httpd",
         "apache_conf_path": "/etc/httpd/conf.d/glpi.conf",
         "apache_default_conf_path": "/etc/httpd/conf.d/welcome.conf",
+        "apache_ssl_default_conf_path": "/etc/httpd/conf.d/ssl.conf",
     },
 }
 
@@ -667,6 +687,13 @@ def validate_feature_contract(values: dict, execution_mode: str, db_deployment_m
     if tls_mode not in TLS_MODES:
         fail("TLS_MODE must be one of: none, self_signed, provided.")
 
+    tls_common_name = read_value(values, "TLS_COMMON_NAME", require_value(values, "GLPI_DOMAIN")).strip()
+    if tls_mode == "self_signed" and not is_dns_name(tls_common_name):
+        fail_config_check(
+            "TLS_COMMON_NAME must be a valid DNS hostname when TLS_MODE=self_signed.",
+            "Set TLS_COMMON_NAME to the DNS name used by clients/proxy SNI. IP SANs are not derived automatically.",
+        )
+
     web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
     if web_server_type not in WEB_SERVER_TYPES:
         fail_config_check("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.", "Set WEB_SERVER_TYPE to nginx, apache, or lighttpd.")
@@ -1010,8 +1037,27 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     app_packages_value = read_value(values, "GLPI_APP_PACKAGES", "").strip()
     if app_packages_value:
         app_packages = as_list(app_packages_value, default_app_packages)
+        required_web_packages = list(web_server_packages[web_server_type])
+        if platform_family == "rhel" and web_server_type == "apache" and tls_mode != "none":
+            required_web_packages.append("mod_ssl")
+        missing_web_packages = sorted(set(required_web_packages) - set(app_packages))
+        if missing_web_packages:
+            fail_config_check(
+                "GLPI_APP_PACKAGES is missing mandatory packages for "
+                f"WEB_SERVER_TYPE={web_server_type}, TLS_MODE={tls_mode}: {', '.join(missing_web_packages)}.",
+                "Add the listed packages to GLPI_APP_PACKAGES or leave GLPI_APP_PACKAGES empty for automatic resolution.",
+            )
     else:
         app_packages = web_server_packages[web_server_type] + default_app_packages
+        if platform_family == "rhel" and web_server_type == "apache" and tls_mode != "none":
+            app_packages.append("mod_ssl")
+
+    tls_common_name = read_value(values, "TLS_COMMON_NAME", glpi_domain).strip() or glpi_domain
+    tls_san_dns = []
+    for candidate in (tls_common_name, glpi_domain):
+        normalized = candidate.strip().lower().rstrip(".")
+        if is_dns_name(normalized) and normalized not in tls_san_dns:
+            tls_san_dns.append(normalized)
 
     default_blackbox_target = f"{'https' if tls_mode != 'none' else 'http'}://{glpi_domain}/"
     blackbox_exporter_enabled = as_bool(read_value(values, "MONITORING_BLACKBOX_EXPORTER_ENABLED", "true"), True)
@@ -1060,7 +1106,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_web_server_type": web_server_type,
         "glpi_use_tls": tls_mode != "none",
         "glpi_tls_mode": tls_mode,
-        "glpi_tls_common_name": read_value(values, "TLS_COMMON_NAME", glpi_domain),
+        "glpi_tls_common_name": tls_common_name,
+        "glpi_tls_san_dns": tls_san_dns,
         "glpi_tls_certificate_path": read_value(values, "TLS_CERTIFICATE_PATH", f"/etc/ssl/certs/{environment_name}.crt"),
         "glpi_tls_certificate_key_path": read_value(values, "TLS_PRIVATE_KEY_PATH", f"/etc/ssl/private/{environment_name}.key"),
         "glpi_tls_provided_local_cert_path": os.path.expanduser(read_value(values, "TLS_PROVIDED_LOCAL_CERT_PATH", "").strip())
@@ -1087,6 +1134,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_apache_service": platform_defaults["apache_service"],
         "glpi_apache_conf_path": platform_defaults["apache_conf_path"],
         "glpi_apache_default_conf_path": platform_defaults["apache_default_conf_path"],
+        "glpi_apache_ssl_default_conf_path": platform_defaults["apache_ssl_default_conf_path"],
         "web_http_port": as_int(require_value(values, "WEB_HTTP_PORT"), 80),
         "web_https_port": as_int(require_value(values, "WEB_HTTPS_PORT"), 443),
         "glpi_app_packages": app_packages,

@@ -105,7 +105,10 @@ Aplicação:
 
 Resultado esperado:
 
-- certificado/chave gerados no host APP;
+- certificado/chave gerados no host APP com `serverAuth` e SAN DNS derivado de
+  `TLS_COMMON_NAME` e `GLPI_DOMAIN`, sem duplicidades;
+- execução repetida preserva certificado válido; mudança de identidade, chave
+  incompatível ou expiração gera backup e renovação;
 - aplicação reconfigurada para HTTPS;
 - validação do web server antes de reload;
 - evidência em `.runtime/<environment>/evidence/tls/` quando disponível.
@@ -150,14 +153,29 @@ Use os checks do kit primeiro:
 ./scripts/glpictl.sh production ops cert check
 ```
 
-Quando estiver no host APP e o engine for Nginx, também é útil validar manualmente:
+Quando estiver no host APP, valide o engine selecionado. Exemplo Apache com valores fictícios:
 
 ```bash
-sudo nginx -t
-curl -I https://glpi.company.com
+sudo apachectl configtest
+sudo apachectl -M | grep ssl
+sudo ss -lntp | grep ':443'
+curl -vk --resolve glpi.example.internal:443:127.0.0.1 https://glpi.example.internal/
+openssl s_client -connect 127.0.0.1:443 -servername glpi.example.internal </dev/null 2>/dev/null |
+  openssl x509 -noout -subject -issuer -dates -ext subjectAltName
 ```
 
-Para Apache ou lighttpd, use o teste equivalente do serviço selecionado pela empresa.
+Para Nginx ou Lighttpd, use o configtest equivalente do engine selecionado.
+
+## Proxy reverso com backend HTTPS
+
+O proxy externo não é configurado pelo kit. Ele deve preservar o `Host`, usar o
+mesmo FQDN como SNI, encaminhar `X-Forwarded-Proto`, `X-Forwarded-Host`,
+`X-Forwarded-Port` e a cadeia `X-Forwarded-For`, além de confiar especificamente
+no certificado/CA do backend. Não desabilite globalmente a validação TLS.
+
+Como o trecho proxy→Apache também usa HTTPS, o GLPI recebe uma conexão TLS real.
+Não foi identificada no GLPI 11.0.8 uma configuração adicional documentada que
+justifique automatizar uma lista de proxies confiáveis neste projeto.
 
 ## Renovação
 

@@ -1,7 +1,4 @@
-<VirtualHost *:{{ web_http_port }}>
-    ServerName {{ glpi_domain }}
-    ServerAlias {{ glpi_app_host }}
-
+{% macro glpi_application_vhost() %}
     DocumentRoot {{ glpi_install_dir }}/public
 
     <Directory {{ glpi_install_dir }}/public>
@@ -19,4 +16,34 @@
 
     ErrorLog {{ glpi_log_dir }}/apache-error.log
     CustomLog {{ glpi_log_dir }}/apache-access.log combined
+{% endmacro %}
+{% if platform_family | default('debian') == 'rhel' %}
+{% if web_http_port | int != 80 %}
+Listen {{ web_http_port }}
+{% endif %}
+{% if glpi_tls_mode != 'none' %}
+Listen {{ web_https_port }} https
+{% endif %}
+{% endif %}
+<VirtualHost *:{{ web_http_port }}>
+    ServerName {{ glpi_domain }}
+    ServerAlias {{ glpi_app_host }}
+{% if glpi_tls_mode == 'none' %}
+{{ glpi_application_vhost() }}
+{% else %}
+    Redirect permanent / https://{{ glpi_domain }}{% if web_https_port | int != 443 %}:{{ web_https_port }}{% endif %}/
+{% endif %}
 </VirtualHost>
+{% if glpi_tls_mode != 'none' %}
+
+<VirtualHost *:{{ web_https_port }}>
+    ServerName {{ glpi_domain }}
+    ServerAlias {{ glpi_app_host }}
+
+    SSLEngine on
+    SSLCertificateFile {{ glpi_tls_certificate_path }}
+    SSLCertificateKeyFile {{ glpi_tls_certificate_key_path }}
+
+{{ glpi_application_vhost() }}
+</VirtualHost>
+{% endif %}

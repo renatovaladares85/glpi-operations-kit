@@ -721,6 +721,7 @@ create_remote_domain_backup_snapshot() {
   local backup_dir remote_root remote_backup_file manifest_path
   local app_required db_required app_has_hosts db_has_hosts
   local glpi_install_dir glpi_config_dir glpi_var_dir glpi_plugin_dir glpi_log_dir glpi_db_name
+  local glpi_tls_certificate_path glpi_tls_certificate_key_path
   local db_root_password db_root_password_escaped remote_root_escaped
   local app_cmd db_cmd
 
@@ -755,8 +756,10 @@ create_remote_domain_backup_snapshot() {
     glpi_var_dir="$(read_effective_runtime_value "glpi_var_dir" "/var/lib/glpi/files")"
     glpi_plugin_dir="$(read_effective_runtime_value "glpi_plugin_dir" "/var/lib/glpi/plugins")"
     glpi_log_dir="$(read_effective_runtime_value "glpi_log_dir" "/var/log/glpi")"
+    glpi_tls_certificate_path="$(read_effective_runtime_value "glpi_tls_certificate_path" "/etc/ssl/certs/${ENVIRONMENT}.crt")"
+    glpi_tls_certificate_key_path="$(read_effective_runtime_value "glpi_tls_certificate_key_path" "/etc/ssl/private/${ENVIRONMENT}.key")"
 
-    app_cmd="set -eu; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php' '/etc/passwd' '/etc/group' '/etc/shadow'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
+    app_cmd="set -eu; ROOT='${remote_root_escaped}/{{ inventory_hostname }}/app'; mkdir -p \"\$ROOT\"; chmod 700 \"\$ROOT\"; MANIFEST=\"\$ROOT/MANIFEST.paths\"; : > \"\$MANIFEST\"; for p in '$(shell_escape_single_quotes "$glpi_install_dir")' '$(shell_escape_single_quotes "$glpi_config_dir")' '$(shell_escape_single_quotes "$glpi_var_dir")' '$(shell_escape_single_quotes "$glpi_plugin_dir")' '$(shell_escape_single_quotes "$glpi_log_dir")' '$(shell_escape_single_quotes "$glpi_tls_certificate_path")' '$(shell_escape_single_quotes "$glpi_tls_certificate_key_path")' '/etc/nginx' '/etc/apache2' '/etc/httpd' '/etc/lighttpd' '/etc/php' '/etc/passwd' '/etc/group' '/etc/shadow'; do if [ -e \"\$p\" ]; then printf '%s\n' \"\$p\" >> \"\$MANIFEST\"; fi; done; if [ -s \"\$MANIFEST\" ]; then tar --absolute-names -czf \"\$ROOT/files.tar.gz\" --files-from \"\$MANIFEST\"; else touch \"\$ROOT/EMPTY\"; tar -czf \"\$ROOT/files.tar.gz\" -C \"\$ROOT\" EMPTY; fi; while IFS= read -r path; do [ -e \"\$path\" ] && stat -c '%a %n' \"\$path\" || true; done < \"\$MANIFEST\" > \"\$ROOT/PERMISSIONS.txt\""
     if ! ansible glpi_app -i "$INVENTORY_RUNTIME_PATH" -b -m shell -a "$app_cmd" -o; then
       echo "Remote snapshot failed on APP hosts before '${domain_name}/${action_name}/${target_name}'." >&2
       echo "Cannot continue safely without a valid APP pre-change snapshot." >&2
@@ -3307,7 +3310,7 @@ resolve_tls_payload_for_legacy_action() {
 
 execute_tls_legacy_apply() {
   local tls_action="$1"
-  local domain local_cert_path local_key_path tls_mode use_tls
+  local domain tls_common_name local_cert_path local_key_path tls_mode use_tls
   local -a payload
   mapfile -t payload < <(resolve_tls_payload_for_legacy_action "$tls_action")
   tls_mode="${payload[0]:-none}"
@@ -3315,12 +3318,15 @@ execute_tls_legacy_apply() {
   local_key_path="${payload[2]:-}"
   domain="$(read_effective_runtime_value "glpi_domain" "")"
   [[ -z "${domain// }" ]] && domain="$(read_product_config_value "$ENVIRONMENT" "glpi.domain" || true)"
+  tls_common_name="$(read_effective_runtime_value "glpi_tls_common_name" "")"
+  [[ -z "${tls_common_name// }" ]] && tls_common_name="$(read_product_config_value "$ENVIRONMENT" "tls.common_name" || true)"
+  [[ -z "${tls_common_name// }" ]] && tls_common_name="$domain"
   use_tls="false"
   [[ "$tls_mode" != "none" ]] && use_tls="true"
   enforce_security_policy_contract "$tls_mode" "$use_tls"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_mode" "$tls_mode"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_use_tls" "$use_tls"
-  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_common_name" "$domain"
+  update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_common_name" "$tls_common_name"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_cert_path" "$local_cert_path"
   update_yaml_top_level_value "$OVERRIDE_RUNTIME_PATH" "glpi_tls_provided_local_key_path" "$local_key_path"
   export ANSIBLE_RUNTIME_INVENTORY="$INVENTORY_RUNTIME_PATH"

@@ -4,6 +4,11 @@
     name: nginx
     state: reloaded
 
+- name: Reload selected web server
+  ansible.builtin.service:
+    name: "{{ glpi_web_service }}"
+    state: reloaded
+
 - name: Restart php-fpm
   ansible.builtin.service:
     name: "{{ glpi_php_fpm_service }}"

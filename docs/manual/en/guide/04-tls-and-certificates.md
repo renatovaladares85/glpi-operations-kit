@@ -22,9 +22,15 @@ Operational commands:
 Validate result:
 
 ```bash
-nginx -t
+sudo apachectl configtest # when WEB_SERVER_TYPE=apache
+sudo nginx -t             # when WEB_SERVER_TYPE=nginx
 curl -I https://glpi.empresa.example
 ```
+
+The `.env` fully controls protocol and engine selection through `WEB_SERVER_TYPE`,
+`TLS_MODE`, `WEB_HTTP_PORT`, and `WEB_HTTPS_PORT`. On Rocky/RHEL-like systems,
+`mod_ssl` is installed only for Apache with TLS enabled; Debian/Ubuntu enables the
+`ssl` module under the same condition.
 
 Let\'s Encrypt scope in this phase:
 
