@@ -1,11 +1,40 @@
 import unittest
+import importlib.util
+import subprocess
+import tempfile
 from pathlib import Path
+
+from jinja2 import Environment, StrictUndefined
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_DB_TEMPLATE = REPO_ROOT / "ansible" / "roles" / "app" / "templates" / "config_db.php.j2"
+PHP_FILTER = REPO_ROOT / "ansible" / "filter_plugins" / "php_string.py"
 
 
 class GlpiDatabaseBootstrapTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("php_string", PHP_FILTER)
+        cls.php_filter = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.php_filter)
+
+    def render_config_db(self, password):
+        environment = Environment(undefined=StrictUndefined, autoescape=False)
+        environment.filters["php_single_quoted_string"] = (
+            self.php_filter.php_single_quoted_string
+        )
+        environment.filters["bool"] = bool
+        template = environment.from_string(CONFIG_DB_TEMPLATE.read_text(encoding="utf-8"))
+        return template.render(
+            glpi_db_host="192.0.2.20",
+            mariadb_port=3306,
+            glpi_db_user="example_user",
+            glpi_db_password=password,
+            glpi_db_name="example_database",
+            glpi_timezone_support_enabled=True,
+        )
+
     def test_app_role_deploys_database_config_without_logging_secret(self):
         app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
@@ -20,8 +49,78 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
         self.assertIn("when: glpi_installation_mode_effective != 'wizard'", app_tasks)
         self.assertIn("class DB extends DBmysql", template)
         self.assertIn("public $dbhost", template)
-        self.assertIn("public $dbpassword = '{{ glpi_db_password | urlencode }}';", template)
+        self.assertIn(
+            "public $dbpassword = {{ glpi_db_password | php_single_quoted_string }};",
+            template,
+        )
+        self.assertNotIn("glpi_db_password | urlencode", template)
         self.assertNotIn("?>", template)
+
+    def test_php_single_quoted_filter_preserves_supported_characters(self):
+        values = [
+            "ExamplePassword123",
+            "Abc@123#Test%+/: value;=!?$&*()[]{}-_.,",
+            "A'b\\c@123",
+            'Dollar$ double" backtick` braces{}',
+        ]
+
+        for original in values:
+            with self.subTest(original=original):
+                literal = self.php_filter.php_single_quoted_string(original)
+                self.assertTrue(literal.startswith("'") and literal.endswith("'"))
+                self.assertNotIn("%40", literal)
+                self.assertNotIn("%23", literal)
+
+    def test_rendered_config_db_is_valid_php_and_round_trips_password(self):
+        passwords = [
+            "ExamplePassword123",
+            "Abc@123#Test%+/: value",
+            "A'b\\c@123",
+            'Dollar$ double" backtick` braces{}',
+        ]
+
+        for original in passwords:
+            with self.subTest(case=passwords.index(original)):
+                rendered = self.render_config_db(original)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    config_path = Path(tmpdir) / "config_db.php"
+                    config_path.write_text(rendered, encoding="utf-8")
+
+                    lint = subprocess.run(
+                        ["php", "-l", str(config_path)],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(lint.returncode, 0, lint.stderr)
+
+                    php_code = """
+class DBmysql {}
+require $argv[1];
+$config = new DB();
+exit(hash_equals($argv[2], $config->dbpassword) ? 0 : 1);
+"""
+                    round_trip = subprocess.run(
+                        ["php", "-r", php_code, str(config_path), original],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(round_trip.returncode, 0, round_trip.stderr)
+                    self.assertEqual(round_trip.stdout, "")
+
+    def test_database_secret_is_not_added_to_public_runtime_or_logs(self):
+        renderer = (REPO_ROOT / "scripts" / "lib" / "render_product_config.py").read_text(
+            encoding="utf-8"
+        )
+        public_runtime = renderer[
+            renderer.index("def build_public_runtime") : renderer.index("def build_inventory")
+        ]
+        glpictl = (REPO_ROOT / "scripts" / "glpictl.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn('"glpi_db_password"', public_runtime)
+        self.assertIn("mask_sensitive_stream", glpictl)
+        self.assertIn("DATABASE_PASSWORD=", glpictl)
 
     def test_app_role_checks_db_compatibility_and_schema_before_redis_and_http(self):
         app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
