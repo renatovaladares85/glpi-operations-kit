@@ -1771,7 +1771,7 @@ normalize_database_compatibility_policy() {
   policy="${policy,,}"
   [[ -z "${policy// }" ]] && policy="block"
   case "$policy" in
-    block|warn|defer) echo "$policy" ;;
+    block|warn|defer) echo "block" ;;
     *) echo "invalid" ;;
   esac
 }
@@ -1819,6 +1819,20 @@ probe_managed_db_version_local() {
 
   printf '%s\n' "$output"
   return 1
+}
+
+probe_managed_db_schema_local() {
+  local db_host="$1" db_port="$2" db_name="$3" db_user="$4" db_password="$5"
+  MYSQL_PWD="$db_password" mysql \
+    --protocol=TCP \
+    --host="$db_host" \
+    --port="$db_port" \
+    --user="$db_user" \
+    --database="$db_name" \
+    --batch \
+    --skip-column-names \
+    --connect-timeout=7 \
+    --execute="SHOW TABLES LIKE 'glpi_configs';" 2>/dev/null
 }
 
 resolve_execution_mode_for_environment() {
@@ -2203,6 +2217,15 @@ run_preflight_checks() {
           if [[ "$managed_db_compat_status" == "pass" ]]; then
             append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
               "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "pass" "$managed_db_compat_message"
+            local managed_db_schema_marker
+            managed_db_schema_marker="$(probe_managed_db_schema_local "$db_host" "$db_port" "$db_name" "$db_user" "$db_password" || true)"
+            if [[ "$managed_db_schema_marker" == "glpi_configs" ]]; then
+              append_precheck_item "$environment" "managed-db-schema" "database" "GLPI_INSTALLATION_MODE=cli" "mandatory" \
+                "Read-only schema readiness check." "SHOW TABLES LIKE glpi_configs" "n/a" "false" "pass" "schema_present=true; next_action=none"
+            else
+              append_precheck_item "$environment" "managed-db-schema" "database" "GLPI_INSTALLATION_MODE=cli" "action-required" \
+                "Read-only schema readiness check; deploy check never installs tables." "SHOW TABLES LIKE glpi_configs" "deploy apply app" "false" "warn" "schema_present=false; schema_bootstrap_deferred=false; next_action=deploy apply app will install GLPI schema"
+            fi
           elif [[ "$database_compatibility_policy" == "block" ]]; then
             append_precheck_item "$environment" "managed-db-version-compatible" "database" "DATABASE_DEPLOYMENT_MODE=managed" "mandatory" \
               "Managed DB version must be compatible with configured GLPI version before app mutation." "SELECT VERSION(), @@version_comment" "n/a" "true" "fail" "$managed_db_compat_message"

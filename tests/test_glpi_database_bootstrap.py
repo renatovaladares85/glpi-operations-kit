@@ -24,6 +24,9 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
         environment.filters["php_single_quoted_string"] = (
             self.php_filter.php_single_quoted_string
         )
+        environment.filters["php_rawurlencoded_single_quoted_string"] = (
+            self.php_filter.php_rawurlencoded_single_quoted_string
+        )
         environment.filters["bool"] = bool
         template = environment.from_string(CONFIG_DB_TEMPLATE.read_text(encoding="utf-8"))
         return template.render(
@@ -50,7 +53,7 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
         self.assertIn("class DB extends DBmysql", template)
         self.assertIn("public $dbhost", template)
         self.assertIn(
-            "public $dbpassword = {{ glpi_db_password | php_single_quoted_string }};",
+            "public $dbpassword = {{ glpi_db_password | php_rawurlencoded_single_quoted_string }};",
             template,
         )
         self.assertNotIn("glpi_db_password | urlencode", template)
@@ -66,10 +69,12 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
 
         for original in values:
             with self.subTest(original=original):
-                literal = self.php_filter.php_single_quoted_string(original)
+                literal = self.php_filter.php_rawurlencoded_single_quoted_string(original)
                 self.assertTrue(literal.startswith("'") and literal.endswith("'"))
-                self.assertNotIn("%40", literal)
-                self.assertNotIn("%23", literal)
+                if "@" in original:
+                    self.assertIn("%40", literal)
+                if "#" in original:
+                    self.assertIn("%23", literal)
 
     def test_rendered_config_db_is_valid_php_and_round_trips_password(self):
         passwords = [
@@ -98,7 +103,7 @@ class GlpiDatabaseBootstrapTest(unittest.TestCase):
 class DBmysql {}
 require $argv[1];
 $config = new DB();
-exit(hash_equals($argv[2], $config->dbpassword) ? 0 : 1);
+exit(hash_equals($argv[2], rawurldecode($config->dbpassword)) ? 0 : 1);
 """
                     round_trip = subprocess.run(
                         ["php", "-r", php_code, str(config_path), original],
@@ -145,31 +150,24 @@ exit(hash_equals($argv[2], $config->dbpassword) ? 0 : 1);
         self.assertIn("--no-telemetry", app_tasks)
         self.assertNotIn("--force", app_tasks)
 
-    def test_defer_policy_skips_schema_bootstrap_and_web_smoke_checks(self):
+    def test_incompatible_database_cannot_defer_schema_bootstrap(self):
         app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
         )
-        redis_script = (
-            REPO_ROOT / "ansible" / "roles" / "app" / "files" / "glpi-redis-integration.sh"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("database_compatibility_policy_effective", app_tasks)
         self.assertIn("database_compatibility_operator_confirmed_effective", app_tasks)
         self.assertIn("database_compatibility_schema_bootstrap_deferred_effective", app_tasks)
         self.assertIn("glpi_schema_bootstrap_deferred_effective", app_tasks)
-        self.assertIn("Use DATABASE_COMPATIBILITY_POLICY=warn|defer only through glpictl confirmation", app_tasks)
-        self.assertIn("not (glpi_schema_bootstrap_deferred_effective | bool)", app_tasks)
-        self.assertIn("GLPI_DEFER_SCHEMA_BOOTSTRAP", app_tasks)
-        self.assertIn("GLPI cache console configuration deferred because DB schema bootstrap is deferred.", redis_script)
+        self.assertIn("database_compatibility_schema_bootstrap_deferred_effective: false", app_tasks)
+        self.assertIn("glpi_db_server_version_supported | bool", app_tasks)
+        self.assertNotIn("accepted under DATABASE_COMPATIBILITY_POLICY", app_tasks)
 
     def test_wizard_mode_skips_config_db_and_schema_bootstrap(self):
         app_tasks = (REPO_ROOT / "ansible" / "roles" / "app" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("glpi_installation_mode_effective in ['cli', 'wizard', 'defer']", app_tasks)
+        self.assertIn("glpi_installation_mode_effective in ['cli', 'wizard']", app_tasks)
         self.assertIn("when: glpi_installation_mode_effective != 'wizard'", app_tasks)
-        self.assertIn("glpi_installation_mode_effective in ['wizard', 'defer']", app_tasks)
         self.assertIn("not (glpi_schema_bootstrap_deferred_effective | bool)", app_tasks)
         self.assertIn('GLPI_DEFER_SCHEMA_BOOTSTRAP: "{{ glpi_schema_bootstrap_deferred_effective | string | lower }}"', app_tasks)
         self.assertIn("SHOW TABLES LIKE 'glpi_configs';", app_tasks)

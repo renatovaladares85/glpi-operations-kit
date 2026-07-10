@@ -52,8 +52,8 @@
 - name: Assert valid GLPI installation mode
   ansible.builtin.assert:
     that:
-      - glpi_installation_mode_effective in ['cli', 'wizard', 'defer']
-    fail_msg: "Invalid GLPI installation mode. Supported values: cli, wizard, defer."
+      - glpi_installation_mode_effective in ['cli', 'wizard']
+    fail_msg: "Invalid GLPI installation mode. Supported effective values: cli, wizard."
   changed_when: false
 
 - name: Assert provided TLS inputs exist
@@ -635,13 +635,8 @@
   ansible.builtin.set_fact:
     database_compatibility_policy_effective: "{{ database_compatibility_policy | default('block') | string | lower }}"
     database_compatibility_operator_confirmed_effective: "{{ database_compatibility_operator_confirmed | default(false) | bool }}"
-    database_compatibility_schema_bootstrap_deferred_effective: "{{ database_compatibility_schema_bootstrap_deferred | default(false) | bool }}"
-    glpi_schema_bootstrap_deferred_effective: >-
-      {{
-        (database_compatibility_schema_bootstrap_deferred | default(false) | bool)
-        or
-        glpi_installation_mode_effective in ['wizard', 'defer']
-      }}
+    database_compatibility_schema_bootstrap_deferred_effective: false
+    glpi_schema_bootstrap_deferred_effective: "{{ glpi_installation_mode_effective == 'wizard' }}"
   changed_when: false
 
 - name: Check existing GLPI database configuration for wizard mode
@@ -831,26 +826,10 @@
 - name: Assert GLPI database server version is supported
   ansible.builtin.assert:
     that:
-      - >-
-        (glpi_db_server_version_supported | bool)
-        or
-        (
-          database_compatibility_policy_effective in ['warn', 'defer']
-          and
-          (database_compatibility_operator_confirmed_effective | bool)
-        )
-    fail_msg: "Unsupported database server for GLPI {{ glpi_version }}: detected {{ glpi_db_server_version_output }}. Required: {{ glpi_db_required_minimum }}. Use DATABASE_COMPATIBILITY_POLICY=warn|defer only through glpictl confirmation, never as a silent Ansible bypass."
+      - glpi_db_server_version_supported | bool
+    fail_msg: "Unsupported database server for GLPI {{ glpi_version }}: detected {{ glpi_db_server_version_output }}. Required: {{ glpi_db_required_minimum }}. Installation is blocked until the database meets the GLPI compatibility matrix."
   changed_when: false
   when: glpi_installation_mode_effective != 'wizard'
-
-- name: Warn about unsupported managed database accepted by policy
-  ansible.builtin.debug:
-    msg: "Unsupported database server for GLPI {{ glpi_version }} accepted under DATABASE_COMPATIBILITY_POLICY={{ database_compatibility_policy_effective }}. Detected {{ glpi_db_server_engine }} {{ glpi_db_server_version_number }}; required {{ glpi_db_required_minimum }}. Schema bootstrap deferred={{ database_compatibility_schema_bootstrap_deferred_effective }}."
-  when:
-    - glpi_installation_mode_effective != 'wizard'
-    - not (glpi_db_server_version_supported | bool)
-    - database_compatibility_policy_effective in ['warn', 'defer']
-    - database_compatibility_operator_confirmed_effective | bool
 
 - name: Check GLPI database schema marker
   ansible.builtin.command:

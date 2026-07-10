@@ -12,7 +12,7 @@ EXECUTION_MODES = {"local", "ssh"}
 HOST_ROLES = {"app", "db", "all"}
 TLS_MODES = {"none", "self_signed", "provided"}
 WEB_SERVER_TYPES = {"nginx", "apache", "lighttpd"}
-GLPI_INSTALLATION_MODES = {"cli", "wizard", "defer"}
+GLPI_INSTALLATION_MODES = {"auto", "cli", "wizard"}
 TOPOLOGY_MODES = {"single-server", "dual-server"}
 DB_ACCESS_MODES = {"restricted", "open"}
 DB_DEPLOYMENT_MODES = {"self_hosted", "managed"}
@@ -644,13 +644,49 @@ def resolve_database_deployment_mode(values: dict) -> str:
     return mode
 
 
+def resolve_glpi_installation_mode(values: dict) -> str:
+    requested = read_value(values, "GLPI_INSTALLATION_MODE", "auto").strip().lower() or "auto"
+    if requested not in GLPI_INSTALLATION_MODES:
+        fail("GLPI_INSTALLATION_MODE must be one of: auto, cli, wizard.")
+
+    connection_keys = (
+        "TOPOLOGY_DB_HOST",
+        "DATABASE_PORT",
+        "DATABASE_NAME",
+        "DATABASE_USER",
+        "DATABASE_PASSWORD",
+    )
+    present = [key for key in connection_keys if read_value(values, key, "").strip()]
+    if requested == "wizard":
+        return "wizard"
+    if requested == "cli":
+        if len(present) != len(connection_keys):
+            fail("Database configuration is incomplete for GLPI_INSTALLATION_MODE=cli. Provide host, port, database, user and password.")
+        return "cli"
+    if not present:
+        return "wizard"
+    if len(present) == len(connection_keys):
+        return "cli"
+    fail("Database configuration is incomplete. Provide host, port, database, user and password for CLI installation, or remove all application database credentials/use GLPI_INSTALLATION_MODE=wizard.")
+
+
 def profile_value(values: dict, profile_name: str, suffix: str, default: str) -> str:
     key = f"RESOURCE_PROFILE_{profile_name.upper()}_{suffix}"
     return read_value(values, key, default)
 
 
 def ensure_required_keys(values: dict, execution_mode: str, db_deployment_mode: str) -> None:
+    installation_mode = resolve_glpi_installation_mode(values)
+    wizard_optional_keys = {
+        "TOPOLOGY_DB_HOST",
+        "DATABASE_NAME",
+        "DATABASE_USER",
+        "DATABASE_PASSWORD",
+        "DATABASE_ROOT_PASSWORD",
+    }
     for key in REQUIRED_PUBLIC_KEYS:
+        if installation_mode == "wizard" and key in wizard_optional_keys:
+            continue
         if db_deployment_mode == "managed" and key == "DATABASE_ROOT_PASSWORD":
             continue
         require_value(values, key)
@@ -987,9 +1023,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     web_server_type = read_value(values, "WEB_SERVER_TYPE", "nginx").strip().lower() or "nginx"
     if web_server_type not in WEB_SERVER_TYPES:
         fail("WEB_SERVER_TYPE must be one of: nginx, apache, lighttpd.")
-    glpi_installation_mode = read_value(values, "GLPI_INSTALLATION_MODE", "cli").strip().lower() or "cli"
-    if glpi_installation_mode not in GLPI_INSTALLATION_MODES:
-        fail("GLPI_INSTALLATION_MODE must be one of: cli, wizard, defer.")
+    glpi_installation_mode = resolve_glpi_installation_mode(values)
     glpi_wizard_reset_config_db = as_bool(read_value(values, "GLPI_WIZARD_RESET_CONFIG_DB", "false"), False)
     platform_family = detect_platform_family()
     platform_defaults = PLATFORM_DEFAULTS[platform_family]
@@ -1017,9 +1051,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
     db_firewall_open = db_access_mode == "open"
     db_firewall_sources = [] if db_firewall_open else restricted_db_sources
     environment_stage = read_value(values, "ENVIRONMENT_STAGE", environment_name).strip() or environment_name
-    database_compatibility_policy = read_value(values, "DATABASE_COMPATIBILITY_POLICY", "block").strip().lower() or "block"
-    if database_compatibility_policy not in {"block", "warn", "defer"}:
-        fail("DATABASE_COMPATIBILITY_POLICY must be one of: block, warn, defer.")
+    database_compatibility_policy = "block"
     database_compatibility_justification = read_value(values, "DATABASE_COMPATIBILITY_JUSTIFICATION", "").strip()
     database_compatibility_require_interactive_confirmation = as_bool(
         read_value(values, "DATABASE_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION", "true"),
@@ -1102,7 +1134,7 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "glpi_backup_base_dir": read_value(values, "BACKUP_BASE_DIR", "/var/backups/glpi"),
         "glpi_domain": glpi_domain,
         "glpi_app_host": app_host,
-        "glpi_db_host": require_value(values, "TOPOLOGY_DB_HOST"),
+        "glpi_db_host": read_value(values, "TOPOLOGY_DB_HOST", ""),
         "glpi_web_server_type": web_server_type,
         "glpi_use_tls": tls_mode != "none",
         "glpi_tls_mode": tls_mode,
@@ -1242,8 +1274,8 @@ def build_public_runtime(values: dict, execution_mode: str, host_role: str, db_d
         "db_firewall_sources": db_firewall_sources,
         "db_allowed_source_hosts": list(db_firewall_sources),
         "glpi_db_app_access_host": db_app_access_host,
-        "glpi_db_name": require_value(values, "DATABASE_NAME"),
-        "glpi_db_user": require_value(values, "DATABASE_USER"),
+        "glpi_db_name": read_value(values, "DATABASE_NAME", ""),
+        "glpi_db_user": read_value(values, "DATABASE_USER", ""),
         "resource_profile_name": active_profile_name,
         "ssh_key_path_resolved": ssh_key_path,
     }
@@ -1254,8 +1286,8 @@ def build_inventory(values: dict, execution_mode: str, host_role: str, db_deploy
     environment_name = require_value(values, "ENVIRONMENT_NAME")
     app_alias = require_value(values, "TOPOLOGY_APP_ALIAS")
     app_host = require_value(values, "TOPOLOGY_APP_HOST")
-    db_alias = require_value(values, "TOPOLOGY_DB_ALIAS")
-    db_host = require_value(values, "TOPOLOGY_DB_HOST")
+    db_alias = read_value(values, "TOPOLOGY_DB_ALIAS", "db-node") or "db-node"
+    db_host = read_value(values, "TOPOLOGY_DB_HOST", "")
     topology_mode = read_value(values, "TOPOLOGY_MODE", "dual-server")
 
     if execution_mode == "local":

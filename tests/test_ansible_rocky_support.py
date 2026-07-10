@@ -138,7 +138,38 @@ class AnsibleRockySupportTest(unittest.TestCase):
             renderer.DOTTED_KEY_MAP["glpi.wizard_reset_config_db"],
             "GLPI_WIZARD_RESET_CONFIG_DB",
         )
-        self.assertEqual(renderer.GLPI_INSTALLATION_MODES, {"cli", "wizard", "defer"})
+        self.assertEqual(renderer.GLPI_INSTALLATION_MODES, {"auto", "cli", "wizard"})
+
+    def test_installation_mode_auto_is_deterministic(self):
+        renderer_path = REPO_ROOT / "scripts" / "lib" / "render_product_config.py"
+        spec = importlib.util.spec_from_file_location("render_product_config_modes", renderer_path)
+        renderer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(renderer)
+        complete = {
+            "TOPOLOGY_DB_HOST": "192.0.2.20",
+            "DATABASE_PORT": "3306",
+            "DATABASE_NAME": "example_database",
+            "DATABASE_USER": "example_user",
+            "DATABASE_PASSWORD": "fictional-secret",
+        }
+
+        self.assertEqual(renderer.resolve_glpi_installation_mode(complete), "cli")
+        self.assertEqual(
+            renderer.resolve_glpi_installation_mode({"GLPI_INSTALLATION_MODE": "auto"}),
+            "wizard",
+        )
+        self.assertEqual(
+            renderer.resolve_glpi_installation_mode({"GLPI_INSTALLATION_MODE": "wizard"}),
+            "wizard",
+        )
+        with self.assertRaises(SystemExit):
+            renderer.resolve_glpi_installation_mode(
+                {"TOPOLOGY_DB_HOST": "192.0.2.20", "DATABASE_NAME": "example_database"}
+            )
+        with self.assertRaises(SystemExit):
+            renderer.resolve_glpi_installation_mode(
+                {"GLPI_INSTALLATION_MODE": "cli", "TOPOLOGY_DB_HOST": "192.0.2.20"}
+            )
 
 
 if __name__ == "__main__":

@@ -152,8 +152,8 @@ check_case "10.0.18" "10.5.27-MariaDB MariaDB Server" "pass"
             'ID=rocky\nVERSION_ID="9.4"\nID_LIKE="rhel centos fedora"\n',
             """
 [[ "$(normalize_database_compatibility_policy "")" == "block" ]]
-[[ "$(normalize_database_compatibility_policy "warn")" == "warn" ]]
-[[ "$(normalize_database_compatibility_policy "defer")" == "defer" ]]
+[[ "$(normalize_database_compatibility_policy "warn")" == "block" ]]
+[[ "$(normalize_database_compatibility_policy "defer")" == "block" ]]
 [[ "$(normalize_database_compatibility_policy "allow")" == "invalid" ]]
 environment_stage_allows_unsupported_database "hml"
 environment_stage_allows_unsupported_database "example-hml"

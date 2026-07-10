@@ -1958,7 +1958,7 @@ load_managed_db_runtime_contract() {
   MANAGED_DB_TIMEZONE_SUPPORT_ENABLED="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_support_enabled" || true)" "false")"
   MANAGED_DB_TIMEZONE_MODE="$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_mode" || true)"
   MANAGED_DB_TIMEZONE_LEGACY_GRANT="$(normalize_bool "$(read_yaml_top_level_value "$PUBLIC_RUNTIME_PATH" "glpi_timezone_db_legacy_grant" || true)" "false")"
-  MANAGED_DB_COMPATIBILITY_POLICY="$(normalize_database_compatibility_policy "$(read_effective_runtime_value "database_compatibility_policy" "block")")"
+  MANAGED_DB_COMPATIBILITY_POLICY="block"
   MANAGED_DB_COMPATIBILITY_JUSTIFICATION="$(read_effective_runtime_value "database_compatibility_justification" "")"
   MANAGED_DB_COMPATIBILITY_REQUIRE_INTERACTIVE_CONFIRMATION="$(normalize_bool "$(read_effective_runtime_value "database_compatibility_require_interactive_confirmation" "true")" "true")"
   MANAGED_DB_COMPATIBILITY_ASSUME_YES="$(normalize_bool "$(read_effective_runtime_value "database_compatibility_assume_yes" "false")" "false")"
@@ -2391,27 +2391,10 @@ run_managed_db_select1_attempt() {
 
 run_managed_db_select1_check() {
   local check_label="$1"
-  local fallback_password_available="false"
-
-  if [[ -n "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
-    fallback_password_available="true"
-  fi
 
   if run_managed_db_select1_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"; then
     return 0
   fi
-
-  if [[ "$fallback_password_available" == "true" ]]; then
-    if run_managed_db_select1_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
-      return 0
-    fi
-    if run_managed_db_select1_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
-      return 0
-    fi
-  else
-    echo "Managed DB connectivity (${check_label}): skipping root/admin fallback (DATABASE_MANAGED_ADMIN_PASSWORD not configured)."
-  fi
-
   return 1
 }
 
@@ -2447,14 +2430,6 @@ run_managed_db_timezone_check() {
 
   if run_managed_db_timezone_check_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"; then
     return 0
-  fi
-  if [[ -n "${MANAGED_DB_ADMIN_PASSWORD// }" ]]; then
-    if run_managed_db_timezone_check_attempt "$check_label" "root" "$MANAGED_DB_ADMIN_PASSWORD"; then
-      return 0
-    fi
-    if run_managed_db_timezone_check_attempt "$check_label" "admin" "$MANAGED_DB_ADMIN_PASSWORD"; then
-      return 0
-    fi
   fi
   return 1
 }
@@ -2631,37 +2606,17 @@ run_managed_db_guided_workarounds() {
 }
 
 handle_managed_db_validation_after_app_apply() {
-  local continue_message
-
   if ! is_managed_database_mode; then
     return 0
   fi
 
   if ! load_managed_db_runtime_contract; then
-    continue_message="Managed DB runtime contract is incomplete. App deployment succeeded, but DB validation could not run."
-    if [[ -n "${MANAGED_DB_HOST// }" ]]; then
-      run_managed_db_guided_workarounds || true
-    else
-      echo "Managed DB endpoint is missing; skipping guided network checks."
-    fi
-    if [[ -t 0 ]]; then
-      if prompt_yes_no "${continue_message} Continue deployment as SUCCESS with warning?"; then
-        record_execution_warning "$continue_message"
-        return 0
-      fi
-      echo "Operator selected fail after managed DB runtime contract validation failure." >&2
-      return 1
-    fi
-    record_execution_warning "${continue_message} Continuing as SUCCESS because no interactive terminal is available."
-    return 0
+    echo "Managed DB runtime contract is incomplete; deploy apply app cannot validate the application database." >&2
+    return 1
   fi
 
   write_step "Validating managed DB connectivity from APP host (MySQL TCP)"
   echo "Managed DB target: host=${MANAGED_DB_HOST} port=${MANAGED_DB_PORT} user=${MANAGED_DB_USER}"
-
-  if ! ensure_managed_db_schema_and_user; then
-    record_execution_warning "Managed DB provisioning/permission check could not run with root/admin; validating existing application DB user instead."
-  fi
 
   if run_managed_db_select1_check "initial"; then
     run_managed_db_timezone_validation_gate
@@ -2676,18 +2631,8 @@ handle_managed_db_validation_after_app_apply() {
     return 0
   fi
 
-  continue_message="Managed DB connectivity validation failed after guided checks/retry. App deployment succeeded."
-  if [[ -t 0 ]]; then
-    if prompt_yes_no "${continue_message} Continue deployment as SUCCESS with warning?"; then
-      record_execution_warning "$continue_message"
-      return 0
-    fi
-    echo "Operator selected fail after managed DB connectivity validation failure." >&2
-    return 1
-  fi
-
-  record_execution_warning "${continue_message} Continuing as SUCCESS because no interactive terminal is available."
-  return 0
+  echo "Managed DB connectivity validation failed with the configured application credentials." >&2
+  return 1
 }
 
 print_operation_log_tail() {

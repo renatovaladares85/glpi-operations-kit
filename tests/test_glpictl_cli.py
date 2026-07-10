@@ -7,6 +7,25 @@ GLPICTL = REPO_ROOT / "scripts" / "glpictl.sh"
 
 
 class GlpiCtlCliTest(unittest.TestCase):
+    def test_normal_managed_app_flow_uses_only_application_credentials(self):
+        script = GLPICTL.read_text(encoding="utf-8")
+        connectivity = script[
+            script.index("run_managed_db_select1_check()") : script.index(
+                "run_managed_db_timezone_check_attempt()"
+            )
+        ]
+        app_validation = script[
+            script.index("handle_managed_db_validation_after_app_apply()") : script.index(
+                "print_operation_log_tail()"
+            )
+        ]
+
+        self.assertIn('run_managed_db_select1_attempt "$check_label" "$MANAGED_DB_USER" "$MANAGED_DB_PASSWORD"', connectivity)
+        self.assertNotIn('"root" "$MANAGED_DB_ADMIN_PASSWORD"', connectivity)
+        self.assertNotIn('"admin" "$MANAGED_DB_ADMIN_PASSWORD"', connectivity)
+        self.assertNotIn("ensure_managed_db_schema_and_user", app_validation)
+        self.assertNotIn("Continue deployment as SUCCESS with warning", app_validation)
+
     def test_execution_summary_uses_selected_web_engine_configtest(self):
         script = GLPICTL.read_text(encoding="utf-8")
 

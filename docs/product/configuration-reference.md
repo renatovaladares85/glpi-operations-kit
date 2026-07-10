@@ -65,8 +65,8 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 | `EXECUTION_HOST_ROLE_DEFAULT` | Prevents wrong mutable actions on wrong hosts in local mode. | `app`, `db`, `all` |
 | `TOPOLOGY_MODE` | Defines single-host or split-host behavior. | `single-server`, `dual-server` |
 | `DATABASE_DEPLOYMENT_MODE` | Defines self-hosted DB vs external managed DB flow. | `self_hosted`, `managed` |
-| `DATABASE_COMPATIBILITY_POLICY` | Controls managed DB incompatibility handling. Default is blocking. | `block`, `warn`, `defer` |
-| `GLPI_INSTALLATION_MODE` | Selects CLI schema bootstrap, manual web wizard, or technical schema deferral. | `cli`, `wizard`, `defer` |
+| `DATABASE_COMPATIBILITY_POLICY` | Enforces the GLPI database compatibility matrix. | `block` |
+| `GLPI_INSTALLATION_MODE` | Selects automatic resolution, CLI schema bootstrap, or web wizard. | `auto`, `cli`, `wizard` |
 | `GLPI_WIZARD_RESET_CONFIG_DB` | Allows wizard mode to back up an existing `config_db.php` in non-production fresh installs. | `true`, `false` |
 | `WEB_SERVER_TYPE` | Selects the Linux web engine automated by this kit. | `nginx`, `apache`, `lighttpd` |
 | `TLS_MODE` | Controls HTTP, self-signed TLS, or provided TLS flow. | `none`, `self_signed`, `provided` |
@@ -88,11 +88,10 @@ Legacy `AUTH_*` and `SSO_*` keys may exist in older environment files and are ig
 - `EXECUTION_MODE=ssh`: requires `NETWORK_SSH_USER` and `NETWORK_SSH_PRIVATE_KEY_PATH` with an existing private key file.
 - `DATABASE_DEPLOYMENT_MODE=managed`: DB Linux-host actions are not applicable; DB checks use direct MySQL TCP connectivity.
 - `DATABASE_COMPATIBILITY_POLICY=block`: default; incompatible managed DB blocks precheck/prepare/apply.
-- `DATABASE_COMPATIBILITY_POLICY=warn`: non-production only; requires justification and explicit confirmation, then continues with schema install/checks unsupported.
-- `DATABASE_COMPATIBILITY_POLICY=defer`: non-production only; requires justification and explicit confirmation, then skips GLPI schema bootstrap and web smoke checks until the DB is upgraded.
-- `GLPI_INSTALLATION_MODE=cli`: default; deploys `config_db.php`, validates DB compatibility, and can run `php bin/console db:install` when schema is absent.
+- Database, PHP, and other mandatory GLPI compatibility failures always block installation; there is no warn/defer bypass.
+- `GLPI_INSTALLATION_MODE=auto` (default): complete DB credentials resolve to CLI, no DB credentials resolve to wizard, and partial configuration fails.
+- `GLPI_INSTALLATION_MODE=cli`: deploys `config_db.php`, validates DB compatibility, and can run `php bin/console db:install` when schema is absent.
 - `GLPI_INSTALLATION_MODE=wizard`: prepares APP files, web server, PHP-FPM, Redis, FHS paths, and permissions, but does not create `config_db.php`, does not run `db:install`, and does not require `glpi_configs`.
-- `GLPI_INSTALLATION_MODE=defer`: keeps technical schema deferral behavior for controlled compatibility exceptions; use `wizard` when the intended installation path is the browser installer.
 - `GLPI_TIMEZONE_SUPPORT_ENABLED=true`: timezone workflow validates OS/PHP and can validate/apply DB timezone tables according to `GLPI_TIMEZONE_DB_MODE`.
 - Redis is installed and configured on GLPI app hosts by default for GLPI cache (DB 0) and PHP-FPM sessions (DB 1).
 - `TLS_MODE=provided`: requires `TLS_PROVIDED_LOCAL_CERT_PATH` and `TLS_PROVIDED_LOCAL_KEY_PATH` pointing to existing local files.
@@ -107,7 +106,7 @@ Deployment secrets required by renderer/precheck from `config/<environment>.env`
 - `DATABASE_PASSWORD`
 - `DATABASE_ROOT_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
 - `MONITORING_MYSQLD_EXPORTER_PASSWORD` when `DATABASE_DEPLOYMENT_MODE=self_hosted`
-- `DATABASE_MANAGED_ADMIN_PASSWORD` (optional, managed-mode fallback for connectivity checks)
+- `DATABASE_MANAGED_ADMIN_PASSWORD` (legacy optional value, unused by normal managed APP check/apply)
 
 Do not commit real environment files, `.runtime/`, private keys, tokens, passwords, certificates with private material, or customer-sensitive evidence.
 
@@ -154,9 +153,7 @@ Official GLPI database requirements enforced by the kit:
 | 10.0.x | 5.7 | 10.2 |
 | 11.0.x | 8.0 | 10.6 |
 
-`DATABASE_COMPATIBILITY_POLICY=block` is the safe default and must remain the normal production posture.
-
-Use `DATABASE_COMPATIBILITY_POLICY=defer` only as a temporary non-production bridge when the APP layer must be installed before a managed DB upgrade. In this mode, the kit still records the incompatible engine/version, requires `DATABASE_COMPATIBILITY_JUSTIFICATION`, requires operator confirmation unless `DATABASE_COMPATIBILITY_ASSUME_YES=true`, skips GLPI schema bootstrap, and skips web smoke checks that require a valid GLPI schema.
+`DATABASE_COMPATIBILITY_POLICY=block` is mandatory. An incompatible database cannot install the selected GLPI release and therefore blocks check, prepare, and apply in every environment.
 
 After the managed DB is upgraded, rerun:
 
